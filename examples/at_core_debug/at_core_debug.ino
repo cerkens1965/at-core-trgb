@@ -13,6 +13,7 @@
 #include <BLEScan.h>
 #include <BLEAdvertisedDevice.h>
 #include <ArduinoJson.h>
+#include <math.h>
 
 LilyGo_RGBPanel panel;
 
@@ -40,7 +41,7 @@ struct StatusData {
 };
 struct FlightData { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
-struct TrafficEntry { char cs[9]; int dist_m,alt_m; bool visible; };
+struct TrafficEntry { char cs[9]; int dist_m,alt_m,bear_deg; bool visible; };
 struct TrafficData  { TrafficEntry t[MAX_TRF]; int count; bool valid; };
 struct AlertData    { bool co,gforce,rpm,traffic; char msg[64]; bool valid; };
 struct DebugData {
@@ -81,6 +82,14 @@ static lv_obj_t *r_noAlert,*r_alertCO,*r_alertGF,*r_alertRPM,*r_alertTFC,*r_aler
 static lv_obj_t *r_hbgps,*r_hblte,*r_hbsd,*r_p5csq,*r_http,*r_code;
 static lv_obj_t *r_ss,*r_fa,*r_lteok,*r_dis,*r_heap,*r_bat,*r_p5mode,*r_pend;
 static lv_obj_t *r_flarmtx,*r_adsbr,*r_flt;
+
+// Radar (page 3)
+#define RAD_CX       240
+#define RAD_CY       240
+#define RAD_R        175
+#define RAD_SCALE_M  5000
+static lv_obj_t *r_radar_hdg, *r_radar_north;
+static lv_obj_t *r_radar_blip[MAX_TRF], *r_radar_cs[MAX_TRF], *r_radar_alt[MAX_TRF];
 
 lv_color_t modeCol(int m){switch(m){case 0:return C_AMBER;case 1:return C_GREEN;case 2:return C_BLUE;default:return C_GREY;}}
 const char* modeStr(int m){switch(m){case 0:return"PREFLIGHT";case 1:return"FLIGHT";case 2:return"POSTFLIGHT";default:return"SLEEP";}}
@@ -138,7 +147,7 @@ void parseTraffic(const char* j){JsonDocument d;if(deserializeJson(d,j))return;
     for(int i=0;i<g_traffic.count;i++){
         strlcpy(g_traffic.t[i].cs,d["t"][i]["cs"]|"???",9);
         g_traffic.t[i].dist_m=d["t"][i]["d"]|0;g_traffic.t[i].alt_m=d["t"][i]["a"]|0;
-        g_traffic.t[i].visible=d["t"][i]["v"]|true;}
+        g_traffic.t[i].bear_deg=d["t"][i]["b"]|0;g_traffic.t[i].visible=d["t"][i]["v"]|true;}
     g_traffic.valid=true;g_dataUpdated=true;}
 void parseAlerts(const char* j){JsonDocument d;if(deserializeJson(d,j))return;
     g_alert.co=d["co"]|false;g_alert.gforce=d["gf"]|false;
@@ -222,19 +231,97 @@ void buildPage2(){
 
 void buildPage3(){
     lv_obj_t* p=g_pages[2];
-    mkLbl(p,"TRAFFIC",C_BLUE,&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,55);
-    r_noTraffic=mkLbl(p,"No traffic detected",C_WHITE,&lv_font_montserrat_16,LV_ALIGN_CENTER,0,-10);
-    for(int i=0;i<MAX_TRF;i++){int y=100+i*38;
-        r_trf[i].dot =mkLblP(p,"●",C_GREEN,&lv_font_montserrat_16,80,y);
-        r_trf[i].cs  =mkLblP(p,"------",C_WHITE,&lv_font_montserrat_16,100,y);
-        r_trf[i].dist=mkLbl(p,"-.--km",C_GREEN,&lv_font_montserrat_16,LV_ALIGN_TOP_MID,0,y);
-        r_trf[i].alt =mkLbl(p,"---m",C_WHITE,&lv_font_montserrat_16,LV_ALIGN_TOP_RIGHT,-80,y);
-        lv_obj_add_flag(r_trf[i].dot,LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(r_trf[i].cs, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(r_trf[i].dist,LV_OBJ_FLAG_HIDDEN);
-        lv_obj_add_flag(r_trf[i].alt, LV_OBJ_FLAG_HIDDEN);}
-    mkLbl(p,"white=SafeSky  amber=invisible",C_GREY,&lv_font_montserrat_16,LV_ALIGN_BOTTOM_MID,0,-80);
-    mkLbl(p,"3/5",C_GREY,&lv_font_montserrat_16,LV_ALIGN_BOTTOM_MID,0,-60);}
+
+    // Heading value (top center, above ring)
+    r_radar_hdg=mkLbl(p,"---°",C_WHITE,&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,32);
+
+    // Outer range ring (r=175, transparent fill, grey border)
+    lv_obj_t* ro=lv_obj_create(p);
+    lv_obj_set_size(ro,RAD_R*2,RAD_R*2);
+    lv_obj_set_pos(ro,RAD_CX-RAD_R,RAD_CY-RAD_R);
+    lv_obj_set_style_radius(ro,LV_RADIUS_CIRCLE,0);
+    lv_obj_set_style_bg_opa(ro,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_color(ro,C_GREY,0);
+    lv_obj_set_style_border_width(ro,1,0);
+    lv_obj_set_style_shadow_opa(ro,LV_OPA_TRANSP,0);
+    lv_obj_set_style_pad_all(ro,0,0);
+    lv_obj_clear_flag(ro,LV_OBJ_FLAG_SCROLLABLE);
+
+    // Inner ring (r=87, half scale, dark border)
+    lv_obj_t* ri=lv_obj_create(p);
+    lv_obj_set_size(ri,RAD_R,RAD_R);
+    lv_obj_set_pos(ri,RAD_CX-RAD_R/2,RAD_CY-RAD_R/2);
+    lv_obj_set_style_radius(ri,LV_RADIUS_CIRCLE,0);
+    lv_obj_set_style_bg_opa(ri,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_color(ri,lv_color_hex(0x303030),0);
+    lv_obj_set_style_border_width(ri,1,0);
+    lv_obj_set_style_shadow_opa(ri,LV_OPA_TRANSP,0);
+    lv_obj_set_style_pad_all(ri,0,0);
+    lv_obj_clear_flag(ri,LV_OBJ_FLAG_SCROLLABLE);
+
+    // Cross lines (H + V)
+    static lv_point_t hpts[2]={{RAD_CX-RAD_R,RAD_CY},{RAD_CX+RAD_R,RAD_CY}};
+    static lv_point_t vpts[2]={{RAD_CX,RAD_CY-RAD_R},{RAD_CX,RAD_CY+RAD_R}};
+    lv_obj_t* hl=lv_line_create(p);
+    lv_line_set_points(hl,hpts,2);
+    lv_obj_set_style_line_color(hl,lv_color_hex(0x303030),0);
+    lv_obj_set_style_line_width(hl,1,0);
+    lv_obj_t* vl=lv_line_create(p);
+    lv_line_set_points(vl,vpts,2);
+    lv_obj_set_style_line_color(vl,lv_color_hex(0x303030),0);
+    lv_obj_set_style_line_width(vl,1,0);
+
+    // Heading track line (green, center → top of ring, always vertical in heading-up)
+    static lv_point_t htrk[2]={{RAD_CX,RAD_CY},{RAD_CX,RAD_CY-RAD_R}};
+    lv_obj_t* tl=lv_line_create(p);
+    lv_line_set_points(tl,htrk,2);
+    lv_obj_set_style_line_color(tl,C_GREEN,0);
+    lv_obj_set_style_line_width(tl,2,0);
+
+    // Own aircraft ▲ at center
+    lv_obj_t* oa=lv_label_create(p);
+    lv_label_set_text(oa,"▲");
+    lv_obj_set_style_text_color(oa,C_GREEN,0);
+    lv_obj_set_style_text_font(oa,&lv_font_montserrat_22,0);
+    lv_obj_align(oa,LV_ALIGN_CENTER,0,2);
+
+    // N indicator (repositioned dynamically on each heading update)
+    r_radar_north=lv_label_create(p);
+    lv_label_set_text(r_radar_north,"N");
+    lv_obj_set_style_text_color(r_radar_north,C_WHITE,0);
+    lv_obj_set_style_text_font(r_radar_north,&lv_font_montserrat_14,0);
+    lv_obj_set_pos(r_radar_north,RAD_CX-5,RAD_CY-RAD_R-20); // default hdg=0 → N at top
+
+    // Scale label + page indicator
+    char scl[16];snprintf(scl,16,"%dkm  3/5",(int)(RAD_SCALE_M/1000));
+    mkLbl(p,scl,C_GREY,&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-55);
+
+    // Traffic blips (square marker + callsign + relative altitude)
+    for(int i=0;i<MAX_TRF;i++){
+        r_radar_blip[i]=lv_obj_create(p);
+        lv_obj_set_size(r_radar_blip[i],10,10);
+        lv_obj_set_style_radius(r_radar_blip[i],0,0);
+        lv_obj_set_style_bg_color(r_radar_blip[i],C_GREEN,0);
+        lv_obj_set_style_bg_opa(r_radar_blip[i],LV_OPA_COVER,0);
+        lv_obj_set_style_border_opa(r_radar_blip[i],LV_OPA_TRANSP,0);
+        lv_obj_set_style_shadow_opa(r_radar_blip[i],LV_OPA_TRANSP,0);
+        lv_obj_set_style_pad_all(r_radar_blip[i],0,0);
+        lv_obj_clear_flag(r_radar_blip[i],LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(r_radar_blip[i],LV_OBJ_FLAG_HIDDEN);
+
+        r_radar_cs[i]=lv_label_create(p);
+        lv_label_set_text(r_radar_cs[i],"");
+        lv_obj_set_style_text_font(r_radar_cs[i],&lv_font_montserrat_14,0);
+        lv_obj_set_style_text_color(r_radar_cs[i],C_WHITE,0);
+        lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
+
+        r_radar_alt[i]=lv_label_create(p);
+        lv_label_set_text(r_radar_alt[i],"");
+        lv_obj_set_style_text_font(r_radar_alt[i],&lv_font_montserrat_14,0);
+        lv_obj_set_style_text_color(r_radar_alt[i],C_GREEN,0);
+        lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
+    }
+}
 
 void buildPage4(){
     lv_obj_t* p=g_pages[3];
@@ -294,27 +381,49 @@ void updateAllPages(){
         lv_obj_set_style_text_color(r_co,g_flight.co_ppm>50?C_RED:g_flight.co_ppm>25?C_AMBER:C_WHITE,0);
         snprintf(b,32,"%d",g_flight.rpm);lv_label_set_text(r_rpm,b);
         lv_obj_set_style_text_color(r_rpm,g_flight.rpm>2700?C_RED:C_WHITE,0);}
-    // P3
+    // P3 — Radar heading-up
+    if(g_status.valid){
+        snprintf(b,32,"%d°",g_status.hdg);
+        lv_label_set_text(r_radar_hdg,b);
+        // N indicator: North is at bearing (360-hdg) in heading-up frame
+        float nbr=(float)((360-g_status.hdg)%360)*(float)M_PI/180.0f;
+        int nx=(int)(RAD_CX+sinf(nbr)*(float)(RAD_R+20))-5;
+        int ny=(int)(RAD_CY-cosf(nbr)*(float)(RAD_R+20))-8;
+        lv_obj_set_pos(r_radar_north,nx,ny);}
     if(g_traffic.valid){
-        lv_label_set_text(r_noTraffic,g_traffic.count==0?"No traffic detected":"");
         for(int i=0;i<MAX_TRF;i++){
-            if(i<g_traffic.count){TrafficEntry& e=g_traffic.t[i];
-                lv_color_t dc=e.dist_m<1000?C_RED:e.dist_m<3000?C_AMBER:C_GREEN;
-                lv_obj_set_style_text_color(r_trf[i].dot,dc,0);
-                lv_label_set_text(r_trf[i].cs,e.cs);
-                lv_obj_set_style_text_color(r_trf[i].cs,e.visible?C_WHITE:C_AMBER,0);
-                snprintf(b,32,"%d.%dkm",e.dist_m/1000,(e.dist_m%1000)/100);
-                lv_label_set_text(r_trf[i].dist,b);lv_obj_set_style_text_color(r_trf[i].dist,dc,0);
-                snprintf(b,32,"%dm",e.alt_m);lv_label_set_text(r_trf[i].alt,b);
-                lv_obj_clear_flag(r_trf[i].dot,LV_OBJ_FLAG_HIDDEN);
-                lv_obj_clear_flag(r_trf[i].cs, LV_OBJ_FLAG_HIDDEN);
-                lv_obj_clear_flag(r_trf[i].dist,LV_OBJ_FLAG_HIDDEN);
-                lv_obj_clear_flag(r_trf[i].alt, LV_OBJ_FLAG_HIDDEN);
+            if(i<g_traffic.count){
+                TrafficEntry& e=g_traffic.t[i];
+                // Relative bearing in heading-up: 0=ahead, 90=right, 180=behind, 270=left
+                int rb=((e.bear_deg-g_status.hdg)%360+360)%360;
+                float brd=(float)rb*(float)M_PI/180.0f;
+                // Scale distance to pixels, clamped to ring edge
+                float dpx=fminf((float)e.dist_m*(float)RAD_R/(float)RAD_SCALE_M,(float)(RAD_R-6));
+                int bx=(int)(RAD_CX+sinf(brd)*dpx)-5;
+                int by=(int)(RAD_CY-cosf(brd)*dpx)-5;
+                lv_color_t col=e.dist_m<1000?C_RED:e.dist_m<3000?C_AMBER:C_GREEN;
+                lv_obj_set_pos(r_radar_blip[i],bx,by);
+                lv_obj_set_style_bg_color(r_radar_blip[i],col,0);
+                lv_obj_clear_flag(r_radar_blip[i],LV_OBJ_FLAG_HIDDEN);
+                // Callsign (white=ADS-B visible, amber=FLARM invisible)
+                lv_obj_set_pos(r_radar_cs[i],bx+13,by-2);
+                lv_label_set_text(r_radar_cs[i],e.cs);
+                lv_obj_set_style_text_color(r_radar_cs[i],e.visible?C_WHITE:C_AMBER,0);
+                lv_obj_clear_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
+                // Relative altitude in hundreds of feet (SafeSky convention)
+                int rel_hft=(int)((e.alt_m-g_status.alt)*3.281f/100.0f);
+                snprintf(b,32,"%+d",rel_hft);
+                lv_obj_set_pos(r_radar_alt[i],bx+13,by+13);
+                lv_label_set_text(r_radar_alt[i],b);
+                lv_obj_set_style_text_color(r_radar_alt[i],col,0);
+                lv_obj_clear_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
             }else{
-                lv_obj_add_flag(r_trf[i].dot,LV_OBJ_FLAG_HIDDEN);
-                lv_obj_add_flag(r_trf[i].cs, LV_OBJ_FLAG_HIDDEN);
-                lv_obj_add_flag(r_trf[i].dist,LV_OBJ_FLAG_HIDDEN);
-                lv_obj_add_flag(r_trf[i].alt, LV_OBJ_FLAG_HIDDEN);}}}
+                lv_obj_add_flag(r_radar_blip[i],LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    }
     // P4
     if(g_alert.valid){
         bool any=g_alert.co||g_alert.gforce||g_alert.rpm||g_alert.traffic;
