@@ -62,7 +62,7 @@ static BLEClient*              g_client  = nullptr;
 static BLERemoteService*       g_svc     = nullptr;
 static BLERemoteCharacteristic *g_chrS=nullptr,*g_chrF=nullptr,
                                 *g_chrT=nullptr,*g_chrA=nullptr,*g_chrD=nullptr;
-static volatile bool g_connected=false, g_doConnect=false;
+static volatile bool g_connected=false, g_doConnect=false, g_doReconnect=false;
 static BLEAdvertisedDevice*    g_target  = nullptr;
 
 #define NUM_PAGES 5
@@ -154,23 +154,25 @@ void parseDebug(const char* j){JsonDocument d;if(deserializeJson(d,j))return;
     g_debug.flarm_tx=d["ftx"]|0;g_debug.flarm_rx=d["frx"]|0;g_debug.adsb_rx=d["adsb_rx"]|0;
     strlcpy(g_debug.fid,d["fid"]|"---",24);g_debug.valid=true;g_dataUpdated=true;}
 
-static void notifyS(BLERemoteCharacteristic*,uint8_t* d,size_t l,bool){char b[l+1];memcpy(b,d,l);b[l]=0;parseStatus(b);}
-static void notifyF(BLERemoteCharacteristic*,uint8_t* d,size_t l,bool){char b[l+1];memcpy(b,d,l);b[l]=0;parseFlight(b);}
-static void notifyT(BLERemoteCharacteristic*,uint8_t* d,size_t l,bool){char b[l+1];memcpy(b,d,l);b[l]=0;parseTraffic(b);}
-static void notifyA(BLERemoteCharacteristic*,uint8_t* d,size_t l,bool){char b[l+1];memcpy(b,d,l);b[l]=0;parseAlerts(b);}
-static void notifyD(BLERemoteCharacteristic*,uint8_t* d,size_t l,bool){char b[l+1];memcpy(b,d,l);b[l]=0;parseDebug(b);}
+#define BLE_BUF 512
+static void notifyS(BLERemoteCharacteristic*,uint8_t* d,size_t l,bool){if(l>=BLE_BUF)return;static char b[BLE_BUF];memcpy(b,d,l);b[l]=0;parseStatus(b);}
+static void notifyF(BLERemoteCharacteristic*,uint8_t* d,size_t l,bool){if(l>=BLE_BUF)return;static char b[BLE_BUF];memcpy(b,d,l);b[l]=0;parseFlight(b);}
+static void notifyT(BLERemoteCharacteristic*,uint8_t* d,size_t l,bool){if(l>=BLE_BUF)return;static char b[BLE_BUF];memcpy(b,d,l);b[l]=0;parseTraffic(b);}
+static void notifyA(BLERemoteCharacteristic*,uint8_t* d,size_t l,bool){if(l>=BLE_BUF)return;static char b[BLE_BUF];memcpy(b,d,l);b[l]=0;parseAlerts(b);}
+static void notifyD(BLERemoteCharacteristic*,uint8_t* d,size_t l,bool){if(l>=BLE_BUF)return;static char b[BLE_BUF];memcpy(b,d,l);b[l]=0;parseDebug(b);}
 
 class ATCCB:public BLEClientCallbacks{
     void onConnect(BLEClient*)override{g_connected=true;g_dataUpdated=true;Serial.println("[BLE] Connected");}
     void onDisconnect(BLEClient*)override{g_connected=false;
         g_status.valid=g_flight.valid=g_traffic.valid=g_alert.valid=g_debug.valid=false;
-        g_dataUpdated=true;Serial.println("[BLE] Disconnected");}};
+        g_dataUpdated=true;g_doReconnect=true;Serial.println("[BLE] Disconnected");}};
+
 class ATCAdv:public BLEAdvertisedDeviceCallbacks{
     void onResult(BLEAdvertisedDevice dev)override{
         if(dev.getName()==BLE_TARGET){BLEDevice::getScan()->stop();
             g_target=new BLEAdvertisedDevice(dev);g_doConnect=true;}}};
 bool connectBLE(){
-    g_client=BLEDevice::createClient();g_client->setClientCallbacks(new ATCCB());
+    if(!g_client){g_client=BLEDevice::createClient();g_client->setClientCallbacks(new ATCCB());}
     if(!g_client->connect(g_target))return false;
     g_client->setMTU(512);g_svc=g_client->getService(BLE_SVC_UUID);
     if(!g_svc){g_client->disconnect();return false;}
@@ -188,10 +190,10 @@ bool connectBLE(){
 void startScan(){BLEScan*s=BLEDevice::getScan();s->setAdvertisedDeviceCallbacks(new ATCAdv());s->setActiveScan(true);s->start(5,false);}
 
 static void cbPrev(lv_event_t* e){
-    if(lv_event_get_code(e)==LV_EVENT_CLICKED&&!g_alertForced){
+    if(lv_event_get_code(e)==LV_EVENT_CLICKED){
         g_navPage=(g_page==0)?NUM_PAGES-1:g_page-1;g_navPending=true;}}
 static void cbNext(lv_event_t* e){
-    if(lv_event_get_code(e)==LV_EVENT_CLICKED&&!g_alertForced){
+    if(lv_event_get_code(e)==LV_EVENT_CLICKED){
         g_navPage=(g_page+1)%NUM_PAGES;g_navPending=true;}}
 
 void buildPage1(){
@@ -389,6 +391,7 @@ void setup(){
 
 void loop(){
     uint32_t now=millis();
+    if(g_doReconnect){g_doReconnect=false;startScan();}
     if(g_doConnect&&!g_connected){g_doConnect=false;
         if(connectBLE())Serial.println("[BLE] OK");
         else{delay(2000);startScan();}}
