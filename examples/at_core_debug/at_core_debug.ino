@@ -549,19 +549,65 @@ void createNavButtons(){
     lv_obj_set_style_text_color(ra,lv_color_hex(0xCCCCCC),0);
     lv_obj_set_style_text_font(ra,&lv_font_montserrat_32,0);lv_obj_center(ra);}
 
+void runBootSplash(){
+    lv_obj_t* s=lv_scr_act();
+    lv_obj_t* lc;
+
+    // Title block
+    lv_obj_t* tl=lv_label_create(s);
+    lv_label_set_text(tl,"AT-VIEW");
+    lv_obj_set_style_text_color(tl,C_AMBER,0);
+    lv_obj_set_style_text_font(tl,&lv_font_montserrat_32,0);
+    lv_obj_align(tl,LV_ALIGN_TOP_MID,0,115);
+    lv_obj_t* sub=lv_label_create(s);
+    lv_label_set_text(sub,"AeroTrace");
+    lv_obj_set_style_text_color(sub,C_GREY,0);
+    lv_obj_set_style_text_font(sub,&lv_font_montserrat_16,0);
+    lv_obj_align(sub,LV_ALIGN_TOP_MID,0,162);
+    lv_timer_handler();delay(600);
+
+    // PANEL
+    lc=lv_label_create(s);lv_label_set_text(lc,"  PANEL    ...");
+    lv_obj_set_style_text_color(lc,C_GREY,0);lv_obj_set_style_text_font(lc,&lv_font_montserrat_16,0);
+    lv_obj_set_pos(lc,130,222);lv_timer_handler();delay(350);
+    lv_label_set_text(lc,"● PANEL    OK");lv_obj_set_style_text_color(lc,C_GREEN,0);lv_timer_handler();
+
+    // LVGL
+    lc=lv_label_create(s);lv_label_set_text(lc,"  LVGL     ...");
+    lv_obj_set_style_text_color(lc,C_GREY,0);lv_obj_set_style_text_font(lc,&lv_font_montserrat_16,0);
+    lv_obj_set_pos(lc,130,252);lv_timer_handler();delay(300);
+    lv_label_set_text(lc,"● LVGL     OK");lv_obj_set_style_text_color(lc,C_GREEN,0);lv_timer_handler();
+
+    // BLE init
+    lc=lv_label_create(s);lv_label_set_text(lc,"  BLE      ...");
+    lv_obj_set_style_text_color(lc,C_GREY,0);lv_obj_set_style_text_font(lc,&lv_font_montserrat_16,0);
+    lv_obj_set_pos(lc,130,282);lv_timer_handler();delay(300);
+    BLEDevice::init("ATCORE-TRGB");
+    lv_label_set_text(lc,"● BLE      OK");lv_obj_set_style_text_color(lc,C_GREEN,0);lv_timer_handler();
+
+    // AT-CORE scan
+    lc=lv_label_create(s);lv_label_set_text(lc,"  AT-CORE  ...");
+    lv_obj_set_style_text_color(lc,C_GREY,0);lv_obj_set_style_text_font(lc,&lv_font_montserrat_16,0);
+    lv_obj_set_pos(lc,130,312);lv_timer_handler();delay(400);
+    startScan();
+    lv_label_set_text(lc,"● AT-CORE  SCAN");lv_obj_set_style_text_color(lc,C_AMBER,0);lv_timer_handler();
+    delay(900);
+
+    lv_obj_clean(s);
+}
+
 void setup(){
     Serial.begin(115200);
     if(!panel.begin()){while(1){Serial.println("Panel FAIL");delay(1000);}}
     Serial.printf("Touch: %s\n",panel.getTouchModelName());
     beginLvglHelper(panel);
     lv_obj_set_style_bg_color(lv_scr_act(),C_BG,0);
+    panel.setBrightness(16);
+    runBootSplash();
     for(int i=0;i<NUM_PAGES;i++){g_pages[i]=mkPage();lv_obj_add_flag(g_pages[i],LV_OBJ_FLAG_HIDDEN);}
     buildPage1();buildPage2();buildPage3();buildPage4();buildPage5();
     lv_obj_clear_flag(g_pages[0],LV_OBJ_FLAG_HIDDEN);
     createNavButtons();
-    BLEDevice::init("ATCORE-TRGB");startScan();
-    Serial.println("BLE scan...");
-    panel.setBrightness(16);
     Serial.println("Ready");}
 
 void loop(){
