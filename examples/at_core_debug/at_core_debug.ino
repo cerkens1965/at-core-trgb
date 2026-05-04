@@ -13,6 +13,7 @@
 #include <BLEScan.h>
 #include <BLEAdvertisedDevice.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include <math.h>
 
 LilyGo_RGBPanel panel;
@@ -52,6 +53,11 @@ struct DebugData {
     int flarm_tx,flarm_rx,adsb_rx;
     char fid[24]; bool valid;
 };
+static const uint8_t kScaleOpts[]={4,8,10,20,40};
+static const char*   kSrcNames[] ={"SSKY","FLRM","ADSB","ALL"};
+struct CfgData{ uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft; int16_t vfilt_ft; };
+static CfgData g_cfg={4,16,3,true,true,2000};
+static Preferences g_prefs;
 
 static StatusData  g_status  = {};
 static FlightData  g_flight  = {};
@@ -67,7 +73,7 @@ static BLERemoteCharacteristic *g_chrS=nullptr,*g_chrF=nullptr,
 static volatile bool g_connected=false, g_doConnect=false, g_doReconnect=false;
 static BLEAdvertisedDevice*    g_target  = nullptr;
 
-#define NUM_PAGES 5
+#define NUM_PAGES 6
 static lv_obj_t* g_pages[NUM_PAGES];
 static uint8_t   g_page=0, g_prevPage=0;
 static bool      g_alertForced=false;
@@ -89,9 +95,7 @@ static lv_obj_t *r_flarmtx,*r_adsbr,*r_flt;
 #define RAD_CX       240
 #define RAD_CY       240
 #define RAD_R        175
-#define RAD_SCALE_NM 4
-#define RAD_SCALE_M  (RAD_SCALE_NM * 1852)
-static lv_obj_t *r_radar_hdg, *r_radar_north;
+static lv_obj_t *r_radar_hdg, *r_radar_north, *r_radar_scale_lbl;
 static lv_obj_t *r_radar_blip[MAX_TRF], *r_radar_cs[MAX_TRF], *r_radar_alt[MAX_TRF], *r_radar_arr[MAX_TRF];
 
 lv_color_t modeCol(int m){switch(m){case 0:return C_AMBER;case 1:return C_GREEN;case 2:return C_BLUE;default:return C_GREY;}}
@@ -316,9 +320,9 @@ void buildPage3(){
     lv_obj_set_style_text_font(r_radar_north,&lv_font_montserrat_14,0);
     lv_obj_set_pos(r_radar_north,RAD_CX-5,RAD_CY-RAD_R-20);
 
-    // Scale label + page indicator
-    char scl[16];snprintf(scl,16,"%dnm  3/5",RAD_SCALE_NM);
-    mkLbl(p,scl,C_GREY,&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-55);
+    // Scale label + page indicator (stored for live update from settings)
+    char scl[16];snprintf(scl,16,"%dnm  3/5",g_cfg.scale_nm);
+    r_radar_scale_lbl=mkLbl(p,scl,C_GREY,&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-55);
 
     // Traffic blips (diamond ◆) + callsign + alt + vertical trend arrow
     for(int i=0;i<MAX_TRF;i++){
@@ -439,7 +443,7 @@ void updateAllPages(){
                 TrafficEntry& e=g_traffic.t[i];
                 int rb=((e.bear_deg-g_status.hdg)%360+360)%360;
                 float brd=(float)rb*(float)M_PI/180.0f;
-                float dpx=fminf((float)e.dist_m*(float)RAD_R/(float)RAD_SCALE_M,(float)(RAD_R-6));
+                float dpx=fminf((float)e.dist_m*(float)RAD_R/((float)g_cfg.scale_nm*1852.0f),(float)(RAD_R-6));
                 int bx=(int)(RAD_CX+sinf(brd)*dpx)-7;
                 int by=(int)(RAD_CY-cosf(brd)*dpx)-9;
                 lv_color_t col=e.dist_m<1000?C_RED:e.dist_m<3000?C_AMBER:C_CYAN;
@@ -549,6 +553,95 @@ void createNavButtons(){
     lv_obj_set_style_text_color(ra,lv_color_hex(0xCCCCCC),0);
     lv_obj_set_style_text_font(ra,&lv_font_montserrat_32,0);lv_obj_center(ra);}
 
+// ─── Settings NVS ─────────────────────────────────────────────────────────────
+void cfgLoad(){
+    g_prefs.begin("atview",true);
+    g_cfg.scale_nm   =g_prefs.getUChar("scale",4);
+    g_cfg.brightness =g_prefs.getUChar("bright",16);
+    g_cfg.trf_src    =g_prefs.getUChar("trf_src",3);
+    g_cfg.dist_nm    =g_prefs.getBool("dist_nm",true);
+    g_cfg.alt_ft     =g_prefs.getBool("alt_ft",true);
+    g_cfg.vfilt_ft   =g_prefs.getShort("vfilt",2000);
+    g_prefs.end();
+}
+void cfgSave(){
+    g_prefs.begin("atview",false);
+    g_prefs.putUChar("scale",g_cfg.scale_nm);
+    g_prefs.putUChar("bright",g_cfg.brightness);
+    g_prefs.putUChar("trf_src",g_cfg.trf_src);
+    g_prefs.putBool("dist_nm",g_cfg.dist_nm);
+    g_prefs.putBool("alt_ft",g_cfg.alt_ft);
+    g_prefs.putShort("vfilt",g_cfg.vfilt_ft);
+    g_prefs.end();
+}
+
+// ─── Settings Page UI ─────────────────────────────────────────────────────────
+static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v;
+
+void updSetPage(){
+    char b[16];
+    snprintf(b,16,"%dnm",g_cfg.scale_nm);  lv_label_set_text(s_scale_v,b);
+    snprintf(b,16,"%dft",g_cfg.vfilt_ft);  lv_label_set_text(s_vfilt_v,b);
+    lv_label_set_text(s_dist_v,g_cfg.dist_nm?"NM":"km");
+    lv_label_set_text(s_alt_v, g_cfg.alt_ft?"ft":"m");
+    snprintf(b,16,"%d",g_cfg.brightness);  lv_label_set_text(s_bright_v,b);
+    lv_label_set_text(s_src_v, kSrcNames[g_cfg.trf_src&3]);
+    snprintf(b,16,"%dnm  3/5",g_cfg.scale_nm); lv_label_set_text(r_radar_scale_lbl,b);
+    panel.setBrightness(g_cfg.brightness);
+}
+
+static void cbSetBtn(lv_event_t* e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    int id=(int)(intptr_t)lv_event_get_user_data(e);
+    int si=0; for(int i=0;i<5;i++) if(kScaleOpts[i]==g_cfg.scale_nm) si=i;
+    switch(id){
+        case 0:  si=max(si-1,0);              g_cfg.scale_nm=kScaleOpts[si]; break;
+        case 1:  si=min(si+1,4);              g_cfg.scale_nm=kScaleOpts[si]; break;
+        case 2:  g_cfg.vfilt_ft=max((int)g_cfg.vfilt_ft-500,500);  break;
+        case 3:  g_cfg.vfilt_ft=min((int)g_cfg.vfilt_ft+500,5000); break;
+        case 4:  case 5: g_cfg.dist_nm=!g_cfg.dist_nm;             break;
+        case 6:  case 7: g_cfg.alt_ft=!g_cfg.alt_ft;               break;
+        case 8:  g_cfg.brightness=max((int)g_cfg.brightness-16,4);  break;
+        case 9:  g_cfg.brightness=min((int)g_cfg.brightness+16,255);break;
+        case 10: g_cfg.trf_src=(g_cfg.trf_src+3)%4;                break;
+        case 11: g_cfg.trf_src=(g_cfg.trf_src+1)%4;                break;
+    }
+    cfgSave(); updSetPage();
+}
+
+static lv_obj_t* mkSetRow(lv_obj_t*p,const char*k,int y,const char*v,int idn,int idup){
+    mkLblP(p,k,C_GREY,&lv_font_montserrat_16,88,y);
+    lv_obj_t* vl=mkLblP(p,v,C_AMBER,&lv_font_montserrat_16,215,y);
+    lv_obj_t* bd=lv_btn_create(p);lv_obj_set_size(bd,38,30);lv_obj_set_pos(bd,285,y-4);
+    lv_obj_set_style_bg_color(bd,lv_color_hex(0x1f2937),0);lv_obj_set_style_border_width(bd,0,0);
+    lv_obj_set_style_radius(bd,6,0);lv_obj_set_style_shadow_opa(bd,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bd,cbSetBtn,LV_EVENT_CLICKED,(void*)(intptr_t)idn);
+    lv_obj_t* ld=lv_label_create(bd);lv_label_set_text(ld,"<");
+    lv_obj_set_style_text_color(ld,C_WHITE,0);lv_obj_center(ld);
+    lv_obj_t* bu=lv_btn_create(p);lv_obj_set_size(bu,38,30);lv_obj_set_pos(bu,329,y-4);
+    lv_obj_set_style_bg_color(bu,lv_color_hex(0x1f2937),0);lv_obj_set_style_border_width(bu,0,0);
+    lv_obj_set_style_radius(bu,6,0);lv_obj_set_style_shadow_opa(bu,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bu,cbSetBtn,LV_EVENT_CLICKED,(void*)(intptr_t)idup);
+    lv_obj_t* lu=lv_label_create(bu);lv_label_set_text(lu,">");
+    lv_obj_set_style_text_color(lu,C_WHITE,0);lv_obj_center(lu);
+    return vl;
+}
+
+void buildPage6(){
+    lv_obj_t*p=g_pages[5]; char b[16];
+    mkLbl(p,"SETTINGS",C_AMBER,&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,55);
+    mkLbl(p,"CONFIG",C_GREY,&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,88);
+    snprintf(b,16,"%dnm",g_cfg.scale_nm);         s_scale_v=mkSetRow(p,"Scale", 108,b,0,1);
+    snprintf(b,16,"%dft",g_cfg.vfilt_ft);          s_vfilt_v=mkSetRow(p,"V-Filt",148,b,2,3);
+    s_dist_v =mkSetRow(p,"Dist",  188,g_cfg.dist_nm?"NM":"km",4,5);
+    s_alt_v  =mkSetRow(p,"Alt",   228,g_cfg.alt_ft?"ft":"m",  6,7);
+    mkLbl(p,"DISPLAY",C_GREY,&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,258);
+    snprintf(b,16,"%d",g_cfg.brightness);           s_bright_v=mkSetRow(p,"Bright",278,b,8,9);
+    mkLbl(p,"TRAFFIC",C_GREY,&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,308);
+    s_src_v  =mkSetRow(p,"Source",328,kSrcNames[g_cfg.trf_src&3],10,11);
+    mkLbl(p,"6/6",C_GREY,&lv_font_montserrat_16,LV_ALIGN_BOTTOM_MID,0,-60);
+}
+
 void runBootSplash(){
     lv_obj_t* s=lv_scr_act();
     lv_obj_t* lc;
@@ -602,12 +695,14 @@ void setup(){
     Serial.printf("Touch: %s\n",panel.getTouchModelName());
     beginLvglHelper(panel);
     lv_obj_set_style_bg_color(lv_scr_act(),C_BG,0);
-    panel.setBrightness(16);
+    cfgLoad();
+    panel.setBrightness(g_cfg.brightness);
     runBootSplash();
     for(int i=0;i<NUM_PAGES;i++){g_pages[i]=mkPage();lv_obj_add_flag(g_pages[i],LV_OBJ_FLAG_HIDDEN);}
-    buildPage1();buildPage2();buildPage3();buildPage4();buildPage5();
+    buildPage1();buildPage2();buildPage3();buildPage4();buildPage5();buildPage6();
     lv_obj_clear_flag(g_pages[0],LV_OBJ_FLAG_HIDDEN);
     createNavButtons();
+    updSetPage();
     Serial.println("Ready");}
 
 void loop(){
