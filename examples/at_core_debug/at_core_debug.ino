@@ -80,6 +80,7 @@ struct TrfRow { lv_obj_t *dot,*cs,*dist,*alt; };
 static TrfRow   r_trf[MAX_TRF];
 static lv_obj_t *r_noTraffic;
 static lv_obj_t *r_noAlert,*r_alertCO,*r_alertGF,*r_alertRPM,*r_alertTFC,*r_alertMsg;
+static lv_obj_t *r_alert_overlay,*r_aov_text;
 static lv_obj_t *r_hbgps,*r_hblte,*r_hbsd,*r_p5csq,*r_http,*r_code;
 static lv_obj_t *r_ss,*r_fa,*r_lteok,*r_dis,*r_heap,*r_bat,*r_p5mode,*r_pend;
 static lv_obj_t *r_flarmtx,*r_adsbr,*r_flt;
@@ -345,6 +346,25 @@ void buildPage3(){
         lv_obj_set_style_text_color(r_radar_arr[i],C_WHITE,0);
         lv_obj_add_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);
     }
+
+    // Alert overlay band — semi-transparent, above scale label
+    r_alert_overlay=lv_obj_create(p);
+    lv_obj_set_size(r_alert_overlay,300,40);
+    lv_obj_set_pos(r_alert_overlay,90,358);
+    lv_obj_set_style_bg_color(r_alert_overlay,lv_color_hex(0x3d0000),0);
+    lv_obj_set_style_bg_opa(r_alert_overlay,LV_OPA_90,0);
+    lv_obj_set_style_border_color(r_alert_overlay,C_RED,0);
+    lv_obj_set_style_border_width(r_alert_overlay,1,0);
+    lv_obj_set_style_radius(r_alert_overlay,8,0);
+    lv_obj_set_style_shadow_opa(r_alert_overlay,LV_OPA_TRANSP,0);
+    lv_obj_set_style_pad_all(r_alert_overlay,0,0);
+    lv_obj_clear_flag(r_alert_overlay,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);
+    r_aov_text=lv_label_create(r_alert_overlay);
+    lv_label_set_text(r_aov_text,"");
+    lv_obj_set_style_text_color(r_aov_text,C_RED,0);
+    lv_obj_set_style_text_font(r_aov_text,&lv_font_montserrat_16,0);
+    lv_obj_center(r_aov_text);
 }
 
 void buildPage4(){
@@ -459,7 +479,7 @@ void updateAllPages(){
             }
         }
     }
-    // P4
+    // P4 (page dédiée alertes — accès manuel uniquement)
     if(g_alert.valid){
         bool any=g_alert.co||g_alert.gforce||g_alert.rpm||g_alert.traffic;
         any?lv_obj_add_flag(r_noAlert,LV_OBJ_FLAG_HIDDEN):lv_obj_clear_flag(r_noAlert,LV_OBJ_FLAG_HIDDEN);
@@ -467,7 +487,18 @@ void updateAllPages(){
         g_alert.gforce?lv_obj_clear_flag(r_alertGF,LV_OBJ_FLAG_HIDDEN):lv_obj_add_flag(r_alertGF,LV_OBJ_FLAG_HIDDEN);
         g_alert.rpm?lv_obj_clear_flag(r_alertRPM,LV_OBJ_FLAG_HIDDEN):lv_obj_add_flag(r_alertRPM,LV_OBJ_FLAG_HIDDEN);
         g_alert.traffic?lv_obj_clear_flag(r_alertTFC,LV_OBJ_FLAG_HIDDEN):lv_obj_add_flag(r_alertTFC,LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(r_alertMsg,g_alert.msg);}
+        lv_label_set_text(r_alertMsg,g_alert.msg);
+        // Overlay sur radar
+        if(any){
+            char ab[48]="";
+            if(g_alert.co)    strcat(ab,"▲CO  ");
+            if(g_alert.gforce)strcat(ab,"▲G  ");
+            if(g_alert.rpm)   strcat(ab,"▲RPM  ");
+            if(g_alert.traffic)strcat(ab,"▲TFC");
+            lv_label_set_text(r_aov_text,ab);
+            lv_obj_clear_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);
+        }else{lv_obj_add_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);}
+    }
     // P5
     if(g_debug.valid){const char* modes[4]={"PRE","FLT","POST","SLP"};
         snprintf(b,32,"%ds",g_debug.hb_gps);lv_label_set_text(r_hbgps,b);lv_obj_set_style_text_color(r_hbgps,hbCol(g_debug.hb_gps),0);
@@ -543,7 +574,7 @@ void loop(){
         static uint32_t ls=0;if(now-ls>8000){ls=now;startScan();}}
     if(g_dataUpdated){g_dataUpdated=false;updateAllPages();}
     bool alert=hasAlert();
-    if(alert&&g_page!=3&&!g_alertForced){g_prevPage=g_page;g_alertForced=true;switchPage(3);}
+    if(alert&&!g_alertForced){g_prevPage=g_page;g_alertForced=true;if(g_page!=2)switchPage(2);}
     else if(!alert&&g_alertForced){g_alertForced=false;switchPage(g_prevPage);}
     if(g_navPending){g_navPending=false;switchPage(g_navPage);}
     lv_timer_handler();delay(2);}
