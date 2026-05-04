@@ -221,7 +221,7 @@ void buildPage1(){
     r_sd   =mkStat(p, 82,168,"SD ---", false);r_ble=mkStat(p,252,168,"BLE",    false);
     r_flarm=mkStat(p, 82,208,"FLARM",  false);r_adsb=mkStat(p,252,208,"ADS-B", false);
     r_coords=mkLbl(p,"--- / ---",C_WHITE,&lv_font_montserrat_16,LV_ALIGN_TOP_MID,0,255);
-    mkLbl(p,"1/5",C_GREY,&lv_font_montserrat_16,LV_ALIGN_BOTTOM_MID,0,-60);}
+    mkLbl(p,"1/6",C_GREY,&lv_font_montserrat_16,LV_ALIGN_BOTTOM_MID,0,-60);}
 
 void buildPage2(){
     lv_obj_t* p=g_pages[1];
@@ -235,7 +235,7 @@ void buildPage2(){
     mkKV(p,178,"G-FORCE",&r_gforce,"--- G",C_WHITE);
     mkKV(p,208,"CO",     &r_co,   "--- ppm",C_WHITE);
     mkKV(p,238,"RPM",    &r_rpm,  "---",C_WHITE);
-    mkLbl(p,"2/5",C_GREY,&lv_font_montserrat_16,LV_ALIGN_BOTTOM_MID,0,-60);}
+    mkLbl(p,"2/6",C_GREY,&lv_font_montserrat_16,LV_ALIGN_BOTTOM_MID,0,-60);}
 
 void buildPage3(){
     lv_obj_t* p=g_pages[2];
@@ -321,7 +321,7 @@ void buildPage3(){
     lv_obj_set_pos(r_radar_north,RAD_CX-5,RAD_CY-RAD_R-20);
 
     // Scale label + page indicator (stored for live update from settings)
-    char scl[16];snprintf(scl,16,"%dnm  3/5",g_cfg.scale_nm);
+    char scl[16];snprintf(scl,16,"%dnm  3/6",g_cfg.scale_nm);
     r_radar_scale_lbl=mkLbl(p,scl,C_GREY,&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-55);
 
     // Traffic blips (diamond ◆) + callsign + alt + vertical trend arrow
@@ -382,7 +382,7 @@ void buildPage4(){
     r_alertMsg=mkLbl(p,"",C_AMBER,&lv_font_montserrat_16,LV_ALIGN_TOP_MID,0,300);
     lv_obj_add_flag(r_alertCO,LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_alertGF,LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(r_alertRPM,LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_alertTFC,LV_OBJ_FLAG_HIDDEN);
-    mkLbl(p,"4/5",C_GREY,&lv_font_montserrat_16,LV_ALIGN_BOTTOM_MID,0,-60);}
+    mkLbl(p,"4/6",C_GREY,&lv_font_montserrat_16,LV_ALIGN_BOTTOM_MID,0,-60);}
 
 void buildPage5(){
     lv_obj_t* p=g_pages[4];
@@ -398,7 +398,7 @@ void buildPage5(){
     r_flarmtx=mkDbgL(p,y,"FLARM","T0 R0",C_GREY);r_adsbr=mkDbgR(p,y,"ADSB","0",C_GREY);y+=dy;
     mkLblP(p,"FLT",C_GREY,&lv_font_montserrat_14,80,y);
     r_flt=mkLblP(p,"---",C_WHITE,&lv_font_montserrat_14,158,y);
-    mkLbl(p,"5/5",C_GREY,&lv_font_montserrat_16,LV_ALIGN_BOTTOM_MID,0,-60);}
+    mkLbl(p,"5/6",C_GREY,&lv_font_montserrat_16,LV_ALIGN_BOTTOM_MID,0,-60);}
 
 void updateAllPages(){
     char b[32];
@@ -586,7 +586,7 @@ void updSetPage(){
     lv_label_set_text(s_alt_v, g_cfg.alt_ft?"ft":"m");
     snprintf(b,16,"%d",g_cfg.brightness);  lv_label_set_text(s_bright_v,b);
     lv_label_set_text(s_src_v, kSrcNames[g_cfg.trf_src&3]);
-    snprintf(b,16,"%dnm  3/5",g_cfg.scale_nm); lv_label_set_text(r_radar_scale_lbl,b);
+    snprintf(b,16,"%dnm  3/6",g_cfg.scale_nm); lv_label_set_text(r_radar_scale_lbl,b);
     panel.setBrightness(g_cfg.brightness);
 }
 
