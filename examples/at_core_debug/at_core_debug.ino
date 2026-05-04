@@ -1,7 +1,8 @@
 /**
- * AT-VIEW AeroTrace — v0.5
+ * AT-VIEW AeroTrace — v0.6
  * LilyGo T-RGB 2.8" | ESP32-S3 | 480×480 circular
- * 3 pages: Status | Radar | Settings  (+hidden Debug via long press on version)
+ * 3 pages: Status(boot+live) | Radar | Settings  (+hidden Debug)
+ * Swipe L/R — long press version → Debug
  * Christophe — 2026-05-04
  */
 
@@ -25,15 +26,20 @@ LilyGo_RGBPanel panel;
 #define BLE_CHR_DEBUG   "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_TARGET      "AT-CORE"
 
-#define C_BG     lv_color_hex(0x000000)
-#define C_WHITE  lv_color_hex(0xFFFFFF)
 #define C_AMBER  lv_color_hex(0xF5A623)
 #define C_GREEN  lv_color_hex(0x22c55e)
 #define C_CYAN   lv_color_hex(0x00E5FF)
 #define C_BLUE   lv_color_hex(0x60a5fa)
 #define C_RED    lv_color_hex(0xef4444)
 #define C_ORANGE lv_color_hex(0xf97316)
-#define C_GREY   lv_color_hex(0x6b7280)
+
+static bool g_dark_theme = true;
+static inline lv_color_t TBG()  {return g_dark_theme?lv_color_hex(0x000000):lv_color_hex(0xFFFFFF);}
+static inline lv_color_t TFG()  {return g_dark_theme?lv_color_hex(0xFFFFFF):lv_color_hex(0x0f172a);}
+static inline lv_color_t TGREY(){return g_dark_theme?lv_color_hex(0x6b7280):lv_color_hex(0x6b7280);}
+static inline lv_color_t TGRID(){return g_dark_theme?lv_color_hex(0x2a2a2a):lv_color_hex(0xd0d0d0);}
+static inline lv_color_t TRING(){return g_dark_theme?lv_color_hex(0x555555):lv_color_hex(0x9ca3af);}
+static inline lv_color_t THDG() {return g_dark_theme?lv_color_hex(0x0d1b2a):lv_color_hex(0xe2e8f0);}
 
 // ── Data structs ──────────────────────────────────────────────────────────────
 struct StatusData {
@@ -79,9 +85,13 @@ static uint8_t   g_page=0, g_prevPage=0;
 static bool      g_inDebug=false, g_alertForced=false;
 static volatile bool    g_navPending=false;
 static volatile uint8_t g_navPage=0;
+static bool             g_rebuildPages=false;
+static bool             g_bootDone=false;
 
-// ── Widget refs — Status (page 0) ─────────────────────────────────────────────
-static lv_obj_t *r_title,*r_mode,*r_gps,*r_lte,*r_sd,*r_ble,*r_flarm,*r_adsb,*r_coords;
+// ── Widget refs — Status page (page 0) ───────────────────────────────────────
+static lv_obj_t *r_title;
+static lv_obj_t *r_boot_panel,*r_boot_lvgl,*r_boot_ble,*r_boot_core;
+static lv_obj_t *r_gps,*r_lte,*r_sd,*r_ble,*r_flarm,*r_adsb,*r_coords;
 
 // ── Widget refs — Radar (page 1) ──────────────────────────────────────────────
 #define RAD_CX 240
@@ -92,6 +102,7 @@ static lv_obj_t *r_card[4];
 static lv_obj_t *r_radar_blip[MAX_TRF],*r_radar_cs[MAX_TRF],
                  *r_radar_alt[MAX_TRF],*r_radar_arr[MAX_TRF];
 static lv_obj_t *r_alert_overlay, *r_aov_text;
+static lv_obj_t *r_co_pill, *r_co_val;
 
 // ── Widget refs — Settings (page 2) ───────────────────────────────────────────
 static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v,*s_theme_v;
@@ -102,8 +113,7 @@ static lv_obj_t *r_ss,*r_fa,*r_lteok,*r_dis,*r_heap,*r_bat,*r_p5mode,*r_pend;
 static lv_obj_t *r_flarmtx,*r_adsbr,*r_flt;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-lv_color_t modeCol(int m){switch(m){case 0:return C_AMBER;case 1:return C_GREEN;case 2:return C_BLUE;default:return C_GREY;}}
-const char* modeStr(int m){switch(m){case 0:return"PREFLIGHT";case 1:return"FLIGHT";case 2:return"POSTFLIGHT";default:return"SLEEP";}}
+lv_color_t modeCol(int m){switch(m){case 0:return C_AMBER;case 1:return C_GREEN;case 2:return C_BLUE;default:return TGREY();}}
 lv_color_t hbCol(int s){return s<10?C_GREEN:s<20?C_AMBER:C_RED;}
 
 lv_obj_t* mkLbl(lv_obj_t*p,const char*t,lv_color_t c,const lv_font_t*f,lv_align_t a,int ox,int oy){
@@ -118,20 +128,20 @@ lv_obj_t* mkStat(lv_obj_t*p,int x,int y,const char*t,bool ok){
     char b[32];snprintf(b,32,"● %s",t);
     lv_obj_t*l=lv_label_create(p);lv_label_set_text(l,b);
     lv_obj_set_style_text_color(l,ok?C_GREEN:C_RED,0);
-    lv_obj_set_style_text_font(l,&lv_font_montserrat_16,0);
+    lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);
     lv_obj_set_pos(l,x,y);return l;}
 void updStat(lv_obj_t*l,const char*t,bool ok){
     char b[32];snprintf(b,32,"● %s",t);
     lv_label_set_text(l,b);lv_obj_set_style_text_color(l,ok?C_GREEN:C_RED,0);}
 lv_obj_t* mkDbgL(lv_obj_t*p,int y,const char*k,const char*v,lv_color_t c){
-    mkLblP(p,k,C_GREY,&lv_font_montserrat_14,80,y);
+    mkLblP(p,k,TGREY(),&lv_font_montserrat_14,80,y);
     return mkLblP(p,v,c,&lv_font_montserrat_14,158,y);}
 lv_obj_t* mkDbgR(lv_obj_t*p,int y,const char*k,const char*v,lv_color_t c){
-    mkLblP(p,k,C_GREY,&lv_font_montserrat_14,252,y);
+    mkLblP(p,k,TGREY(),&lv_font_montserrat_14,252,y);
     return mkLblP(p,v,c,&lv_font_montserrat_14,330,y);}
 lv_obj_t* mkPage(){
     lv_obj_t*p=lv_obj_create(lv_scr_act());lv_obj_set_size(p,480,480);
-    lv_obj_set_pos(p,0,0);lv_obj_set_style_bg_color(p,C_BG,0);
+    lv_obj_set_pos(p,0,0);lv_obj_set_style_bg_color(p,TBG(),0);
     lv_obj_set_style_border_width(p,0,0);lv_obj_set_style_pad_all(p,0,0);
     lv_obj_clear_flag(p,LV_OBJ_FLAG_SCROLLABLE);return p;}
 
@@ -204,7 +214,7 @@ bool connectBLE(){
     return true;}
 void startScan(){BLEScan*s=BLEDevice::getScan();s->setAdvertisedDeviceCallbacks(new ATCAdv());s->setActiveScan(true);s->start(5,false);}
 
-// ── Navigation ────────────────────────────────────────────────────────────────
+// ── Navigation & swipe ────────────────────────────────────────────────────────
 void switchPage(uint8_t np){
     if(g_inDebug){lv_obj_add_flag(g_dbgPage,LV_OBJ_FLAG_HIDDEN);g_inDebug=false;}
     lv_obj_add_flag(g_pages[g_page],LV_OBJ_FLAG_HIDDEN);
@@ -243,7 +253,8 @@ void cfgLoad(){
     g_cfg.alt_ft    =g_prefs.getBool("alt_ft",true);
     g_cfg.dark      =g_prefs.getBool("dark",true);
     g_cfg.vfilt_ft  =g_prefs.getShort("vfilt",2000);
-    g_prefs.end();}
+    g_prefs.end();
+    g_dark_theme=g_cfg.dark;}
 void cfgSave(){
     g_prefs.begin("atview",false);
     g_prefs.putUChar("scale",g_cfg.scale_nm);
@@ -255,50 +266,130 @@ void cfgSave(){
     g_prefs.putShort("vfilt",g_cfg.vfilt_ft);
     g_prefs.end();}
 
-// ── Page 0 — Status ───────────────────────────────────────────────────────────
+// ── Forward declarations ──────────────────────────────────────────────────────
+void buildStatusPage();
+void buildRadarPage();
+void buildSettingsPage();
+void buildDebugPage();
+void createSwipeHandlers();
+void updSetPage();
+
+// ── Theme rebuild ─────────────────────────────────────────────────────────────
+void rebuildAllPages(){
+    g_dark_theme=g_cfg.dark;
+    lv_obj_set_style_bg_color(lv_scr_act(),TBG(),0);
+    for(int i=0;i<NUM_PAGES;i++){
+        lv_obj_clean(g_pages[i]);
+        lv_obj_set_style_bg_color(g_pages[i],TBG(),0);}
+    lv_obj_clean(g_dbgPage);
+    lv_obj_set_style_bg_color(g_dbgPage,TBG(),0);
+    buildStatusPage();buildRadarPage();buildSettingsPage();buildDebugPage();
+    createSwipeHandlers();updSetPage();}
+
+// ── Page 0 — Status (boot section + live section, same page always) ───────────
 void buildStatusPage(){
     lv_obj_t*p=g_pages[0];
-    r_title =mkLbl(p,"SEARCHING AT-CORE...",C_AMBER,&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,55);
-    r_mode  =mkLbl(p,"---",C_GREY,&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,85);
-    r_gps   =mkStat(p, 82,128,"GPS ---",false);
-    r_lte   =mkStat(p,252,128,"LTE ---",false);
-    r_sd    =mkStat(p, 82,168,"SD ---", false);
-    r_ble   =mkStat(p,252,168,"BLE",    false);
-    r_flarm =mkStat(p, 82,208,"FLARM",  false);
-    r_adsb  =mkStat(p,252,208,"ADS-B",  false);
-    r_coords=mkLbl(p,"--- / ---",C_WHITE,&lv_font_montserrat_16,LV_ALIGN_TOP_MID,0,255);}
+
+    // ── Brand header
+    r_title=mkLbl(p,"AT-VIEW",C_AMBER,&lv_font_montserrat_22,LV_ALIGN_TOP_MID,0,52);
+    mkLbl(p,"AeroTrace",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,80);
+
+    // ── Boot checks (4 lines, compact, frozen after boot)
+    const char* bp_str = g_bootDone ? "● PANEL    OK" : "  PANEL    ...";
+    const char* bl_str = g_bootDone ? "● LVGL     OK" : "  LVGL     ...";
+    const char* bb_str = g_bootDone ? "● BLE      OK" : "  BLE      ...";
+    const char* bc_str = g_bootDone ? "● AT-CORE  SCAN" : "  AT-CORE  ...";
+    lv_color_t ok_col  = g_bootDone ? C_GREEN : TGREY();
+    lv_color_t core_col= g_bootDone ? C_AMBER : TGREY();
+    r_boot_panel=mkLblP(p,bp_str,ok_col,  &lv_font_montserrat_14,120,108);
+    r_boot_lvgl =mkLblP(p,bl_str,ok_col,  &lv_font_montserrat_14,120,128);
+    r_boot_ble  =mkLblP(p,bb_str,ok_col,  &lv_font_montserrat_14,120,148);
+    r_boot_core =mkLblP(p,bc_str,core_col,&lv_font_montserrat_14,120,168);
+
+    // ── Separator line
+    static lv_point_t sep[2]={{100,192},{380,192}};
+    lv_obj_t*sl=lv_line_create(p);lv_line_set_points(sl,sep,2);
+    lv_obj_set_style_line_color(sl,TGRID(),0);lv_obj_set_style_line_width(sl,1,0);
+
+    // ── Live status indicators (2 columns)
+    r_gps  =mkStat(p, 82,202,"GPS ---",false);
+    r_lte  =mkStat(p,252,202,"LTE ---",false);
+    r_sd   =mkStat(p, 82,228,"SD ---", false);
+    r_ble  =mkStat(p,252,228,"BLE",    false);
+    r_flarm=mkStat(p, 82,254,"FLARM",  false);
+    r_adsb =mkStat(p,252,254,"ADS-B",  false);
+    r_coords=mkLbl(p,"--- / ---",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,284);
+    mkLbl(p,"v0.6  —  2026-05-04",TGREY(),&lv_font_montserrat_12,LV_ALIGN_BOTTOM_MID,0,-60);}
+
+// Boot animation — runs on page 0 before it goes live
+// Does NOT clean the page — just animates the boot check labels
+void runBootOnPage(){
+    lv_obj_t*p=g_pages[0];
+
+    lv_timer_handler();delay(500);
+
+    // PANEL
+    lv_label_set_text(r_boot_panel,"  PANEL    ...");
+    lv_obj_set_style_text_color(r_boot_panel,TGREY(),0);lv_timer_handler();delay(350);
+    lv_label_set_text(r_boot_panel,"● PANEL    OK");
+    lv_obj_set_style_text_color(r_boot_panel,C_GREEN,0);lv_timer_handler();
+
+    // LVGL
+    lv_label_set_text(r_boot_lvgl,"  LVGL     ...");
+    lv_obj_set_style_text_color(r_boot_lvgl,TGREY(),0);lv_timer_handler();delay(300);
+    lv_label_set_text(r_boot_lvgl,"● LVGL     OK");
+    lv_obj_set_style_text_color(r_boot_lvgl,C_GREEN,0);lv_timer_handler();
+
+    // BLE
+    lv_label_set_text(r_boot_ble,"  BLE      ...");
+    lv_obj_set_style_text_color(r_boot_ble,TGREY(),0);lv_timer_handler();delay(300);
+    BLEDevice::init("ATCORE-TRGB");
+    lv_label_set_text(r_boot_ble,"● BLE      OK");
+    lv_obj_set_style_text_color(r_boot_ble,C_GREEN,0);lv_timer_handler();
+
+    // AT-CORE scan
+    lv_label_set_text(r_boot_core,"  AT-CORE  ...");
+    lv_obj_set_style_text_color(r_boot_core,TGREY(),0);lv_timer_handler();delay(400);
+    startScan();
+    lv_label_set_text(r_boot_core,"● AT-CORE  SCAN");
+    lv_obj_set_style_text_color(r_boot_core,C_AMBER,0);lv_timer_handler();
+    delay(600);
+    g_bootDone=true;
+
+    // Live status indicators are already on the page below — BLE/GPS/etc.
+    // will update as soon as data arrives
+}
 
 // ── Page 1 — Radar ────────────────────────────────────────────────────────────
 void buildRadarPage(){
     lv_obj_t*p=g_pages[1];
 
-    // Heading pill (top centre, SafeSky style)
+    // Heading pill (top centre)
     lv_obj_t*hb=lv_obj_create(p);lv_obj_set_size(hb,72,28);
     lv_obj_align(hb,LV_ALIGN_TOP_MID,0,28);
-    lv_obj_set_style_bg_color(hb,lv_color_hex(0x0d1b2a),0);
-    lv_obj_set_style_bg_opa(hb,LV_OPA_COVER,0);
-    lv_obj_set_style_border_color(hb,C_WHITE,0);lv_obj_set_style_border_width(hb,1,0);
+    lv_obj_set_style_bg_color(hb,THDG(),0);lv_obj_set_style_bg_opa(hb,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(hb,TFG(),0);lv_obj_set_style_border_width(hb,1,0);
     lv_obj_set_style_radius(hb,14,0);lv_obj_set_style_shadow_opa(hb,LV_OPA_TRANSP,0);
     lv_obj_set_style_pad_all(hb,0,0);lv_obj_clear_flag(hb,LV_OBJ_FLAG_SCROLLABLE);
     r_radar_hdg=lv_label_create(hb);lv_label_set_text(r_radar_hdg,"---°");
-    lv_obj_set_style_text_color(r_radar_hdg,C_WHITE,0);
+    lv_obj_set_style_text_color(r_radar_hdg,TFG(),0);
     lv_obj_set_style_text_font(r_radar_hdg,&lv_font_montserrat_16,0);lv_obj_center(r_radar_hdg);
 
     // Outer ring
     lv_obj_t*ro=lv_obj_create(p);lv_obj_set_size(ro,RAD_R*2,RAD_R*2);
     lv_obj_set_pos(ro,RAD_CX-RAD_R,RAD_CY-RAD_R);lv_obj_set_style_radius(ro,LV_RADIUS_CIRCLE,0);
-    lv_obj_set_style_bg_opa(ro,LV_OPA_TRANSP,0);lv_obj_set_style_border_color(ro,C_GREY,0);
+    lv_obj_set_style_bg_opa(ro,LV_OPA_TRANSP,0);lv_obj_set_style_border_color(ro,TRING(),0);
     lv_obj_set_style_border_width(ro,1,0);lv_obj_set_style_shadow_opa(ro,LV_OPA_TRANSP,0);
     lv_obj_set_style_pad_all(ro,0,0);lv_obj_clear_flag(ro,LV_OBJ_FLAG_SCROLLABLE);
 
     // Inner ring (half scale)
     lv_obj_t*ri=lv_obj_create(p);lv_obj_set_size(ri,RAD_R,RAD_R);
     lv_obj_set_pos(ri,RAD_CX-RAD_R/2,RAD_CY-RAD_R/2);lv_obj_set_style_radius(ri,LV_RADIUS_CIRCLE,0);
-    lv_obj_set_style_bg_opa(ri,LV_OPA_TRANSP,0);lv_obj_set_style_border_color(ri,lv_color_hex(0x303030),0);
+    lv_obj_set_style_bg_opa(ri,LV_OPA_TRANSP,0);lv_obj_set_style_border_color(ri,TGRID(),0);
     lv_obj_set_style_border_width(ri,1,0);lv_obj_set_style_shadow_opa(ri,LV_OPA_TRANSP,0);
     lv_obj_set_style_pad_all(ri,0,0);lv_obj_clear_flag(ri,LV_OBJ_FLAG_SCROLLABLE);
 
-    // Tick marks — 12×30°, cardinal (every 90°) longer and white
+    // Tick marks — cardinal (every 90°) longer and brighter
     static lv_point_t tick_pts[12][2];
     for(int t=0;t<12;t++){
         float a=(float)t*30.0f*(float)M_PI/180.0f;
@@ -308,41 +399,76 @@ void buildRadarPage(){
         tick_pts[t][1].x=(lv_coord_t)(RAD_CX+sinf(a)*(float)RAD_R);
         tick_pts[t][1].y=(lv_coord_t)(RAD_CY-cosf(a)*(float)RAD_R);
         lv_obj_t*tm=lv_line_create(p);lv_line_set_points(tm,tick_pts[t],2);
-        lv_obj_set_style_line_color(tm,(t%3==0)?C_WHITE:C_GREY,0);
+        lv_obj_set_style_line_color(tm,(t%3==0)?TFG():TRING(),0);
         lv_obj_set_style_line_width(tm,(t%3==0)?2:1,0);}
 
     // Cross lines (faint grid)
     static lv_point_t hpts[2]={{RAD_CX-RAD_R,RAD_CY},{RAD_CX+RAD_R,RAD_CY}};
     static lv_point_t vpts[2]={{RAD_CX,RAD_CY-RAD_R},{RAD_CX,RAD_CY+RAD_R}};
     lv_obj_t*hl=lv_line_create(p);lv_line_set_points(hl,hpts,2);
-    lv_obj_set_style_line_color(hl,lv_color_hex(0x303030),0);lv_obj_set_style_line_width(hl,1,0);
+    lv_obj_set_style_line_color(hl,TGRID(),0);lv_obj_set_style_line_width(hl,1,0);
     lv_obj_t*vl=lv_line_create(p);lv_line_set_points(vl,vpts,2);
-    lv_obj_set_style_line_color(vl,lv_color_hex(0x303030),0);lv_obj_set_style_line_width(vl,1,0);
+    lv_obj_set_style_line_color(vl,TGRID(),0);lv_obj_set_style_line_width(vl,1,0);
 
-    // Heading track line (green, centre → top)
-    static lv_point_t htrk[2]={{RAD_CX,RAD_CY},{RAD_CX,RAD_CY-RAD_R}};
-    lv_obj_t*tl=lv_line_create(p);lv_line_set_points(tl,htrk,2);
-    lv_obj_set_style_line_color(tl,C_GREEN,0);lv_obj_set_style_line_width(tl,2,0);
-
-    // Own aircraft triangle (closed polyline)
-    static lv_point_t tri[4]={{RAD_CX,RAD_CY-20},{RAD_CX-12,RAD_CY+12},{RAD_CX+12,RAD_CY+12},{RAD_CX,RAD_CY-20}};
+    // Own aircraft triangle — small and thin, no heading line
+    static lv_point_t tri[4]={{RAD_CX,RAD_CY-14},{RAD_CX-8,RAD_CY+8},{RAD_CX+8,RAD_CY+8},{RAD_CX,RAD_CY-14}};
     lv_obj_t*ot=lv_line_create(p);lv_line_set_points(ot,tri,4);
-    lv_obj_set_style_line_color(ot,C_GREEN,0);lv_obj_set_style_line_width(ot,3,0);
+    lv_obj_set_style_line_color(ot,C_GREEN,0);lv_obj_set_style_line_width(ot,2,0);
 
-    // Cardinal labels N/E/S/W — repositioned on each heading update
+    // Cardinal labels N/E/S/W — INSIDE the ring at RAD_R-24, avoiding the pill zone
     const char*cnames[]={"N","E","S","W"};
     for(int ci=0;ci<4;ci++){
         r_card[ci]=lv_label_create(p);
         lv_label_set_text(r_card[ci],cnames[ci]);
         lv_obj_set_style_text_font(r_card[ci],&lv_font_montserrat_14,0);
-        lv_obj_set_style_text_color(r_card[ci],ci==0?C_WHITE:C_GREY,0);
-        lv_obj_set_pos(r_card[ci],RAD_CX-5,RAD_CY-RAD_R-20);}
+        lv_obj_set_style_text_color(r_card[ci],ci==0?TFG():TRING(),0);
+        lv_obj_set_pos(r_card[ci],RAD_CX-5,RAD_CY-(RAD_R-24)-8);}
 
-    // Scale label (live update from settings)
+    // Scale label — clearly below the ring (ring bottom ~y=415, label top ~y=446)
     char scl[12];snprintf(scl,12,"%dnm",g_cfg.scale_nm);
-    r_radar_scale_lbl=mkLbl(p,scl,C_GREY,&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-55);
+    r_radar_scale_lbl=mkLbl(p,scl,TGREY(),&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-20);
 
-    // Traffic blips ◆ + callsign + alt + trend arrow
+    // CO arc gauge — 3 fixed color bands (30° total) in bottom-right quadrant
+    // LVGL arc convention: 0°=right(3h), increases CW → compass120°=LVGL30°, compass150°=LVGL60°
+    // Each band 10°: green(30-40°) caution(40-50°) danger(50-60°)
+    {
+        struct Band{int s,e;lv_color_t c;};
+        Band bs[]={{30,40,C_GREEN},{40,50,C_ORANGE},{50,60,C_RED}};
+        for(auto&b:bs){
+            lv_obj_t*ba=lv_arc_create(p);
+            lv_obj_set_size(ba,440,440);lv_obj_set_pos(ba,20,20);
+            lv_arc_set_bg_start_angle(ba,b.s);lv_arc_set_bg_end_angle(ba,b.e);
+            lv_arc_set_range(ba,0,1);lv_arc_set_value(ba,0);
+            lv_obj_set_style_arc_color(ba,b.c,LV_PART_MAIN);
+            lv_obj_set_style_arc_width(ba,16,LV_PART_MAIN);
+            lv_obj_set_style_arc_width(ba,0,LV_PART_INDICATOR);
+            lv_obj_set_style_bg_opa(ba,LV_OPA_TRANSP,0);
+            lv_obj_set_style_shadow_opa(ba,LV_OPA_TRANSP,0);
+            lv_obj_set_style_pad_all(ba,0,0);
+            lv_obj_clear_flag(ba,LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_style_opa(ba,LV_OPA_TRANSP,LV_PART_KNOB);}
+    }
+    // CO needle — thin arc indicator moving across the bands (no background shown)
+    r_co_pill=lv_arc_create(p);
+    lv_obj_set_size(r_co_pill,440,440);lv_obj_set_pos(r_co_pill,20,20);
+    lv_arc_set_bg_start_angle(r_co_pill,30);lv_arc_set_bg_end_angle(r_co_pill,60);
+    lv_arc_set_range(r_co_pill,0,150);lv_arc_set_value(r_co_pill,0);
+    lv_obj_set_style_arc_width(r_co_pill,0,LV_PART_MAIN);
+    lv_obj_set_style_arc_color(r_co_pill,TFG(),LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(r_co_pill,4,LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(r_co_pill,LV_OPA_TRANSP,0);
+    lv_obj_set_style_shadow_opa(r_co_pill,LV_OPA_TRANSP,0);
+    lv_obj_set_style_pad_all(r_co_pill,0,0);
+    lv_obj_clear_flag(r_co_pill,LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_opa(r_co_pill,LV_OPA_TRANSP,LV_PART_KNOB);
+    // CO label — inside ring, lower-right quadrant, clearly associated with the arc
+    r_co_val=lv_label_create(p);lv_label_set_text(r_co_val,"CO\n---");
+    lv_obj_set_style_text_color(r_co_val,TGREY(),0);
+    lv_obj_set_style_text_font(r_co_val,&lv_font_montserrat_12,0);
+    lv_obj_set_style_text_align(r_co_val,LV_TEXT_ALIGN_CENTER,0);
+    lv_obj_set_pos(r_co_val,336,358);
+
+    // Traffic blips ◆ + callsign + alt + trend
     for(int i=0;i<MAX_TRF;i++){
         r_radar_blip[i]=lv_label_create(p);lv_label_set_text(r_radar_blip[i],"◆");
         lv_obj_set_style_text_font(r_radar_blip[i],&lv_font_montserrat_16,0);
@@ -351,7 +477,7 @@ void buildRadarPage(){
 
         r_radar_cs[i]=lv_label_create(p);lv_label_set_text(r_radar_cs[i],"");
         lv_obj_set_style_text_font(r_radar_cs[i],&lv_font_montserrat_14,0);
-        lv_obj_set_style_text_color(r_radar_cs[i],C_WHITE,0);
+        lv_obj_set_style_text_color(r_radar_cs[i],TFG(),0);
         lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
 
         r_radar_alt[i]=lv_label_create(p);lv_label_set_text(r_radar_alt[i],"");
@@ -361,10 +487,10 @@ void buildRadarPage(){
 
         r_radar_arr[i]=lv_label_create(p);lv_label_set_text(r_radar_arr[i],"");
         lv_obj_set_style_text_font(r_radar_arr[i],&lv_font_montserrat_14,0);
-        lv_obj_set_style_text_color(r_radar_arr[i],C_WHITE,0);
+        lv_obj_set_style_text_color(r_radar_arr[i],TFG(),0);
         lv_obj_add_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);}
 
-    // Alert overlay band
+    // Alert overlay
     r_alert_overlay=lv_obj_create(p);lv_obj_set_size(r_alert_overlay,300,40);
     lv_obj_set_pos(r_alert_overlay,90,358);
     lv_obj_set_style_bg_color(r_alert_overlay,lv_color_hex(0x3d0000),0);
@@ -377,7 +503,7 @@ void buildRadarPage(){
     lv_obj_set_style_text_color(r_aov_text,C_RED,0);
     lv_obj_set_style_text_font(r_aov_text,&lv_font_montserrat_16,0);lv_obj_center(r_aov_text);}
 
-// ── Page 2 — Settings helpers ─────────────────────────────────────────────────
+// ── Page 2 — Settings ─────────────────────────────────────────────────────────
 void updSetPage(){
     char b[16];
     snprintf(b,16,"%dnm",g_cfg.scale_nm); lv_label_set_text(s_scale_v,b);
@@ -405,41 +531,42 @@ static void cbSetBtn(lv_event_t*e){
         case 9:g_cfg.brightness=min((int)g_cfg.brightness+16,255);break;
         case 10:g_cfg.trf_src=(g_cfg.trf_src+3)%4;break;
         case 11:g_cfg.trf_src=(g_cfg.trf_src+1)%4;break;
-        case 12:case 13:g_cfg.dark=!g_cfg.dark;break;}
-    cfgSave();updSetPage();}
+        case 12:case 13:g_cfg.dark=!g_cfg.dark;g_rebuildPages=true;break;}
+    cfgSave();
+    if(!g_rebuildPages)updSetPage();}
 
 static lv_obj_t* mkSetRow(lv_obj_t*p,const char*k,int y,const char*v,int idn,int idup){
-    mkLblP(p,k,C_GREY,&lv_font_montserrat_16,88,y);
+    mkLblP(p,k,TGREY(),&lv_font_montserrat_16,88,y);
     lv_obj_t*vl=mkLblP(p,v,C_AMBER,&lv_font_montserrat_16,215,y);
+    lv_color_t btnbg=g_dark_theme?lv_color_hex(0x1f2937):lv_color_hex(0xdde1e7);
     lv_obj_t*bd=lv_btn_create(p);lv_obj_set_size(bd,38,30);lv_obj_set_pos(bd,285,y-4);
-    lv_obj_set_style_bg_color(bd,lv_color_hex(0x1f2937),0);lv_obj_set_style_border_width(bd,0,0);
+    lv_obj_set_style_bg_color(bd,btnbg,0);lv_obj_set_style_border_width(bd,0,0);
     lv_obj_set_style_radius(bd,6,0);lv_obj_set_style_shadow_opa(bd,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bd,cbSetBtn,LV_EVENT_CLICKED,(void*)(intptr_t)idn);
     lv_obj_t*ld=lv_label_create(bd);lv_label_set_text(ld,"<");
-    lv_obj_set_style_text_color(ld,C_WHITE,0);lv_obj_center(ld);
+    lv_obj_set_style_text_color(ld,TFG(),0);lv_obj_center(ld);
     lv_obj_t*bu=lv_btn_create(p);lv_obj_set_size(bu,38,30);lv_obj_set_pos(bu,329,y-4);
-    lv_obj_set_style_bg_color(bu,lv_color_hex(0x1f2937),0);lv_obj_set_style_border_width(bu,0,0);
+    lv_obj_set_style_bg_color(bu,btnbg,0);lv_obj_set_style_border_width(bu,0,0);
     lv_obj_set_style_radius(bu,6,0);lv_obj_set_style_shadow_opa(bu,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bu,cbSetBtn,LV_EVENT_CLICKED,(void*)(intptr_t)idup);
     lv_obj_t*lu=lv_label_create(bu);lv_label_set_text(lu,">");
-    lv_obj_set_style_text_color(lu,C_WHITE,0);lv_obj_center(lu);
+    lv_obj_set_style_text_color(lu,TFG(),0);lv_obj_center(lu);
     return vl;}
 
 void buildSettingsPage(){
     lv_obj_t*p=g_pages[2];char b[16];
     mkLbl(p,"SETTINGS",C_AMBER,&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,55);
-    mkLbl(p,"CONFIG",C_GREY,&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,88);
+    mkLbl(p,"CONFIG",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,88);
     snprintf(b,16,"%dnm",g_cfg.scale_nm); s_scale_v=mkSetRow(p,"Scale", 108,b,0,1);
     snprintf(b,16,"%dft",g_cfg.vfilt_ft); s_vfilt_v=mkSetRow(p,"V-Filt",148,b,2,3);
     s_dist_v =mkSetRow(p,"Dist",  188,g_cfg.dist_nm?"NM":"km",4,5);
     s_alt_v  =mkSetRow(p,"Alt",   228,g_cfg.alt_ft?"ft":"m",  6,7);
-    mkLbl(p,"DISPLAY",C_GREY,&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,262);
+    mkLbl(p,"DISPLAY",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,262);
     snprintf(b,16,"%d",g_cfg.brightness); s_bright_v=mkSetRow(p,"Bright",282,b,8,9);
     s_theme_v=mkSetRow(p,"Theme",322,g_cfg.dark?"DARK":"LIGHT",12,13);
-    mkLbl(p,"TRAFFIC",C_GREY,&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,358);
+    mkLbl(p,"TRAFFIC",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,358);
     s_src_v  =mkSetRow(p,"Source",378,kSrcNames[g_cfg.trf_src&3],10,11);
-    // Version — long press unlocks debug page
-    lv_obj_t*ver=mkLblP(p,"v0.5  ●  AT-VIEW",C_GREY,&lv_font_montserrat_14,160,418);
+    lv_obj_t*ver=mkLblP(p,"v0.6  ●  AT-VIEW",TGREY(),&lv_font_montserrat_14,160,418);
     lv_obj_add_flag(ver,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(ver,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(ver,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);}
@@ -449,27 +576,31 @@ void buildDebugPage(){
     lv_obj_t*p=g_dbgPage;
     mkLbl(p,"DEBUG SIM7600",C_BLUE,&lv_font_montserrat_16,LV_ALIGN_TOP_MID,0,58);
     int y=86,dy=26;
-    r_hbgps =mkDbgL(p,y,"HB GPS","---",C_GREY);r_hblte=mkDbgR(p,y,"HB LTE","---",C_GREY);y+=dy;
-    r_hbsd  =mkDbgL(p,y,"HB SD", "---",C_GREY);r_p5csq=mkDbgR(p,y,"CSQ",   "---",C_GREY);y+=dy;
-    r_http  =mkDbgL(p,y,"HTTP",  "---",C_GREY);r_code =mkDbgR(p,y,"CODE",  "---",C_GREY);y+=dy;
-    r_ss    =mkDbgL(p,y,"SafeSky","---",C_GREY);r_fa   =mkDbgR(p,y,"FastAPI","---",C_GREY);y+=dy;
-    r_lteok =mkDbgL(p,y,"LTE",   "---",C_GREY);r_dis  =mkDbgR(p,y,"DIS",   "---",C_GREY);y+=dy;
-    r_heap  =mkDbgL(p,y,"HEAP",  "---",C_GREY);r_bat  =mkDbgR(p,y,"BAT",   "---",C_GREY);y+=dy;
-    r_p5mode=mkDbgL(p,y,"MODE",  "---",C_GREY);r_pend =mkDbgR(p,y,"PEND",  "---",C_GREY);y+=dy;
-    r_flarmtx=mkDbgL(p,y,"FLARM","T0 R0",C_GREY);r_adsbr=mkDbgR(p,y,"ADSB","0",C_GREY);y+=dy;
-    mkLblP(p,"FLT",C_GREY,&lv_font_montserrat_14,80,y);
-    r_flt=mkLblP(p,"---",C_WHITE,&lv_font_montserrat_14,158,y);
-    mkLbl(p,"swipe to exit",C_GREY,&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-55);}
+    r_hbgps =mkDbgL(p,y,"HB GPS","---",TGREY());r_hblte=mkDbgR(p,y,"HB LTE","---",TGREY());y+=dy;
+    r_hbsd  =mkDbgL(p,y,"HB SD", "---",TGREY());r_p5csq=mkDbgR(p,y,"CSQ",   "---",TGREY());y+=dy;
+    r_http  =mkDbgL(p,y,"HTTP",  "---",TGREY());r_code =mkDbgR(p,y,"CODE",  "---",TGREY());y+=dy;
+    r_ss    =mkDbgL(p,y,"SafeSky","---",TGREY());r_fa   =mkDbgR(p,y,"FastAPI","---",TGREY());y+=dy;
+    r_lteok =mkDbgL(p,y,"LTE",   "---",TGREY());r_dis  =mkDbgR(p,y,"DIS",   "---",TGREY());y+=dy;
+    r_heap  =mkDbgL(p,y,"HEAP",  "---",TGREY());r_bat  =mkDbgR(p,y,"BAT",   "---",TGREY());y+=dy;
+    r_p5mode=mkDbgL(p,y,"MODE",  "---",TGREY());r_pend =mkDbgR(p,y,"PEND",  "---",TGREY());y+=dy;
+    r_flarmtx=mkDbgL(p,y,"FLARM","T0 R0",TGREY());r_adsbr=mkDbgR(p,y,"ADSB","0",TGREY());y+=dy;
+    mkLblP(p,"FLT",TGREY(),&lv_font_montserrat_14,80,y);
+    r_flt=mkLblP(p,"---",TFG(),&lv_font_montserrat_14,158,y);
+    mkLbl(p,"swipe to exit",TGREY(),&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-55);}
+
+// ── Swipe handlers ────────────────────────────────────────────────────────────
+void createSwipeHandlers(){
+    for(int i=0;i<NUM_PAGES;i++)
+        lv_obj_add_event_cb(g_pages[i],swipeCb,LV_EVENT_ALL,NULL);
+    lv_obj_add_event_cb(g_dbgPage,swipeCb,LV_EVENT_ALL,NULL);}
 
 // ── Update all live data ──────────────────────────────────────────────────────
 void updateAllPages(){
     char b[32];
     // Status page
-    lv_label_set_text(r_title,g_connected?"AT-CORE":"SEARCHING AT-CORE...");
-    lv_obj_set_style_text_color(r_title,g_connected?C_AMBER:C_GREY,0);
+    lv_label_set_text(r_title,g_connected?"AT-CORE":"AT-VIEW");
+    lv_obj_set_style_text_color(r_title,g_connected?C_GREEN:C_AMBER,0);
     if(g_status.valid){
-        lv_label_set_text(r_mode,modeStr(g_status.mode));
-        lv_obj_set_style_text_color(r_mode,modeCol(g_status.mode),0);
         snprintf(b,32,"GPS %dsat",g_status.gps_sat);updStat(r_gps,b,g_status.gps_fix);
         snprintf(b,32,"LTE %d",g_status.csq);updStat(r_lte,b,g_status.csq>5);
         snprintf(b,32,"SD %dfr",g_status.frames);updStat(r_sd,b,g_status.sd_ok);
@@ -484,8 +615,9 @@ void updateAllPages(){
         for(int ci=0;ci<4;ci++){
             int rel=((cbear[ci]-g_status.hdg)%360+360)%360;
             float ra=(float)rel*(float)M_PI/180.0f;
-            int cx=(int)(RAD_CX+sinf(ra)*(float)(RAD_R+18))-5;
-            int cy=(int)(RAD_CY-cosf(ra)*(float)(RAD_R+18))-8;
+            int r_inner=RAD_R-24;
+            int cx=(int)(RAD_CX+sinf(ra)*(float)r_inner)-5;
+            int cy=(int)(RAD_CY-cosf(ra)*(float)r_inner)-8;
             lv_obj_set_pos(r_card[ci],cx,cy);}}
     // Radar — traffic blips
     if(g_traffic.valid){
@@ -502,41 +634,36 @@ void updateAllPages(){
                 lv_obj_set_style_text_color(r_radar_blip[i],col,0);
                 lv_obj_clear_flag(r_radar_blip[i],LV_OBJ_FLAG_HIDDEN);
                 lv_obj_set_pos(r_radar_cs[i],bx+16,by);lv_label_set_text(r_radar_cs[i],e.cs);
-                lv_obj_set_style_text_color(r_radar_cs[i],e.visible?C_WHITE:C_AMBER,0);
+                lv_obj_set_style_text_color(r_radar_cs[i],e.visible?TFG():C_AMBER,0);
                 lv_obj_clear_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
                 int rel_hft=(int)((e.alt_m-g_status.alt)*3.281f/100.0f);
                 snprintf(b,32,"%+d",rel_hft);
                 lv_obj_set_pos(r_radar_alt[i],bx+16,by+14);lv_label_set_text(r_radar_alt[i],b);
                 lv_obj_set_style_text_color(r_radar_alt[i],col,0);
                 lv_obj_clear_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
-                if(e.climb_fpm>100){
-                    lv_label_set_text(r_radar_arr[i],"↑");
-                    lv_obj_set_style_text_color(r_radar_arr[i],C_GREEN,0);
-                    lv_obj_set_pos(r_radar_arr[i],bx-14,by);
-                    lv_obj_clear_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);
-                }else if(e.climb_fpm<-100){
-                    lv_label_set_text(r_radar_arr[i],"↓");
-                    lv_obj_set_style_text_color(r_radar_arr[i],C_RED,0);
-                    lv_obj_set_pos(r_radar_arr[i],bx-14,by);
-                    lv_obj_clear_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);
-                }else{lv_obj_add_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);}
+                if(e.climb_fpm>100){lv_label_set_text(r_radar_arr[i],"↑");lv_obj_set_style_text_color(r_radar_arr[i],C_GREEN,0);lv_obj_set_pos(r_radar_arr[i],bx-14,by);lv_obj_clear_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);}
+                else if(e.climb_fpm<-100){lv_label_set_text(r_radar_arr[i],"↓");lv_obj_set_style_text_color(r_radar_arr[i],C_RED,0);lv_obj_set_pos(r_radar_arr[i],bx-14,by);lv_obj_clear_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);}
+                else{lv_obj_add_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);}
             }else{
-                lv_obj_add_flag(r_radar_blip[i],LV_OBJ_FLAG_HIDDEN);
-                lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
-                lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
-                lv_obj_add_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);}}}
-    // Alert overlay on radar
+                lv_obj_add_flag(r_radar_blip[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);}}}
+    // CO gauge — needle position + text color
+    if(g_flight.valid){
+        int co=g_flight.co_ppm;
+        lv_arc_set_value(r_co_pill,min(co,150));
+        lv_color_t co_col=co<35?C_GREEN:co<70?C_ORANGE:C_RED;
+        char cb[16];snprintf(cb,16,"CO\n%dppm",co);
+        lv_label_set_text(r_co_val,cb);
+        lv_obj_set_style_text_color(r_co_val,co_col,0);}
+    // Alert overlay
     if(g_alert.valid){
         bool any=g_alert.co||g_alert.gforce||g_alert.rpm||g_alert.traffic;
         if(any){char ab[48]="";
-            if(g_alert.co)    strcat(ab,"▲CO  ");
-            if(g_alert.gforce)strcat(ab,"▲G  ");
-            if(g_alert.rpm)   strcat(ab,"▲RPM  ");
-            if(g_alert.traffic)strcat(ab,"▲TFC");
-            lv_label_set_text(r_aov_text,ab);
-            lv_obj_clear_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);
+            if(g_alert.co)strcat(ab,"▲CO  ");if(g_alert.gforce)strcat(ab,"▲G  ");
+            if(g_alert.rpm)strcat(ab,"▲RPM  ");if(g_alert.traffic)strcat(ab,"▲TFC");
+            lv_label_set_text(r_aov_text,ab);lv_obj_clear_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);
         }else{lv_obj_add_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);}}
-    // Debug page
+    // Debug
     if(g_debug.valid&&g_dbgPage){
         const char*modes[4]={"PRE","FLT","POST","SLP"};
         snprintf(b,32,"%ds",g_debug.hb_gps);lv_label_set_text(r_hbgps,b);lv_obj_set_style_text_color(r_hbgps,hbCol(g_debug.hb_gps),0);
@@ -550,56 +677,17 @@ void updateAllPages(){
         lv_label_set_text(r_lteok,g_debug.lte_ok?"OK":"FAIL");lv_obj_set_style_text_color(r_lteok,g_debug.lte_ok?C_GREEN:C_RED,0);
         lv_label_set_text(r_dis,g_debug.disable_lte?"ON":"OFF");lv_obj_set_style_text_color(r_dis,g_debug.disable_lte?C_AMBER:C_GREEN,0);
         snprintf(b,32,"%dkB",g_debug.heap/1024);lv_label_set_text(r_heap,b);lv_obj_set_style_text_color(r_heap,g_debug.heap>100000?C_GREEN:g_debug.heap>50000?C_AMBER:C_RED,0);
-        if(g_debug.bat_pct<0){lv_label_set_text(r_bat,"---");lv_obj_set_style_text_color(r_bat,C_GREY,0);}
+        if(g_debug.bat_pct<0){lv_label_set_text(r_bat,"---");lv_obj_set_style_text_color(r_bat,TGREY(),0);}
         else{snprintf(b,32,"%d%%",g_debug.bat_pct);lv_label_set_text(r_bat,b);lv_obj_set_style_text_color(r_bat,g_debug.bat_pct>40?C_GREEN:g_debug.bat_pct>20?C_AMBER:C_RED,0);}
         lv_label_set_text(r_p5mode,modes[min(g_debug.mode,3)]);lv_obj_set_style_text_color(r_p5mode,modeCol(g_debug.mode),0);
         snprintf(b,32,"%d",g_debug.pending);lv_label_set_text(r_pend,b);lv_obj_set_style_text_color(r_pend,g_debug.pending==0?C_GREEN:C_AMBER,0);
         snprintf(b,32,"T%d R%d",g_debug.flarm_tx,g_debug.flarm_rx);lv_label_set_text(r_flarmtx,b);
-        lv_obj_set_style_text_color(r_flarmtx,(g_debug.flarm_tx>0||g_debug.flarm_rx>0)?C_GREEN:C_GREY,0);
+        lv_obj_set_style_text_color(r_flarmtx,(g_debug.flarm_tx>0||g_debug.flarm_rx>0)?C_GREEN:TGREY(),0);
         snprintf(b,32,"%d",g_debug.adsb_rx);lv_label_set_text(r_adsbr,b);
-        lv_obj_set_style_text_color(r_adsbr,g_debug.adsb_rx>0?C_GREEN:C_GREY,0);
+        lv_obj_set_style_text_color(r_adsbr,g_debug.adsb_rx>0?C_GREEN:TGREY(),0);
         lv_label_set_text(r_flt,g_debug.fid);}}
 
 bool hasAlert(){return g_alert.valid&&(g_alert.co||g_alert.gforce||g_alert.rpm||g_alert.traffic);}
-
-// ── Boot splash ───────────────────────────────────────────────────────────────
-void runBootSplash(){
-    lv_obj_t*s=lv_scr_act();lv_obj_t*lc;
-    lv_obj_t*tl=lv_label_create(s);lv_label_set_text(tl,"AT-VIEW");
-    lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_32,0);
-    lv_obj_align(tl,LV_ALIGN_TOP_MID,0,115);
-    lv_obj_t*sub=lv_label_create(s);lv_label_set_text(sub,"AeroTrace");
-    lv_obj_set_style_text_color(sub,C_GREY,0);lv_obj_set_style_text_font(sub,&lv_font_montserrat_16,0);
-    lv_obj_align(sub,LV_ALIGN_TOP_MID,0,162);lv_timer_handler();delay(600);
-
-    lc=lv_label_create(s);lv_label_set_text(lc,"  PANEL    ...");
-    lv_obj_set_style_text_color(lc,C_GREY,0);lv_obj_set_style_text_font(lc,&lv_font_montserrat_16,0);
-    lv_obj_set_pos(lc,130,222);lv_timer_handler();delay(350);
-    lv_label_set_text(lc,"● PANEL    OK");lv_obj_set_style_text_color(lc,C_GREEN,0);lv_timer_handler();
-
-    lc=lv_label_create(s);lv_label_set_text(lc,"  LVGL     ...");
-    lv_obj_set_style_text_color(lc,C_GREY,0);lv_obj_set_style_text_font(lc,&lv_font_montserrat_16,0);
-    lv_obj_set_pos(lc,130,252);lv_timer_handler();delay(300);
-    lv_label_set_text(lc,"● LVGL     OK");lv_obj_set_style_text_color(lc,C_GREEN,0);lv_timer_handler();
-
-    lc=lv_label_create(s);lv_label_set_text(lc,"  BLE      ...");
-    lv_obj_set_style_text_color(lc,C_GREY,0);lv_obj_set_style_text_font(lc,&lv_font_montserrat_16,0);
-    lv_obj_set_pos(lc,130,282);lv_timer_handler();delay(300);
-    BLEDevice::init("ATCORE-TRGB");
-    lv_label_set_text(lc,"● BLE      OK");lv_obj_set_style_text_color(lc,C_GREEN,0);lv_timer_handler();
-
-    lc=lv_label_create(s);lv_label_set_text(lc,"  AT-CORE  ...");
-    lv_obj_set_style_text_color(lc,C_GREY,0);lv_obj_set_style_text_font(lc,&lv_font_montserrat_16,0);
-    lv_obj_set_pos(lc,130,312);lv_timer_handler();delay(400);
-    startScan();
-    lv_label_set_text(lc,"● AT-CORE  SCAN");lv_obj_set_style_text_color(lc,C_AMBER,0);lv_timer_handler();
-    delay(900);lv_obj_clean(s);}
-
-// ── Swipe handler — attach to all pages ───────────────────────────────────────
-void createSwipeHandlers(){
-    for(int i=0;i<NUM_PAGES;i++){
-        lv_obj_add_event_cb(g_pages[i],swipeCb,LV_EVENT_ALL,NULL);}
-    lv_obj_add_event_cb(g_dbgPage,swipeCb,LV_EVENT_ALL,NULL);}
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 void setup(){
@@ -607,34 +695,40 @@ void setup(){
     if(!panel.begin()){while(1){Serial.println("Panel FAIL");delay(1000);}}
     Serial.printf("Touch: %s\n",panel.getTouchModelName());
     beginLvglHelper(panel);
-    lv_obj_set_style_bg_color(lv_scr_act(),C_BG,0);
-    cfgLoad();panel.setBrightness(g_cfg.brightness);
-    runBootSplash();
+    cfgLoad();
+    g_dark_theme=g_cfg.dark;
+    lv_obj_set_style_bg_color(lv_scr_act(),TBG(),0);
+    panel.setBrightness(g_cfg.brightness);
+
+    // Create all page containers
     for(int i=0;i<NUM_PAGES;i++){g_pages[i]=mkPage();lv_obj_add_flag(g_pages[i],LV_OBJ_FLAG_HIDDEN);}
     g_dbgPage=mkPage();lv_obj_add_flag(g_dbgPage,LV_OBJ_FLAG_HIDDEN);
-    buildStatusPage();buildRadarPage();buildSettingsPage();buildDebugPage();
+
+    // Build status page first (creates boot label refs), then show and animate
+    buildStatusPage();
     lv_obj_clear_flag(g_pages[0],LV_OBJ_FLAG_HIDDEN);
+    runBootOnPage(); // animates boot labels in place, sets g_bootDone=true
+
+    // Build remaining pages
+    buildRadarPage();buildSettingsPage();buildDebugPage();
     createSwipeHandlers();updSetPage();
     Serial.println("Ready");}
 
 // ── Loop ──────────────────────────────────────────────────────────────────────
 void loop(){
     uint32_t now=millis();
-    // BLE management
     if(g_doReconnect){g_doReconnect=false;startScan();}
     if(g_doConnect&&!g_connected){g_doConnect=false;
         if(connectBLE())Serial.println("[BLE] OK");
         else{delay(2000);startScan();}}
     if(!g_connected&&!g_doConnect){
         static uint32_t ls=0;if(now-ls>8000){ls=now;startScan();}}
-    // Data update
+    if(g_rebuildPages){g_rebuildPages=false;rebuildAllPages();}
     if(g_dataUpdated){g_dataUpdated=false;updateAllPages();}
-    // Alert → force radar page
     bool alert=hasAlert();
     if(alert&&!g_alertForced&&!g_inDebug){
         g_prevPage=g_page;g_alertForced=true;
         if(g_page!=1)switchPage(1);}
     else if(!alert&&g_alertForced){g_alertForced=false;switchPage(g_prevPage);}
-    // Pending navigation from buttons
     if(g_navPending){g_navPending=false;switchPage(g_navPage);}
     lv_timer_handler();delay(2);}
