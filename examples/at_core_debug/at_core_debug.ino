@@ -108,6 +108,7 @@ static lv_obj_t *r_alert_overlay, *r_aov_text;
 static lv_obj_t *r_co_val, *r_co_ball, *r_co_text;
 static lv_obj_t *r_hdr_bat;
 static lv_obj_t *r_hdr_gps, *r_hdr_lte, *r_hdr_wifi, *r_hdr_ble;
+static lv_obj_t *r_hdr_lte_b[4];  // 4 drawn signal bars inside LTE pill
 
 // ── Widget refs — Settings (page 2) ───────────────────────────────────────────
 static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v,*s_theme_v;
@@ -149,6 +150,48 @@ lv_obj_t* mkPage(){
     lv_obj_set_pos(p,0,0);lv_obj_set_style_bg_color(p,TBG(),0);
     lv_obj_set_style_border_width(p,0,0);lv_obj_set_style_pad_all(p,0,0);
     lv_obj_clear_flag(p,LV_OBJ_FLAG_SCROLLABLE);return p;}
+// Tab pill: 68×20 capsule partly outside the bezel — returns the inner label ref
+// Positions are calculated so the pill extends ~10px beyond the display circle edge,
+// creating a demi-capsule "tab stuck to the bezel" effect.
+lv_obj_t* mkTabPill(lv_obj_t*p,const char*t,lv_color_t c,int x,int y){
+    lv_obj_t*b=lv_obj_create(p);lv_obj_set_size(b,68,20);lv_obj_set_pos(b,x,y);
+    lv_obj_set_style_bg_color(b,THDG(),0);lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(b,TRING(),0);lv_obj_set_style_border_width(b,1,0);
+    lv_obj_set_style_radius(b,10,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_set_style_pad_all(b,0,0);
+    lv_obj_clear_flag(b,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,t);
+    lv_obj_set_style_text_color(l,c,0);lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);
+    lv_obj_center(l);return l;}
+// LTE pill: 4 drawn signal bars (bottom-aligned) + "LTE" label, returns label ref
+lv_obj_t* mkLTEPill(lv_obj_t*p,int x,int y){
+    lv_obj_t*b=lv_obj_create(p);lv_obj_set_size(b,68,20);lv_obj_set_pos(b,x,y);
+    lv_obj_set_style_bg_color(b,THDG(),0);lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(b,TRING(),0);lv_obj_set_style_border_width(b,1,0);
+    lv_obj_set_style_radius(b,10,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_set_style_pad_all(b,0,0);
+    lv_obj_clear_flag(b,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+    static const int8_t bh[4]={4,7,10,13};
+    for(int i=0;i<4;i++){
+        r_hdr_lte_b[i]=lv_obj_create(b);lv_obj_set_size(r_hdr_lte_b[i],3,bh[i]);
+        lv_obj_set_pos(r_hdr_lte_b[i],10+i*4,16-bh[i]);
+        lv_obj_set_style_radius(r_hdr_lte_b[i],1,0);
+        lv_obj_set_style_bg_color(r_hdr_lte_b[i],TGREY(),0);lv_obj_set_style_bg_opa(r_hdr_lte_b[i],LV_OPA_COVER,0);
+        lv_obj_set_style_border_width(r_hdr_lte_b[i],0,0);lv_obj_set_style_shadow_opa(r_hdr_lte_b[i],LV_OPA_TRANSP,0);
+        lv_obj_set_style_pad_all(r_hdr_lte_b[i],0,0);
+        lv_obj_clear_flag(r_hdr_lte_b[i],LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);}
+    lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,"LTE");
+    lv_obj_set_style_text_color(l,TGREY(),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);
+    lv_obj_set_pos(l,30,3);return l;}
+// Flash a tab pill (3× blink) when its status becomes active
+static void _flash_cb(void*var,int32_t v){lv_obj_set_style_opa((lv_obj_t*)var,(lv_opa_t)v,0);}
+void flashTab(lv_obj_t*lbl){
+    lv_obj_t*pill=lv_obj_get_parent(lbl);
+    lv_anim_t a;lv_anim_init(&a);lv_anim_set_var(&a,pill);
+    lv_anim_set_exec_cb(&a,(lv_anim_exec_xcb_t)_flash_cb);
+    lv_anim_set_values(&a,LV_OPA_COVER,LV_OPA_20);
+    lv_anim_set_time(&a,160);lv_anim_set_playback_time(&a,160);
+    lv_anim_set_repeat_count(&a,3);lv_anim_start(&a);}
 
 // ── Parsers ───────────────────────────────────────────────────────────────────
 void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
@@ -381,19 +424,18 @@ void buildRadarPage(){
     lv_obj_set_style_text_color(r_radar_hdg,TFG(),0);
     lv_obj_set_style_text_font(r_radar_hdg,&lv_font_montserrat_16,0);lv_obj_center(r_radar_hdg);
 
-    // Battery — left of pill (charge icon or level)
-    r_hdr_bat=lv_label_create(p);lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);
-    lv_obj_set_style_text_color(r_hdr_bat,TGREY(),0);
-    lv_obj_set_style_text_font(r_hdr_bat,&lv_font_montserrat_14,0);lv_obj_set_pos(r_hdr_bat,134,31);
-    // Connectivity column — right of pill (GPS / LTE / WiFi / BLE)
-    r_hdr_gps =lv_label_create(p);lv_label_set_text(r_hdr_gps, LV_SYMBOL_GPS  " GPS");
-    lv_obj_set_style_text_color(r_hdr_gps, TGREY(),0);lv_obj_set_style_text_font(r_hdr_gps, &lv_font_montserrat_12,0);lv_obj_set_pos(r_hdr_gps, 285,23);
-    r_hdr_lte =lv_label_create(p);lv_label_set_text(r_hdr_lte, "LTE");
-    lv_obj_set_style_text_color(r_hdr_lte, TGREY(),0);lv_obj_set_style_text_font(r_hdr_lte, &lv_font_montserrat_12,0);lv_obj_set_pos(r_hdr_lte, 285,36);
-    r_hdr_wifi=lv_label_create(p);lv_label_set_text(r_hdr_wifi,LV_SYMBOL_WIFI " WiFi");
-    lv_obj_set_style_text_color(r_hdr_wifi,TGREY(),0);lv_obj_set_style_text_font(r_hdr_wifi,&lv_font_montserrat_12,0);lv_obj_set_pos(r_hdr_wifi,285,49);
-    r_hdr_ble =lv_label_create(p);lv_label_set_text(r_hdr_ble, LV_SYMBOL_BLUETOOTH " BLE");
-    lv_obj_set_style_text_color(r_hdr_ble, TGREY(),0);lv_obj_set_style_text_font(r_hdr_ble, &lv_font_montserrat_12,0);lv_obj_set_pos(r_hdr_ble, 285,62);
+    // Tab pills hugging the bezel arc (each pill extends ~10px outside the display circle)
+    // Positions: right_edge = circle_boundary(y) + 10, left_edge = right_edge - 68
+    // Left arc:  battery  @ y_c=33: left boundary=119 → pos x=109
+    // Right arc: GPS      @ y_c=33: right boundary=361 → pos x=303
+    //            LTE      @ y_c=57: right boundary=395 → pos x=337
+    //            WiFi     @ y_c=81: right boundary=420 → pos x=362
+    //            BLE      @ y_c=105: right boundary=438 → pos x=380
+    r_hdr_bat  = mkTabPill(p, LV_SYMBOL_CHARGE,          TGREY(), 109, 23);
+    r_hdr_gps  = mkTabPill(p, LV_SYMBOL_GPS " GPS",       TGREY(), 303, 23);
+    r_hdr_lte  = mkLTEPill(p, 337, 47);
+    r_hdr_wifi = mkTabPill(p, LV_SYMBOL_WIFI " WiFi",     TGREY(), 362, 71);
+    r_hdr_ble  = mkTabPill(p, LV_SYMBOL_BLUETOOTH " BLE", TGREY(), 380, 95);
 
     // Outer ring
     lv_obj_t*ro=lv_obj_create(p);lv_obj_set_size(ro,RAD_R*2,RAD_R*2);
@@ -626,13 +668,31 @@ void updateAllPages(){
         updStat(r_adsb,"ADS-B",g_status.adsb_ok);
         if(g_status.gps_fix){snprintf(b,32,"%.4f / %.4f",g_status.lat,g_status.lon);lv_label_set_text(r_coords,b);}
     }else{updStat(r_ble,"BLE",g_connected);}
-    // Header — connectivity column (right) + battery (left)
-    {bool gps_ok=g_status.valid&&g_status.gps_fix;
+    // Header — connectivity tabs + battery
+    // Inactive: dim gray text + dark border. Active: bright color + bright border + flash on activation.
+    {static bool prev_gps=false,prev_lte=false,prev_ble=false;
+     bool gps_ok=g_status.valid&&g_status.gps_fix;
      bool lte_ok=g_status.valid&&g_status.csq>5;
-     lv_obj_set_style_text_color(r_hdr_gps, gps_ok?C_GREEN:TGREY(),0);
-     lv_obj_set_style_text_color(r_hdr_lte, lte_ok?C_GREEN:TGREY(),0);
-     lv_obj_set_style_text_color(r_hdr_ble, g_connected?C_BLUE:TGREY(),0);
-     // Battery: charge icon if unknown, level icon+% otherwise
+     // Flash blink when status transitions to active
+     if(gps_ok&&!prev_gps)flashTab(r_hdr_gps);
+     if(lte_ok&&!prev_lte)flashTab(r_hdr_lte);
+     if(g_connected&&!prev_ble)flashTab(r_hdr_ble);
+     prev_gps=gps_ok;prev_lte=lte_ok;prev_ble=g_connected;
+     // GPS tab
+     lv_obj_set_style_text_color(r_hdr_gps,gps_ok?C_GREEN:TGREY(),0);
+     lv_obj_set_style_border_color(lv_obj_get_parent(r_hdr_gps),gps_ok?C_GREEN:TRING(),0);
+     // LTE tab — signal bars colored by strength
+     {int csq=g_status.valid?g_status.csq:0;
+      int bars=csq>20?4:csq>14?3:csq>8?2:csq>3?1:0;
+      for(int bb=0;bb<4;bb++)
+          lv_obj_set_style_bg_color(r_hdr_lte_b[bb],bb<bars?C_GREEN:TGREY(),0);
+      lv_obj_set_style_text_color(r_hdr_lte,bars>0?C_GREEN:TGREY(),0);
+      lv_obj_set_style_border_color(lv_obj_get_parent(r_hdr_lte),lte_ok?C_GREEN:TRING(),0);}
+     // WiFi tab (future — always dim)
+     // BLE tab
+     lv_obj_set_style_text_color(r_hdr_ble,g_connected?C_BLUE:TGREY(),0);
+     lv_obj_set_style_border_color(lv_obj_get_parent(r_hdr_ble),g_connected?C_BLUE:TRING(),0);
+     // Battery
      if(!g_debug.valid||g_debug.bat_pct<0){
          lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);
          lv_obj_set_style_text_color(r_hdr_bat,g_connected?C_GREEN:TGREY(),0);
