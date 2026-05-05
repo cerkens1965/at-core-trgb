@@ -88,6 +88,7 @@ static volatile bool    g_navPending=false;
 static volatile uint8_t g_navPage=0;
 static bool             g_rebuildPages=false;
 static bool             g_bootDone=false;
+static bool             g_autoNavDone=false;
 
 // ── Widget refs — Status page (page 0) ───────────────────────────────────────
 static lv_obj_t *r_title;
@@ -104,7 +105,8 @@ static lv_obj_t *r_radar_cs[MAX_TRF],*r_radar_alt[MAX_TRF];
 static lv_obj_t *r_trf_img[MAX_TRF],*r_trf_vect[MAX_TRF];
 static lv_point_t r_vect_pts[MAX_TRF][2];
 static lv_obj_t *r_alert_overlay, *r_aov_text;
-static lv_obj_t *r_co_pill, *r_co_val;
+static lv_obj_t *r_co_val, *r_co_ball, *r_co_text;
+static lv_obj_t *r_rflag_gps, *r_rflag_ble, *r_rflag_lte;
 
 // ── Widget refs — Settings (page 2) ───────────────────────────────────────────
 static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v,*s_theme_v;
@@ -192,7 +194,7 @@ static void notifyD(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){if(l>=BLE_
 
 class ATCCB:public BLEClientCallbacks{
     void onConnect(BLEClient*)override{g_connected=true;g_dataUpdated=true;Serial.println("[BLE] Connected");}
-    void onDisconnect(BLEClient*)override{g_connected=false;
+    void onDisconnect(BLEClient*)override{g_connected=false;g_autoNavDone=false;
         g_status.valid=g_flight.valid=g_traffic.valid=g_alert.valid=g_debug.valid=false;
         g_dataUpdated=true;g_doReconnect=true;Serial.println("[BLE] Disconnected");}};
 class ATCAdv:public BLEAdvertisedDeviceCallbacks{
@@ -378,6 +380,14 @@ void buildRadarPage(){
     lv_obj_set_style_text_color(r_radar_hdg,TFG(),0);
     lv_obj_set_style_text_font(r_radar_hdg,&lv_font_montserrat_16,0);lv_obj_center(r_radar_hdg);
 
+    // Status flags: GPS (left of pill), BLE + LTE (right of pill)
+    r_rflag_gps=lv_label_create(p);lv_label_set_text(r_rflag_gps,"GPS");
+    lv_obj_set_style_text_color(r_rflag_gps,TGREY(),0);lv_obj_set_style_text_font(r_rflag_gps,&lv_font_montserrat_12,0);lv_obj_set_pos(r_rflag_gps,105,40);
+    r_rflag_ble=lv_label_create(p);lv_label_set_text(r_rflag_ble,"BLE");
+    lv_obj_set_style_text_color(r_rflag_ble,TGREY(),0);lv_obj_set_style_text_font(r_rflag_ble,&lv_font_montserrat_12,0);lv_obj_set_pos(r_rflag_ble,299,40);
+    r_rflag_lte=lv_label_create(p);lv_label_set_text(r_rflag_lte,"LTE");
+    lv_obj_set_style_text_color(r_rflag_lte,TGREY(),0);lv_obj_set_style_text_font(r_rflag_lte,&lv_font_montserrat_12,0);lv_obj_set_pos(r_rflag_lte,348,40);
+
     // Outer ring
     lv_obj_t*ro=lv_obj_create(p);lv_obj_set_size(ro,RAD_R*2,RAD_R*2);
     lv_obj_set_pos(ro,RAD_CX-RAD_R,RAD_CY-RAD_R);lv_obj_set_style_radius(ro,LV_RADIUS_CIRCLE,0);
@@ -451,25 +461,23 @@ void buildRadarPage(){
             lv_obj_clear_flag(ba,LV_OBJ_FLAG_CLICKABLE);
             lv_obj_set_style_opa(ba,LV_OPA_TRANSP,LV_PART_KNOB);}
     }
-    // CO needle — thin arc indicator moving across the bands (no background shown)
-    r_co_pill=lv_arc_create(p);
-    lv_obj_set_size(r_co_pill,440,440);lv_obj_set_pos(r_co_pill,20,20);
-    lv_arc_set_bg_start_angle(r_co_pill,30);lv_arc_set_bg_end_angle(r_co_pill,60);
-    lv_arc_set_range(r_co_pill,0,150);lv_arc_set_value(r_co_pill,0);
-    lv_obj_set_style_arc_width(r_co_pill,0,LV_PART_MAIN);
-    lv_obj_set_style_arc_color(r_co_pill,TFG(),LV_PART_INDICATOR);
-    lv_obj_set_style_arc_width(r_co_pill,4,LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(r_co_pill,LV_OPA_TRANSP,0);
-    lv_obj_set_style_shadow_opa(r_co_pill,LV_OPA_TRANSP,0);
-    lv_obj_set_style_pad_all(r_co_pill,0,0);
-    lv_obj_clear_flag(r_co_pill,LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_style_opa(r_co_pill,LV_OPA_TRANSP,LV_PART_KNOB);
-    // CO label — inside ring, lower-right quadrant, clearly associated with the arc
-    r_co_val=lv_label_create(p);lv_label_set_text(r_co_val,"CO\n---");
+    // CO ball cursor — 12×12 circle sliding along the arc (LVGL 30°–60°) by CO ppm
+    // Arc midline radius = 440/2 - 16/2 = 212px from center (240,240)
+    r_co_ball=lv_obj_create(p);lv_obj_set_size(r_co_ball,12,12);
+    lv_obj_set_style_radius(r_co_ball,LV_RADIUS_CIRCLE,0);
+    lv_obj_set_style_bg_color(r_co_ball,TBG(),0);lv_obj_set_style_bg_opa(r_co_ball,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(r_co_ball,TFG(),0);lv_obj_set_style_border_width(r_co_ball,2,0);
+    lv_obj_set_style_shadow_opa(r_co_ball,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(r_co_ball,0,0);
+    lv_obj_clear_flag(r_co_ball,LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_pos(r_co_ball,(int)(240+212*0.866f)-6,(int)(240+212*0.5f)-6);
+    // CO text label — just inside the arc at midpoint direction (LVGL 45°, r≈155)
+    r_co_text=lv_label_create(p);lv_label_set_text(r_co_text,"CO");
+    lv_obj_set_style_text_color(r_co_text,TGREY(),0);
+    lv_obj_set_style_text_font(r_co_text,&lv_font_montserrat_12,0);lv_obj_set_pos(r_co_text,344,334);
+    // CO ppm value label
+    r_co_val=lv_label_create(p);lv_label_set_text(r_co_val,"---");
     lv_obj_set_style_text_color(r_co_val,TGREY(),0);
-    lv_obj_set_style_text_font(r_co_val,&lv_font_montserrat_12,0);
-    lv_obj_set_style_text_align(r_co_val,LV_TEXT_ALIGN_CENTER,0);
-    lv_obj_set_pos(r_co_val,336,358);
+    lv_obj_set_style_text_font(r_co_val,&lv_font_montserrat_12,0);lv_obj_set_pos(r_co_val,341,350);
 
     // Traffic VL3 icons (bitmap rotated) + speed vector + callsign + alt
     for(int i=0;i<MAX_TRF;i++){
@@ -611,6 +619,14 @@ void updateAllPages(){
         updStat(r_adsb,"ADS-B",g_status.adsb_ok);
         if(g_status.gps_fix){snprintf(b,32,"%.4f / %.4f",g_status.lat,g_status.lon);lv_label_set_text(r_coords,b);}
     }else{updStat(r_ble,"BLE",g_connected);}
+    // Radar flags (GPS/BLE/LTE indicators near heading pill)
+    {bool gps_ok=g_status.valid&&g_status.gps_fix;bool lte_ok=g_status.valid&&g_status.csq>5;
+     lv_label_set_text(r_rflag_gps,gps_ok?"●GPS":"GPS");lv_obj_set_style_text_color(r_rflag_gps,gps_ok?C_GREEN:TGREY(),0);
+     lv_label_set_text(r_rflag_ble,g_connected?"●BLE":"BLE");lv_obj_set_style_text_color(r_rflag_ble,g_connected?C_GREEN:TGREY(),0);
+     lv_label_set_text(r_rflag_lte,lte_ok?"●LTE":"LTE");lv_obj_set_style_text_color(r_rflag_lte,lte_ok?C_GREEN:TGREY(),0);}
+    // Auto-navigate to radar once BLE+GPS ready (one-shot per connection)
+    if(!g_autoNavDone&&g_connected&&g_status.valid&&g_status.gps_fix&&g_page==0){
+        g_autoNavDone=true;g_navPending=true;g_navPage=1;}
     // Radar — heading + cardinal labels
     if(g_status.valid){
         snprintf(b,32,"%d°",g_status.hdg);lv_label_set_text(r_radar_hdg,b);
@@ -660,14 +676,15 @@ void updateAllPages(){
             }else{
                 lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
                 lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);}}}
-    // CO gauge — needle position + text color
+    // CO gauge — ball position + ppm label
     if(g_flight.valid){
         int co=g_flight.co_ppm;
-        lv_arc_set_value(r_co_pill,min(co,150));
+        float co_a=(30.0f+fminf((float)co,150.0f)/150.0f*30.0f)*(float)M_PI/180.0f;
+        lv_obj_set_pos(r_co_ball,(int)(240.0f+212.0f*cosf(co_a))-6,(int)(240.0f+212.0f*sinf(co_a))-6);
         lv_color_t co_col=co<35?C_GREEN:co<70?C_ORANGE:C_RED;
-        char cb[16];snprintf(cb,16,"CO\n%dppm",co);
-        lv_label_set_text(r_co_val,cb);
-        lv_obj_set_style_text_color(r_co_val,co_col,0);}
+        char cb[12];snprintf(cb,12,"%dppm",co);
+        lv_label_set_text(r_co_val,cb);lv_obj_set_style_text_color(r_co_val,co_col,0);
+        lv_obj_set_style_text_color(r_co_text,co_col,0);}
     // Alert overlay
     if(g_alert.valid){
         bool any=g_alert.co||g_alert.gforce||g_alert.rpm||g_alert.traffic;
