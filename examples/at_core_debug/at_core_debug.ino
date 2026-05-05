@@ -35,11 +35,6 @@ LilyGo_RGBPanel panel;
 #define C_BLUE   lv_color_hex(0x60a5fa)
 #define C_RED    lv_color_hex(0xef4444)
 #define C_ORANGE lv_color_hex(0xf97316)
-// Pill scheme — inactive: light gray + dim icon; active: same gray + neon-green border + black icon
-#define PILL_BG   lv_color_hex(0x8090a0)  // light-medium slate gray (all states)
-#define PILL_IDM  lv_color_hex(0xdde4ec)  // inactive icon/text: near-white dim
-#define PILL_ACT  lv_color_hex(0x0d1117)  // active icon/text: near-black
-#define PILL_GRN  lv_color_hex(0x00ff55)  // active border: neon green
 
 static bool g_dark_theme = true;
 static inline lv_color_t TBG()  {return g_dark_theme?lv_color_hex(0x000000):lv_color_hex(0xFFFFFF);}
@@ -48,6 +43,8 @@ static inline lv_color_t TGREY(){return g_dark_theme?lv_color_hex(0x6b7280):lv_c
 static inline lv_color_t TGRID(){return g_dark_theme?lv_color_hex(0x2a2a2a):lv_color_hex(0xd0d0d0);}
 static inline lv_color_t TRING(){return g_dark_theme?lv_color_hex(0x555555):lv_color_hex(0x9ca3af);}
 static inline lv_color_t THDG() {return g_dark_theme?lv_color_hex(0x0d1b2a):lv_color_hex(0xe2e8f0);}
+static inline lv_color_t PILL_IC_OFF(){return g_dark_theme?lv_color_hex(0x2d3f52):lv_color_hex(0xb0bcc8);}
+static inline lv_color_t PILL_IC_ON() {return g_dark_theme?lv_color_hex(0xffffff):lv_color_hex(0x0d1117);}
 
 // ── Data structs ──────────────────────────────────────────────────────────────
 struct StatusData {
@@ -158,25 +155,22 @@ lv_obj_t* mkPage(){
     lv_obj_set_pos(p,0,0);lv_obj_set_style_bg_color(p,TBG(),0);
     lv_obj_set_style_border_width(p,0,0);lv_obj_set_style_pad_all(p,0,0);
     lv_obj_clear_flag(p,LV_OBJ_FLAG_SCROLLABLE);return p;}
-// Tab pill: 52×32 capsule, partly outside bezel. Returns inner label ref.
-// Active state = neon-green border (set in updateAllPages), inactive = no border.
-lv_obj_t* mkTabPill(lv_obj_t*p,const char*t,lv_color_t c,int x,int y){
+// Tab pill: 52×32 invisible hit-zone, icon floats freely. Returns inner label ref.
+lv_obj_t* mkTabPill(lv_obj_t*p,const char*t,int x,int y){
     lv_obj_t*b=lv_obj_create(p);lv_obj_set_size(b,52,32);lv_obj_set_pos(b,x,y);
-    lv_obj_set_style_bg_color(b,PILL_BG,0);lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
-    lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_border_opa(b,LV_OPA_TRANSP,0);
-    lv_obj_set_style_radius(b,16,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
-    lv_obj_set_style_pad_all(b,0,0);lv_obj_set_style_clip_corner(b,true,0);
+    lv_obj_set_style_bg_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_set_style_pad_all(b,0,0);
     lv_obj_clear_flag(b,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,t);
-    lv_obj_set_style_text_color(l,PILL_IDM,0);lv_obj_set_style_text_font(l,&lv_font_montserrat_16,0);
+    lv_obj_set_style_text_color(l,PILL_IC_OFF(),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_16,0);
     lv_obj_center(l);return l;}
 // LTE pill: 4 drawn signal bars (bottom-aligned), returns dummy label ref for parent lookups
 lv_obj_t* mkLTEPill(lv_obj_t*p,int x,int y){
     lv_obj_t*b=lv_obj_create(p);lv_obj_set_size(b,52,32);lv_obj_set_pos(b,x,y);
-    lv_obj_set_style_bg_color(b,PILL_BG,0);lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
-    lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_border_opa(b,LV_OPA_TRANSP,0);
-    lv_obj_set_style_radius(b,16,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
-    lv_obj_set_style_pad_all(b,0,0);lv_obj_set_style_clip_corner(b,true,0);
+    lv_obj_set_style_bg_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_set_style_pad_all(b,0,0);
     lv_obj_clear_flag(b,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
     // 4 signal bars centered in 52×32 — bar widths 3px, gap 2px, bottom at y=27
     static const int8_t bh[4]={5,8,12,16};
@@ -184,23 +178,22 @@ lv_obj_t* mkLTEPill(lv_obj_t*p,int x,int y){
         r_hdr_lte_b[i]=lv_obj_create(b);lv_obj_set_size(r_hdr_lte_b[i],3,bh[i]);
         lv_obj_set_pos(r_hdr_lte_b[i],17+i*5,27-bh[i]);
         lv_obj_set_style_radius(r_hdr_lte_b[i],1,0);
-        lv_obj_set_style_bg_color(r_hdr_lte_b[i],PILL_IDM,0);lv_obj_set_style_bg_opa(r_hdr_lte_b[i],LV_OPA_COVER,0);
+        lv_obj_set_style_bg_color(r_hdr_lte_b[i],PILL_IC_OFF(),0);lv_obj_set_style_bg_opa(r_hdr_lte_b[i],LV_OPA_COVER,0);
         lv_obj_set_style_border_width(r_hdr_lte_b[i],0,0);lv_obj_set_style_shadow_opa(r_hdr_lte_b[i],LV_OPA_TRANSP,0);
         lv_obj_set_style_pad_all(r_hdr_lte_b[i],0,0);
         lv_obj_clear_flag(r_hdr_lte_b[i],LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);}
     // Invisible dummy label — anchor for lv_obj_get_parent() in flashTab/updateAllPages
     lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,"");
     lv_obj_set_style_opa(l,LV_OPA_TRANSP,0);lv_obj_center(l);return l;}
-// Image pill — same container as mkTabPill, image centered, recolorable
+// Image pill — transparent hit-zone, image floats freely, recolorable
 lv_obj_t* mkImgPill(lv_obj_t*p,const lv_img_dsc_t*src,int x,int y){
     lv_obj_t*b=lv_obj_create(p);lv_obj_set_size(b,52,32);lv_obj_set_pos(b,x,y);
-    lv_obj_set_style_bg_color(b,PILL_BG,0);lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
-    lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_border_opa(b,LV_OPA_TRANSP,0);
-    lv_obj_set_style_radius(b,16,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
-    lv_obj_set_style_pad_all(b,0,0);lv_obj_set_style_clip_corner(b,true,0);
+    lv_obj_set_style_bg_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_set_style_pad_all(b,0,0);
     lv_obj_clear_flag(b,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t*img=lv_img_create(b);lv_img_set_src(img,src);
-    lv_obj_set_style_img_recolor(img,PILL_IDM,0);
+    lv_obj_set_style_img_recolor(img,PILL_IC_OFF(),0);
     lv_obj_set_style_img_recolor_opa(img,LV_OPA_COVER,0);
     lv_obj_center(img);return img;}
 // Flash a tab pill (3× blink) when its status becomes active
@@ -444,22 +437,22 @@ void buildRadarPage(){
     lv_obj_set_style_text_color(r_radar_hdg,TFG(),0);
     lv_obj_set_style_text_font(r_radar_hdg,&lv_font_montserrat_16,0);lv_obj_center(r_radar_hdg);
 
-    // Tab pills 52×32 — left arc shifted inward so icons/text clear the physical bezel
-    // (effective display radius ~226px vs mathematical 240px → ~14px extra bezel margin)
-    // Left:  Battery  y_c=96  → x=44   (icon center x=70, 4px inside phys bezel)
-    //        SafeSky  y_c=134 → x=26   (icon center x=52, 12px inside phys bezel)
-    //        FLARM    y_c=172 → x=8    (icon center x=34, 9px inside phys bezel)
-    //        ADS-B    y_c=210 → x=8    (text center x=34, 18px inside phys bezel)
-    // Right: GPS      y_c=96  x=388  LTE y_c=134 x=411  WiFi y_c=172 x=426  BLE y_c=210 x=434
-    r_hdr_bat  = mkTabPill(p, LV_SYMBOL_CHARGE, PILL_IDM,  44, 80);
-    r_hdr_sky  = mkImgPill(p, &img_safesky,  26, 118);
-    r_hdr_flrm = mkImgPill(p, &img_flarm,     8, 156);
-    r_hdr_adsb = mkTabPill(p, "ADS-B",       PILL_IDM,   8, 194);
-    lv_obj_set_style_text_font(r_hdr_adsb,&lv_font_montserrat_12,0);
-    r_hdr_gps  = mkTabPill(p, LV_SYMBOL_GPS,        PILL_IDM, 388, 80);
+    // Tab pills 52×32 — outer edge is AT the display circle boundary (8-12px behind bezel).
+    // The circular LCD naturally clips the outer rounded corner → flat outer edge = "D" shape.
+    // Only the inner rounded end (radius=16 half-circle) is fully visible.
+    // Left:  Battery  y_c=96  x=40   SafeSky y_c=134 x=17   FLARM y_c=172 x=2   ADS-B y_c=210 x=-6
+    // Right: GPS      y_c=96  x=388  LTE     y_c=134 x=411  WiFi  y_c=172 x=426  BLE   y_c=210 x=434
+    r_hdr_bat  = mkTabPill(p, LV_SYMBOL_CHARGE,       40, 80);
+    r_hdr_sky  = mkImgPill(p, &img_safesky,           17, 118);
+    r_hdr_flrm = mkImgPill(p, &img_flarm,              2, 156);
+    r_hdr_adsb = mkTabPill(p, "ADS-B",                -6, 194);
+    // ADS-B: font_10 + shift label toward visible inner side so text clears the physical bezel
+    lv_obj_set_style_text_font(r_hdr_adsb,&lv_font_montserrat_10,0);
+    lv_obj_align(r_hdr_adsb, LV_ALIGN_CENTER, 12, 0);
+    r_hdr_gps  = mkTabPill(p, LV_SYMBOL_GPS,         388, 80);
     r_hdr_lte  = mkLTEPill(p, 411, 118);
-    r_hdr_wifi = mkTabPill(p, LV_SYMBOL_WIFI,       PILL_IDM, 426, 156);
-    r_hdr_ble  = mkTabPill(p, LV_SYMBOL_BLUETOOTH,  PILL_IDM, 434, 194);
+    r_hdr_wifi = mkTabPill(p, LV_SYMBOL_WIFI,        426, 156);
+    r_hdr_ble  = mkTabPill(p, LV_SYMBOL_BLUETOOTH,   434, 194);
 
     // Outer ring
     lv_obj_t*ro=lv_obj_create(p);lv_obj_set_size(ro,RAD_R*2,RAD_R*2);
@@ -728,8 +721,7 @@ void updateRadarDR(){
             lv_obj_set_pos(r_radar_cs[i],sx+12,sy-8);lv_label_set_text(r_radar_cs[i],e.cs);
             lv_obj_set_style_text_color(r_radar_cs[i],e.visible?TFG():C_AMBER,0);
             lv_obj_clear_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
-            // e.alt_m = "a" field = delta altitude in hundreds of feet (TCAS convention)
-            snprintf(b,32,"%+d",e.alt_m);
+            snprintf(b,32,"%+d",e.alt_m); // already delta in hundreds of feet from AT-CORE
             lv_obj_set_pos(r_radar_alt[i],sx+12,sy+6);lv_label_set_text(r_radar_alt[i],b);
             lv_obj_set_style_text_color(r_radar_alt[i],col,0);
             lv_obj_clear_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
@@ -759,33 +751,17 @@ void updateAllPages(){
      if(lte_ok&&!prev_lte)flashTab(r_hdr_lte);
      if(g_connected&&!prev_ble)flashTab(r_hdr_ble);
      prev_gps=gps_ok;prev_lte=lte_ok;prev_ble=g_connected;
-     // Helper: toggle pill border (neon-green when active) + icon color
-     // bg stays PILL_BG in all cases — only border and icon/text color change
-     #define SET_PILL_TXT(lbl,act) do{ \
-         lv_obj_t*_p=lv_obj_get_parent(lbl); \
-         lv_obj_set_style_border_color(_p,PILL_GRN,0); \
-         lv_obj_set_style_border_width(_p,(act)?3:0,0); \
-         lv_obj_set_style_border_opa(_p,(act)?LV_OPA_COVER:LV_OPA_TRANSP,0); \
-         lv_obj_set_style_text_color(lbl,(act)?PILL_ACT:PILL_IDM,0); \
-     }while(0)
-     #define SET_PILL_IMG(img,act) do{ \
-         lv_obj_t*_p=lv_obj_get_parent(img); \
-         lv_obj_set_style_border_color(_p,PILL_GRN,0); \
-         lv_obj_set_style_border_width(_p,(act)?3:0,0); \
-         lv_obj_set_style_border_opa(_p,(act)?LV_OPA_COVER:LV_OPA_TRANSP,0); \
-         lv_obj_set_style_img_recolor(img,(act)?PILL_ACT:PILL_IDM,0); \
-     }while(0)
+     #define SET_PILL_TXT(lbl,act) \
+         lv_obj_set_style_text_color(lbl,(act)?PILL_IC_ON():PILL_IC_OFF(),0)
+     #define SET_PILL_IMG(img,act) \
+         lv_obj_set_style_img_recolor(img,(act)?PILL_IC_ON():PILL_IC_OFF(),0)
      // GPS
      SET_PILL_TXT(r_hdr_gps, gps_ok);
-     // LTE — bars reflect signal level, pill border reflects lte_ok
+     // LTE — bars reflect signal level
      {int csq=g_status.valid?g_status.csq:0;
       int bars=csq>20?4:csq>14?3:csq>8?2:csq>3?1:0;
-      lv_obj_t*_p=lv_obj_get_parent(r_hdr_lte);
-      lv_obj_set_style_border_color(_p,PILL_GRN,0);
-      lv_obj_set_style_border_width(_p,lte_ok?3:0,0);
-      lv_obj_set_style_border_opa(_p,lte_ok?LV_OPA_COVER:LV_OPA_TRANSP,0);
       for(int bb=0;bb<4;bb++)
-          lv_obj_set_style_bg_color(r_hdr_lte_b[bb],bb<bars?PILL_ACT:PILL_IDM,0);}
+          lv_obj_set_style_bg_color(r_hdr_lte_b[bb],bb<bars?PILL_IC_ON():PILL_IC_OFF(),0);}
      // WiFi — always inactive (T-RGB has no WiFi ground link)
      SET_PILL_TXT(r_hdr_wifi, false);
      // BLE
