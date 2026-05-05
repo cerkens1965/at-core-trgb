@@ -106,7 +106,8 @@ static lv_obj_t *r_trf_img[MAX_TRF],*r_trf_vect[MAX_TRF];
 static lv_point_t r_vect_pts[MAX_TRF][2];
 static lv_obj_t *r_alert_overlay, *r_aov_text;
 static lv_obj_t *r_co_val, *r_co_ball, *r_co_text;
-static lv_obj_t *r_rflag_gps, *r_rflag_ble, *r_rflag_lte;
+static lv_obj_t *r_hdr_bat;
+static lv_obj_t *r_hdr_gps, *r_hdr_lte, *r_hdr_wifi, *r_hdr_ble;
 
 // ── Widget refs — Settings (page 2) ───────────────────────────────────────────
 static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v,*s_theme_v;
@@ -380,13 +381,19 @@ void buildRadarPage(){
     lv_obj_set_style_text_color(r_radar_hdg,TFG(),0);
     lv_obj_set_style_text_font(r_radar_hdg,&lv_font_montserrat_16,0);lv_obj_center(r_radar_hdg);
 
-    // Status flags: GPS (left of pill), BLE + LTE (right of pill)
-    r_rflag_gps=lv_label_create(p);lv_label_set_text(r_rflag_gps,"GPS");
-    lv_obj_set_style_text_color(r_rflag_gps,TGREY(),0);lv_obj_set_style_text_font(r_rflag_gps,&lv_font_montserrat_12,0);lv_obj_set_pos(r_rflag_gps,105,40);
-    r_rflag_ble=lv_label_create(p);lv_label_set_text(r_rflag_ble,"BLE");
-    lv_obj_set_style_text_color(r_rflag_ble,TGREY(),0);lv_obj_set_style_text_font(r_rflag_ble,&lv_font_montserrat_12,0);lv_obj_set_pos(r_rflag_ble,299,40);
-    r_rflag_lte=lv_label_create(p);lv_label_set_text(r_rflag_lte,"LTE");
-    lv_obj_set_style_text_color(r_rflag_lte,TGREY(),0);lv_obj_set_style_text_font(r_rflag_lte,&lv_font_montserrat_12,0);lv_obj_set_pos(r_rflag_lte,348,40);
+    // Battery — left of pill (charge icon or level)
+    r_hdr_bat=lv_label_create(p);lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);
+    lv_obj_set_style_text_color(r_hdr_bat,TGREY(),0);
+    lv_obj_set_style_text_font(r_hdr_bat,&lv_font_montserrat_14,0);lv_obj_set_pos(r_hdr_bat,134,31);
+    // Connectivity column — right of pill (GPS / LTE / WiFi / BLE)
+    r_hdr_gps =lv_label_create(p);lv_label_set_text(r_hdr_gps, LV_SYMBOL_GPS  " GPS");
+    lv_obj_set_style_text_color(r_hdr_gps, TGREY(),0);lv_obj_set_style_text_font(r_hdr_gps, &lv_font_montserrat_12,0);lv_obj_set_pos(r_hdr_gps, 285,23);
+    r_hdr_lte =lv_label_create(p);lv_label_set_text(r_hdr_lte, "LTE");
+    lv_obj_set_style_text_color(r_hdr_lte, TGREY(),0);lv_obj_set_style_text_font(r_hdr_lte, &lv_font_montserrat_12,0);lv_obj_set_pos(r_hdr_lte, 285,36);
+    r_hdr_wifi=lv_label_create(p);lv_label_set_text(r_hdr_wifi,LV_SYMBOL_WIFI " WiFi");
+    lv_obj_set_style_text_color(r_hdr_wifi,TGREY(),0);lv_obj_set_style_text_font(r_hdr_wifi,&lv_font_montserrat_12,0);lv_obj_set_pos(r_hdr_wifi,285,49);
+    r_hdr_ble =lv_label_create(p);lv_label_set_text(r_hdr_ble, LV_SYMBOL_BLUETOOTH " BLE");
+    lv_obj_set_style_text_color(r_hdr_ble, TGREY(),0);lv_obj_set_style_text_font(r_hdr_ble, &lv_font_montserrat_12,0);lv_obj_set_pos(r_hdr_ble, 285,62);
 
     // Outer ring
     lv_obj_t*ro=lv_obj_create(p);lv_obj_set_size(ro,RAD_R*2,RAD_R*2);
@@ -470,14 +477,14 @@ void buildRadarPage(){
     lv_obj_set_style_shadow_opa(r_co_ball,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(r_co_ball,0,0);
     lv_obj_clear_flag(r_co_ball,LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_pos(r_co_ball,(int)(240+212*0.866f)-6,(int)(240+212*0.5f)-6);
-    // CO text label — just inside the arc at midpoint direction (LVGL 45°, r≈155)
+    // CO text + ppm — OUTSIDE radar ring (r=175), at arc midpoint (LVGL 45°, r≈190)
+    // x=240+190*cos45°=374, y=374 → label anchored just outside the ring
     r_co_text=lv_label_create(p);lv_label_set_text(r_co_text,"CO");
     lv_obj_set_style_text_color(r_co_text,TGREY(),0);
-    lv_obj_set_style_text_font(r_co_text,&lv_font_montserrat_12,0);lv_obj_set_pos(r_co_text,344,334);
-    // CO ppm value label
+    lv_obj_set_style_text_font(r_co_text,&lv_font_montserrat_12,0);lv_obj_set_pos(r_co_text,366,364);
     r_co_val=lv_label_create(p);lv_label_set_text(r_co_val,"---");
     lv_obj_set_style_text_color(r_co_val,TGREY(),0);
-    lv_obj_set_style_text_font(r_co_val,&lv_font_montserrat_12,0);lv_obj_set_pos(r_co_val,341,350);
+    lv_obj_set_style_text_font(r_co_val,&lv_font_montserrat_12,0);lv_obj_set_pos(r_co_val,360,380);
 
     // Traffic VL3 icons (bitmap rotated) + speed vector + callsign + alt
     for(int i=0;i<MAX_TRF;i++){
@@ -619,11 +626,26 @@ void updateAllPages(){
         updStat(r_adsb,"ADS-B",g_status.adsb_ok);
         if(g_status.gps_fix){snprintf(b,32,"%.4f / %.4f",g_status.lat,g_status.lon);lv_label_set_text(r_coords,b);}
     }else{updStat(r_ble,"BLE",g_connected);}
-    // Radar flags (GPS/BLE/LTE indicators near heading pill)
-    {bool gps_ok=g_status.valid&&g_status.gps_fix;bool lte_ok=g_status.valid&&g_status.csq>5;
-     lv_label_set_text(r_rflag_gps,gps_ok?"●GPS":"GPS");lv_obj_set_style_text_color(r_rflag_gps,gps_ok?C_GREEN:TGREY(),0);
-     lv_label_set_text(r_rflag_ble,g_connected?"●BLE":"BLE");lv_obj_set_style_text_color(r_rflag_ble,g_connected?C_GREEN:TGREY(),0);
-     lv_label_set_text(r_rflag_lte,lte_ok?"●LTE":"LTE");lv_obj_set_style_text_color(r_rflag_lte,lte_ok?C_GREEN:TGREY(),0);}
+    // Header — connectivity column (right) + battery (left)
+    {bool gps_ok=g_status.valid&&g_status.gps_fix;
+     bool lte_ok=g_status.valid&&g_status.csq>5;
+     lv_obj_set_style_text_color(r_hdr_gps, gps_ok?C_GREEN:TGREY(),0);
+     lv_obj_set_style_text_color(r_hdr_lte, lte_ok?C_GREEN:TGREY(),0);
+     lv_obj_set_style_text_color(r_hdr_ble, g_connected?C_BLUE:TGREY(),0);
+     // Battery: charge icon if unknown, level icon+% otherwise
+     if(!g_debug.valid||g_debug.bat_pct<0){
+         lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);
+         lv_obj_set_style_text_color(r_hdr_bat,g_connected?C_GREEN:TGREY(),0);
+     }else{
+         char bb[20];
+         const char*bi=g_debug.bat_pct>=75?LV_SYMBOL_BATTERY_FULL:
+                        g_debug.bat_pct>=50?LV_SYMBOL_BATTERY_3:
+                        g_debug.bat_pct>=25?LV_SYMBOL_BATTERY_2:
+                        g_debug.bat_pct>=10?LV_SYMBOL_BATTERY_1:LV_SYMBOL_BATTERY_EMPTY;
+         snprintf(bb,20,"%s %d%%",bi,g_debug.bat_pct);
+         lv_label_set_text(r_hdr_bat,bb);
+         lv_obj_set_style_text_color(r_hdr_bat,
+             g_debug.bat_pct>=50?C_GREEN:g_debug.bat_pct>=20?C_AMBER:C_RED,0);}}
     // Auto-navigate to radar once BLE+GPS ready (one-shot per connection)
     if(!g_autoNavDone&&g_connected&&g_status.valid&&g_status.gps_fix&&g_page==0){
         g_autoNavDone=true;g_navPending=true;g_navPage=1;}
