@@ -15,6 +15,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <math.h>
+#include "img_vl3.h"
 
 LilyGo_RGBPanel panel;
 
@@ -47,7 +48,7 @@ struct StatusData {
     bool gps_fix,sd_ok,flarm_ok,adsb_ok,valid; };
 struct FlightData  { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
-struct TrafficEntry { char cs[9]; int dist_m,alt_m,bear_deg,climb_fpm; bool visible; };
+struct TrafficEntry { char cs[9]; int dist_m,alt_m,bear_deg,hdg_deg,spd_kt; bool visible; };
 struct TrafficData  { TrafficEntry t[MAX_TRF]; int count; bool valid; };
 struct AlertData    { bool co,gforce,rpm,traffic; char msg[64]; bool valid; };
 struct DebugData    {
@@ -99,8 +100,9 @@ static lv_obj_t *r_gps,*r_lte,*r_sd,*r_ble,*r_flarm,*r_adsb,*r_coords;
 #define RAD_R  175
 static lv_obj_t *r_radar_hdg, *r_radar_scale_lbl;
 static lv_obj_t *r_card[4];
-static lv_obj_t *r_radar_blip[MAX_TRF],*r_radar_cs[MAX_TRF],
-                 *r_radar_alt[MAX_TRF],*r_radar_arr[MAX_TRF];
+static lv_obj_t *r_radar_cs[MAX_TRF],*r_radar_alt[MAX_TRF];
+static lv_obj_t *r_trf_img[MAX_TRF],*r_trf_vect[MAX_TRF];
+static lv_point_t r_vect_pts[MAX_TRF][2];
 static lv_obj_t *r_alert_overlay, *r_aov_text;
 static lv_obj_t *r_co_pill, *r_co_val;
 
@@ -162,7 +164,8 @@ void parseTraffic(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     for(int i=0;i<g_traffic.count;i++){
         strlcpy(g_traffic.t[i].cs,d["t"][i]["cs"]|"???",9);
         g_traffic.t[i].dist_m=d["t"][i]["d"]|0;g_traffic.t[i].alt_m=d["t"][i]["a"]|0;
-        g_traffic.t[i].bear_deg=d["t"][i]["b"]|0;g_traffic.t[i].climb_fpm=d["t"][i]["c"]|0;
+        g_traffic.t[i].bear_deg=d["t"][i]["b"]|0;g_traffic.t[i].hdg_deg=d["t"][i]["c"]|0;
+        g_traffic.t[i].spd_kt=d["t"][i]["s"]|100;
         g_traffic.t[i].visible=d["t"][i]["v"]|true;}
     g_traffic.valid=true;g_dataUpdated=true;}
 void parseAlerts(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
@@ -468,27 +471,27 @@ void buildRadarPage(){
     lv_obj_set_style_text_align(r_co_val,LV_TEXT_ALIGN_CENTER,0);
     lv_obj_set_pos(r_co_val,336,358);
 
-    // Traffic blips ◆ + callsign + alt + trend
+    // Traffic VL3 icons (bitmap rotated) + speed vector + callsign + alt
     for(int i=0;i<MAX_TRF;i++){
-        r_radar_blip[i]=lv_label_create(p);lv_label_set_text(r_radar_blip[i],"◆");
-        lv_obj_set_style_text_font(r_radar_blip[i],&lv_font_montserrat_16,0);
-        lv_obj_set_style_text_color(r_radar_blip[i],C_CYAN,0);
-        lv_obj_add_flag(r_radar_blip[i],LV_OBJ_FLAG_HIDDEN);
-
+        r_vect_pts[i][0]={RAD_CX,RAD_CY};r_vect_pts[i][1]={RAD_CX,RAD_CY};
+        r_trf_img[i]=lv_img_create(p);
+        lv_img_set_src(r_trf_img[i],&img_vl3);
+        lv_img_set_pivot(r_trf_img[i],20,20);
+        lv_obj_set_style_img_recolor(r_trf_img[i],C_CYAN,0);
+        lv_obj_set_style_img_recolor_opa(r_trf_img[i],LV_OPA_COVER,0);
+        lv_obj_set_style_shadow_opa(r_trf_img[i],LV_OPA_TRANSP,0);
+        lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);
+        r_trf_vect[i]=lv_line_create(p);lv_line_set_points(r_trf_vect[i],r_vect_pts[i],2);
+        lv_obj_set_style_line_color(r_trf_vect[i],C_AMBER,0);lv_obj_set_style_line_width(r_trf_vect[i],2,0);
+        lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
         r_radar_cs[i]=lv_label_create(p);lv_label_set_text(r_radar_cs[i],"");
         lv_obj_set_style_text_font(r_radar_cs[i],&lv_font_montserrat_14,0);
         lv_obj_set_style_text_color(r_radar_cs[i],TFG(),0);
         lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
-
         r_radar_alt[i]=lv_label_create(p);lv_label_set_text(r_radar_alt[i],"");
         lv_obj_set_style_text_font(r_radar_alt[i],&lv_font_montserrat_14,0);
         lv_obj_set_style_text_color(r_radar_alt[i],C_CYAN,0);
-        lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
-
-        r_radar_arr[i]=lv_label_create(p);lv_label_set_text(r_radar_arr[i],"");
-        lv_obj_set_style_text_font(r_radar_arr[i],&lv_font_montserrat_14,0);
-        lv_obj_set_style_text_color(r_radar_arr[i],TFG(),0);
-        lv_obj_add_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);}
+        lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);}
 
     // Alert overlay
     r_alert_overlay=lv_obj_create(p);lv_obj_set_size(r_alert_overlay,300,40);
@@ -619,34 +622,44 @@ void updateAllPages(){
             int cx=(int)(RAD_CX+sinf(ra)*(float)r_inner)-5;
             int cy=(int)(RAD_CY-cosf(ra)*(float)r_inner)-8;
             lv_obj_set_pos(r_card[ci],cx,cy);}}
-    // Radar — traffic blips
+    // Radar — traffic VL3 icons (bitmap, heading-up) + speed vector (1 min)
     if(g_traffic.valid){
         for(int i=0;i<MAX_TRF;i++){
             if(i<g_traffic.count){
                 TrafficEntry&e=g_traffic.t[i];
                 int rb=((e.bear_deg-g_status.hdg)%360+360)%360;
                 float brd=(float)rb*(float)M_PI/180.0f;
-                float dpx=fminf((float)e.dist_m*(float)RAD_R/((float)g_cfg.scale_nm*1852.0f),(float)(RAD_R-6));
-                int bx=(int)(RAD_CX+sinf(brd)*dpx)-7;
-                int by=(int)(RAD_CY-cosf(brd)*dpx)-9;
+                float dpx=fminf((float)e.dist_m*(float)RAD_R/((float)g_cfg.scale_nm*1852.0f),(float)(RAD_R-20));
+                int sx=(int)(RAD_CX+sinf(brd)*dpx);
+                int sy=(int)(RAD_CY-cosf(brd)*dpx);
+                int rel_hdg=((e.hdg_deg-g_status.hdg)%360+360)%360;
+                float hr=(float)rel_hdg*(float)M_PI/180.0f;
+                float cs=cosf(hr),sn=sinf(hr);
                 lv_color_t col=e.dist_m<1000?C_RED:e.dist_m<3000?C_AMBER:C_CYAN;
-                lv_obj_set_pos(r_radar_blip[i],bx,by);
-                lv_obj_set_style_text_color(r_radar_blip[i],col,0);
-                lv_obj_clear_flag(r_radar_blip[i],LV_OBJ_FLAG_HIDDEN);
-                lv_obj_set_pos(r_radar_cs[i],bx+16,by);lv_label_set_text(r_radar_cs[i],e.cs);
+                // Image pivot au centre (20,20), position corrigée pour centrer sur le blip
+                lv_obj_set_pos(r_trf_img[i],sx-20,sy-20);
+                lv_img_set_angle(r_trf_img[i],(int16_t)(rel_hdg*10));
+                lv_obj_set_style_img_recolor(r_trf_img[i],col,0);
+                lv_obj_clear_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);
+                // Vecteur vitesse depuis le nez: 1 min de vol à spd_kt
+                // Nez = offset (0,-15) depuis centre → après rotation: (+15*sn, -15*cs)
+                float px_per_nm=(float)RAD_R/(float)g_cfg.scale_nm;
+                float vect_px=fmaxf(6.f,fminf((float)e.spd_kt/60.0f*px_per_nm,35.f));
+                r_vect_pts[i][0]={(lv_coord_t)(sx+(int)(15.f*sn)),(lv_coord_t)(sy-(int)(15.f*cs))};
+                r_vect_pts[i][1]={(lv_coord_t)(sx+(int)((15.f+vect_px)*sn)),(lv_coord_t)(sy-(int)((15.f+vect_px)*cs))};
+                lv_line_set_points(r_trf_vect[i],r_vect_pts[i],2);
+                lv_obj_clear_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
+                lv_obj_set_pos(r_radar_cs[i],sx+12,sy-8);lv_label_set_text(r_radar_cs[i],e.cs);
                 lv_obj_set_style_text_color(r_radar_cs[i],e.visible?TFG():C_AMBER,0);
                 lv_obj_clear_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
                 int rel_hft=(int)((e.alt_m-g_status.alt)*3.281f/100.0f);
                 snprintf(b,32,"%+d",rel_hft);
-                lv_obj_set_pos(r_radar_alt[i],bx+16,by+14);lv_label_set_text(r_radar_alt[i],b);
+                lv_obj_set_pos(r_radar_alt[i],sx+12,sy+6);lv_label_set_text(r_radar_alt[i],b);
                 lv_obj_set_style_text_color(r_radar_alt[i],col,0);
                 lv_obj_clear_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
-                if(e.climb_fpm>100){lv_label_set_text(r_radar_arr[i],"↑");lv_obj_set_style_text_color(r_radar_arr[i],C_GREEN,0);lv_obj_set_pos(r_radar_arr[i],bx-14,by);lv_obj_clear_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);}
-                else if(e.climb_fpm<-100){lv_label_set_text(r_radar_arr[i],"↓");lv_obj_set_style_text_color(r_radar_arr[i],C_RED,0);lv_obj_set_pos(r_radar_arr[i],bx-14,by);lv_obj_clear_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);}
-                else{lv_obj_add_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);}
             }else{
-                lv_obj_add_flag(r_radar_blip[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
-                lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_arr[i],LV_OBJ_FLAG_HIDDEN);}}}
+                lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);}}}
     // CO gauge — needle position + text color
     if(g_flight.valid){
         int co=g_flight.co_ppm;
