@@ -986,14 +986,17 @@ void updateAllPages(){
      // ⚠ TEST EN COURS : brancher AT-CORE sur secteur et vérifier "BAT xx% ⚡" page Status.
      {int bat=(g_status.valid&&g_status.bat>=0)?g_status.bat:
               (g_debug.valid&&g_debug.bat_pct>=0)?g_debug.bat_pct:-1;
-      if(bat<0){lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);SET_PILL_TXT(r_hdr_bat,g_connected);}
-      else{const char*bi=bat>=75?LV_SYMBOL_BATTERY_FULL:bat>=50?LV_SYMBOL_BATTERY_3:
-                          bat>=25?LV_SYMBOL_BATTERY_2:bat>=10?LV_SYMBOL_BATTERY_1:LV_SYMBOL_BATTERY_EMPTY;
-           char bb[24];
-           if(g_status.charging)snprintf(bb,24,LV_SYMBOL_CHARGE"%s%d%%",bi,bat);
-           else snprintf(bb,24,"%s%d%%",bi,bat);
-           lv_label_set_text(r_hdr_bat,bb);
-           SET_PILL_TXT(r_hdr_bat,g_status.charging?true:bat>=20);}}
+       if(bat<0){
+          // Pas de données — symbole charge grisé
+          lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);SET_PILL_TXT(r_hdr_bat,false);
+      }else if(g_status.charging){
+          // En charge — éclair seul, actif/bright
+          lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);SET_PILL_TXT(r_hdr_bat,true);
+      }else{
+          // Sur batterie — jauge seule, sans %, rouge si <20%
+          const char*bi=bat>=75?LV_SYMBOL_BATTERY_FULL:bat>=50?LV_SYMBOL_BATTERY_3:
+                         bat>=25?LV_SYMBOL_BATTERY_2:bat>=10?LV_SYMBOL_BATTERY_1:LV_SYMBOL_BATTERY_EMPTY;
+          lv_label_set_text(r_hdr_bat,bi);SET_PILL_TXT(r_hdr_bat,bat>=20);}}
      #undef SET_PILL_TXT
      #undef SET_PILL_IMG
      }
