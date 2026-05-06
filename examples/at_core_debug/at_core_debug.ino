@@ -48,7 +48,7 @@ static inline lv_color_t PILL_IC_ON() {return g_dark_theme?lv_color_hex(0xffffff
 
 // ── Data structs ──────────────────────────────────────────────────────────────
 struct StatusData {
-    int mode,gps_sat,csq,frames,alt,spd,hdg; float lat,lon;
+    int mode,gps_sat,csq,frames,alt,spd,hdg,bat; float lat,lon;
     bool gps_fix,sd_ok,flarm_ok,adsb_ok,valid; };
 struct FlightData  { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
@@ -61,7 +61,7 @@ struct DebugData    {
     int ss_ago,fa_ago,heap,bat_pct,mode,pending,flarm_tx,flarm_rx,adsb_rx;
     char fid[24]; bool valid; };
 
-static const uint8_t kScaleOpts[]={4,8,10,20,40};
+static const uint8_t kScaleOpts[]={1,2,4,8,10,20,40};
 static const char*   kSrcNames[] ={"SSKY","FLRM","ADSB","ALL"};
 struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark; int16_t vfilt_ft; };
 static CfgData     g_cfg={4,16,3,true,true,true,2000};
@@ -73,6 +73,15 @@ static TrafficData g_traffic = {};
 static AlertData   g_alert   = {};
 static DebugData   g_debug   = {};
 static volatile bool g_dataUpdated = false;
+
+// ── Pilot DB / Auth ───────────────────────────────────────────────────────────
+struct PilotEntry { char code[5]; char name[32]; char status[12]; char primary_icao[8]; };
+#define MAX_PILOTS 24
+static PilotEntry  g_pilots[MAX_PILOTS] = {};
+static int         g_pilot_cnt = 0;
+static char        g_aircraft_icao[8] = "";
+struct AuthSession { char name[32]; char status[12]; bool is_owner; bool valid; };
+static AuthSession g_session = {};
 
 // ── BLE state ─────────────────────────────────────────────────────────────────
 static BLEClient*              g_client = nullptr;
@@ -97,7 +106,7 @@ static bool             g_autoNavDone=false;
 // ── Widget refs — Status page (page 0) ───────────────────────────────────────
 static lv_obj_t *r_title;
 static lv_obj_t *r_boot_panel,*r_boot_lvgl,*r_boot_ble,*r_boot_core;
-static lv_obj_t *r_gps,*r_lte,*r_sd,*r_ble,*r_flarm,*r_adsb,*r_coords;
+static lv_obj_t *r_gps,*r_lte,*r_sd,*r_ble,*r_flarm,*r_adsb,*r_coords,*r_bat_p1;
 
 // ── Widget refs — Radar (page 1) ──────────────────────────────────────────────
 #define RAD_CX 240
@@ -114,6 +123,17 @@ static lv_obj_t *r_hdr_bat;
 static lv_obj_t *r_hdr_sky, *r_hdr_flrm, *r_hdr_adsb;  // left arc: SafeSky / FLARM / ADS-B
 static lv_obj_t *r_hdr_gps, *r_hdr_lte, *r_hdr_wifi, *r_hdr_ble;
 static lv_obj_t *r_hdr_lte_b[4];  // 4 drawn signal bars inside LTE pill
+
+// ── Widget refs — Auth overlay ────────────────────────────────────────────────
+static lv_obj_t* g_auth_ov       = nullptr;
+static lv_obj_t* g_auth_dots[4]  = {};
+static lv_obj_t* g_auth_prompt   = nullptr;
+static lv_obj_t* g_auth_name     = nullptr;
+static lv_obj_t* g_auth_msg      = nullptr;
+static char      g_auth_buf[5]   = {};
+static int       g_auth_len      = 0;
+static bool      g_auth_p2       = false;   // phase 2: instructor code for student
+static char      g_auth_scode[5] = {};      // student code saved during phase 2
 
 // ── Widget refs — Settings (page 2) ───────────────────────────────────────────
 static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v,*s_theme_v;
@@ -210,7 +230,7 @@ void flashTab(lv_obj_t*lbl){
 void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.mode=d["mode"]|0;g_status.gps_sat=d["gps_sat"]|0;g_status.csq=d["csq"]|-1;
     g_status.frames=d["frames"]|0;g_status.alt=d["alt"]|0;g_status.spd=d["spd"]|0;
-    g_status.hdg=d["hdg"]|0;g_status.lat=d["lat"]|0.0f;g_status.lon=d["lon"]|0.0f;
+    g_status.hdg=d["hdg"]|0;g_status.bat=d["bat"]|-1;g_status.lat=d["lat"]|0.0f;g_status.lon=d["lon"]|0.0f;
     g_status.gps_fix=d["gps_fix"]|false;g_status.sd_ok=d["sd_ok"]|false;
     g_status.flarm_ok=d["flarm"]|false;g_status.adsb_ok=d["adsb"]|false;
     g_status.valid=true;g_dataUpdated=true;}
@@ -381,7 +401,161 @@ void buildStatusPage(){
     r_flarm=mkStat(p, 82,254,"FLARM",  false);
     r_adsb =mkStat(p,252,254,"ADS-B",  false);
     r_coords=mkLbl(p,"--- / ---",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,284);
+    mkLblP(p,"BAT",TGREY(),&lv_font_montserrat_14,82,310);
+    r_bat_p1=mkLblP(p,"---%",TGREY(),&lv_font_montserrat_14,252,310);
     mkLbl(p,"v0.6  —  2026-05-04",TGREY(),&lv_font_montserrat_12,LV_ALIGN_BOTTOM_MID,0,-60);}
+
+// ── Pilot DB / Auth functions ─────────────────────────────────────────────────
+void pilotDBLoad(){
+    Preferences p;p.begin("auth",true);
+    p.getString("icao","").toCharArray(g_aircraft_icao,sizeof(g_aircraft_icao));
+    String db=p.getString("pilots","");p.end();
+    if(!db.length())return;
+    JsonDocument doc;if(deserializeJson(doc,db))return;
+    g_pilot_cnt=0;
+    for(JsonObject e:doc.as<JsonArray>()){
+        if(g_pilot_cnt>=MAX_PILOTS)break;
+        PilotEntry&t=g_pilots[g_pilot_cnt++];
+        strlcpy(t.code,         e["c"]|"",sizeof(t.code));
+        strlcpy(t.name,         e["n"]|"",sizeof(t.name));
+        strlcpy(t.status,       e["s"]|"",sizeof(t.status));
+        strlcpy(t.primary_icao, e["i"]|"",sizeof(t.primary_icao));}}
+
+PilotEntry* pilotFind(const char*code){
+    for(int i=0;i<g_pilot_cnt;i++)if(strcmp(g_pilots[i].code,code)==0)return&g_pilots[i];
+    return nullptr;}
+
+bool checkOwnerNVS(){
+    if(!g_aircraft_icao[0])return false;
+    Preferences p;p.begin("auth",true);
+    String oc=p.getString("owner","");p.end();
+    if(oc.length()!=4)return false;
+    char cb[5];oc.toCharArray(cb,5);
+    PilotEntry*pe=pilotFind(cb);
+    if(!pe||strcmp(pe->primary_icao,g_aircraft_icao)!=0)return false;
+    strlcpy(g_session.name,pe->name,32);strlcpy(g_session.status,pe->status,12);
+    g_session.is_owner=true;g_session.valid=true;return true;}
+
+void authUpdateDots(){
+    for(int i=0;i<4;i++){
+        lv_obj_set_style_bg_color(g_auth_dots[i],TFG(),0);
+        lv_obj_set_style_border_color(g_auth_dots[i],TFG(),0);
+        lv_obj_set_style_bg_opa(g_auth_dots[i],i<g_auth_len?LV_OPA_COVER:LV_OPA_TRANSP,0);}}
+
+static void _auth_err_cb(lv_timer_t*t){
+    for(int i=0;i<4;i++){
+        lv_obj_set_style_bg_opa(g_auth_dots[i],LV_OPA_TRANSP,0);
+        lv_obj_set_style_bg_color(g_auth_dots[i],TFG(),0);
+        lv_obj_set_style_border_color(g_auth_dots[i],TFG(),0);}
+    lv_label_set_text(g_auth_msg,"");lv_timer_del(t);}
+
+void authError(const char*msg){
+    lv_label_set_text(g_auth_msg,msg);
+    for(int i=0;i<4;i++){
+        lv_obj_set_style_bg_color(g_auth_dots[i],C_RED,0);
+        lv_obj_set_style_bg_opa(g_auth_dots[i],LV_OPA_COVER,0);
+        lv_obj_set_style_border_color(g_auth_dots[i],C_RED,0);}
+    g_auth_len=0;memset(g_auth_buf,0,5);
+    lv_timer_create(_auth_err_cb,1500,nullptr);}
+
+void authSuccess(PilotEntry*pe){
+    strlcpy(g_session.name,pe->name,32);strlcpy(g_session.status,pe->status,12);
+    bool owner=g_aircraft_icao[0]&&pe->primary_icao[0]&&strcmp(pe->primary_icao,g_aircraft_icao)==0;
+    g_session.is_owner=owner;g_session.valid=true;
+    if(owner){Preferences p;p.begin("auth",false);p.putString("owner",pe->code);p.end();}
+    else{Preferences p;p.begin("auth",false);p.putString("owner","");p.end();}
+    if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}}
+
+void authValidate(){
+    if(!g_auth_p2){
+        PilotEntry*pe=pilotFind(g_auth_buf);
+        if(!pe){authError("Code inconnu - Retry");return;}
+        if(strcmp(pe->status,"student")==0){
+            strlcpy(g_auth_scode,g_auth_buf,5);
+            g_auth_p2=true;g_auth_len=0;memset(g_auth_buf,0,5);
+            authUpdateDots();
+            lv_label_set_text(g_auth_prompt,"Code Instructeur");
+            lv_label_set_text(g_auth_name,pe->name);
+            lv_label_set_text(g_auth_msg,"");
+        }else{authSuccess(pe);}
+    }else{
+        PilotEntry*inst=pilotFind(g_auth_buf);
+        if(!inst||strcmp(inst->status,"instructor")!=0){authError("Code instructeur invalide");return;}
+        PilotEntry*stud=pilotFind(g_auth_scode);
+        if(stud)authSuccess(stud);else authError("Erreur session");}}
+
+static void _auth_btn_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    intptr_t d=(intptr_t)lv_event_get_user_data(e);
+    if(d==10){if(g_auth_len>0){g_auth_len--;g_auth_buf[g_auth_len]=0;authUpdateDots();}
+    }else if(d==11){if(g_auth_len==4)authValidate();
+    }else{if(g_auth_len<4){g_auth_buf[g_auth_len++]='0'+d;g_auth_buf[g_auth_len]=0;
+        authUpdateDots();if(g_auth_len==4)authValidate();}}}
+
+void mkAuthOverlay(){
+    g_auth_ov=lv_obj_create(lv_scr_act());
+    lv_obj_set_size(g_auth_ov,480,480);lv_obj_set_pos(g_auth_ov,0,0);
+    lv_obj_set_style_bg_color(g_auth_ov,TBG(),0);lv_obj_set_style_bg_opa(g_auth_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(g_auth_ov,0,0);lv_obj_set_style_radius(g_auth_ov,0,0);
+    lv_obj_set_style_shadow_opa(g_auth_ov,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(g_auth_ov,0,0);
+    lv_obj_clear_flag(g_auth_ov,LV_OBJ_FLAG_SCROLLABLE);
+    // ICAO + title
+    lv_obj_t*il=lv_label_create(g_auth_ov);
+    lv_label_set_text(il,g_aircraft_icao[0]?g_aircraft_icao:"AT-VIEW");
+    lv_obj_set_style_text_color(il,TGREY(),0);
+    lv_obj_set_style_text_font(il,&lv_font_montserrat_14,0);
+    lv_obj_align(il,LV_ALIGN_TOP_MID,0,46);
+    g_auth_prompt=lv_label_create(g_auth_ov);
+    lv_label_set_text(g_auth_prompt,"Identification");
+    lv_obj_set_style_text_color(g_auth_prompt,TFG(),0);
+    lv_obj_set_style_text_font(g_auth_prompt,&lv_font_montserrat_16,0);
+    lv_obj_align(g_auth_prompt,LV_ALIGN_TOP_MID,0,76);
+    // 4 PIN dots — container centered
+    lv_obj_t*dc=lv_obj_create(g_auth_ov);
+    lv_obj_set_size(dc,130,28);
+    lv_obj_set_style_bg_opa(dc,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(dc,0,0);
+    lv_obj_set_style_shadow_opa(dc,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(dc,0,0);
+    lv_obj_clear_flag(dc,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(dc,LV_ALIGN_TOP_MID,0,114);
+    for(int i=0;i<4;i++){
+        g_auth_dots[i]=lv_obj_create(dc);
+        lv_obj_set_size(g_auth_dots[i],22,22);lv_obj_set_pos(g_auth_dots[i],i*36,3);
+        lv_obj_set_style_radius(g_auth_dots[i],LV_RADIUS_CIRCLE,0);
+        lv_obj_set_style_bg_color(g_auth_dots[i],TFG(),0);
+        lv_obj_set_style_bg_opa(g_auth_dots[i],LV_OPA_TRANSP,0);
+        lv_obj_set_style_border_color(g_auth_dots[i],TFG(),0);
+        lv_obj_set_style_border_width(g_auth_dots[i],2,0);
+        lv_obj_set_style_shadow_opa(g_auth_dots[i],LV_OPA_TRANSP,0);
+        lv_obj_set_style_pad_all(g_auth_dots[i],0,0);
+        lv_obj_clear_flag(g_auth_dots[i],LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);}
+    // Name hint + error
+    g_auth_name=lv_label_create(g_auth_ov);lv_label_set_text(g_auth_name,"");
+    lv_obj_set_style_text_color(g_auth_name,C_GREEN,0);
+    lv_obj_set_style_text_font(g_auth_name,&lv_font_montserrat_14,0);
+    lv_obj_align(g_auth_name,LV_ALIGN_TOP_MID,0,156);
+    g_auth_msg=lv_label_create(g_auth_ov);lv_label_set_text(g_auth_msg,"");
+    lv_obj_set_style_text_color(g_auth_msg,C_RED,0);
+    lv_obj_set_style_text_font(g_auth_msg,&lv_font_montserrat_12,0);
+    lv_obj_align(g_auth_msg,LV_ALIGN_TOP_MID,0,184);
+    // Keypad 3×4 — BW=68 BH=54 BG=8 → width=220 KX=130 bottom=450 (within circle ✓)
+    static const char*kL[12]={"1","2","3","4","5","6","7","8","9","<","0","OK"};
+    static const intptr_t kV[12]={1,2,3,4,5,6,7,8,9,10,0,11};
+    for(int i=0;i<12;i++){
+        int r=i/3,c=i%3;
+        lv_obj_t*btn=lv_btn_create(g_auth_ov);
+        lv_obj_set_size(btn,68,54);
+        lv_obj_set_pos(btn,130+c*76,210+r*62);
+        lv_obj_set_style_bg_color(btn,lv_color_hex(0x1e2b38),0);
+        lv_obj_set_style_bg_color(btn,lv_color_hex(0x2d4358),LV_STATE_PRESSED);
+        lv_obj_set_style_bg_opa(btn,LV_OPA_COVER,0);
+        lv_obj_set_style_radius(btn,12,0);
+        lv_obj_set_style_shadow_opa(btn,LV_OPA_TRANSP,0);
+        lv_obj_set_style_border_width(btn,0,0);
+        lv_obj_add_event_cb(btn,_auth_btn_cb,LV_EVENT_CLICKED,(void*)kV[i]);
+        lv_obj_t*lb=lv_label_create(btn);lv_label_set_text(lb,kL[i]);
+        lv_obj_set_style_text_color(lb,TFG(),0);
+        lv_obj_set_style_text_font(lb,&lv_font_montserrat_16,0);
+        lv_obj_center(lb);}}
 
 // Boot animation — runs on page 0 before it goes live
 // Does NOT clean the page — just animates the boot check labels
@@ -539,10 +713,9 @@ void buildRadarPage(){
     // CO text + ppm — OUTSIDE radar ring (r=175), at arc midpoint (LVGL 45°, r≈190)
     // x=240+190*cos45°=374, y=374 → label anchored just outside the ring
     r_co_text=lv_label_create(p);lv_label_set_text(r_co_text,"CO");
-    lv_obj_set_style_text_color(r_co_text,TGREY(),0);
+    lv_obj_set_style_text_color(r_co_text,lv_color_hex(0x000000),0);
     lv_obj_set_style_text_font(r_co_text,&lv_font_montserrat_12,0);lv_obj_set_pos(r_co_text,366,364);
-    r_co_val=lv_label_create(p);lv_label_set_text(r_co_val,"---");
-    lv_obj_set_style_text_color(r_co_val,TGREY(),0);
+    r_co_val=lv_label_create(p);lv_label_set_text(r_co_val,"");
     lv_obj_set_style_text_font(r_co_val,&lv_font_montserrat_12,0);lv_obj_set_pos(r_co_val,360,380);
 
     // Traffic VL3 icons (bitmap rotated) + speed vector + callsign + alt
@@ -596,10 +769,10 @@ void updSetPage(){
 static void cbSetBtn(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
     int id=(int)(intptr_t)lv_event_get_user_data(e);
-    int si=0;for(int i=0;i<5;i++)if(kScaleOpts[i]==g_cfg.scale_nm)si=i;
+    int si=0;for(int i=0;i<7;i++)if(kScaleOpts[i]==g_cfg.scale_nm)si=i;
     switch(id){
         case 0:si=max(si-1,0);g_cfg.scale_nm=kScaleOpts[si];break;
-        case 1:si=min(si+1,4);g_cfg.scale_nm=kScaleOpts[si];break;
+        case 1:si=min(si+1,6);g_cfg.scale_nm=kScaleOpts[si];break;
         case 2:g_cfg.vfilt_ft=max((int)g_cfg.vfilt_ft-500,500);break;
         case 3:g_cfg.vfilt_ft=min((int)g_cfg.vfilt_ft+500,5000);break;
         case 4:case 5:g_cfg.dist_nm=!g_cfg.dist_nm;break;
@@ -742,6 +915,9 @@ void updateAllPages(){
         updStat(r_ble,"BLE",g_connected);updStat(r_flarm,"FLARM",g_status.flarm_ok);
         updStat(r_adsb,"ADS-B",g_status.adsb_ok);
         if(g_status.gps_fix){snprintf(b,32,"%.4f / %.4f",g_status.lat,g_status.lon);lv_label_set_text(r_coords,b);}
+        if(g_status.bat<0){lv_label_set_text(r_bat_p1,"---%");lv_obj_set_style_text_color(r_bat_p1,TGREY(),0);}
+        else{snprintf(b,32,"%d%%",g_status.bat);lv_label_set_text(r_bat_p1,b);
+        lv_obj_set_style_text_color(r_bat_p1,g_status.bat>=50?C_GREEN:g_status.bat>=20?C_AMBER:C_RED,0);}
     }else{updStat(r_ble,"BLE",g_connected);}
     // Header — connectivity tabs + battery — B&W scheme: active=bright bg+black icon, inactive=dark bg+gray icon
     {static bool prev_gps=false,prev_lte=false,prev_ble=false;
@@ -812,10 +988,8 @@ void updateAllPages(){
         int co=g_flight.co_ppm;
         float co_a=(30.0f+fminf((float)co,150.0f)/150.0f*30.0f)*(float)M_PI/180.0f;
         lv_obj_set_pos(r_co_ball,(int)(240.0f+212.0f*cosf(co_a))-6,(int)(240.0f+212.0f*sinf(co_a))-6);
-        lv_color_t co_col=co<35?C_GREEN:co<70?C_ORANGE:C_RED;
-        char cb[12];snprintf(cb,12,"%dppm",co);
-        lv_label_set_text(r_co_val,cb);lv_obj_set_style_text_color(r_co_val,co_col,0);
-        lv_obj_set_style_text_color(r_co_text,co_col,0);}
+        lv_obj_set_style_text_color(r_co_text,lv_color_hex(0x000000),0);
+        lv_label_set_text(r_co_val,"");}
     // Alert overlay
     if(g_alert.valid){
         bool any=g_alert.co||g_alert.gforce||g_alert.rpm||g_alert.traffic;
@@ -873,6 +1047,9 @@ void setup(){
     // Build remaining pages
     buildRadarPage();buildSettingsPage();buildDebugPage();
     createSwipeHandlers();updSetPage();
+    // Auth — show overlay unless owner auto-login from NVS
+    pilotDBLoad();
+    if(g_pilot_cnt>0 && !checkOwnerNVS()) mkAuthOverlay();
     Serial.println("Ready");}
 
 // ── Loop ──────────────────────────────────────────────────────────────────────
