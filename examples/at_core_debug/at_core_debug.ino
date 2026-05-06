@@ -880,10 +880,10 @@ void updateRadarDR(){
     for(int i=0;i<MAX_TRF;i++){
         if(i<g_traffic.count){
             TrafficEntry&e=g_traffic.t[i];
-            // Filtre ground : masque les aéronefs à vitesse < 30 kt (taxi/stationnement).
-            // Seuil 30 kt valable si AT-CORE fournit le champ "s" (spd_kt) dans le JSON TRAFFIC.
+            // Filtre ground : masque les aéronefs à vitesse < 20 kt (taxi/stationnement).
+            // Seuil 20 kt valable si AT-CORE fournit le champ "s" (spd_kt) dans le JSON TRAFFIC.
             // Si "s" absent, défaut = 100 kt → l'avion reste visible même filtré. Normal.
-            if(!g_cfg.show_grnd&&e.spd_kt<30){
+            if(!g_cfg.show_grnd&&e.spd_kt<20){
                 lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
                 lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
             } else {
