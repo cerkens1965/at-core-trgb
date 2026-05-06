@@ -106,7 +106,8 @@ static bool             g_autoNavDone=false;
 // ── Widget refs — Status page (page 0) ───────────────────────────────────────
 static lv_obj_t *r_title;
 static lv_obj_t *r_boot_panel,*r_boot_lvgl,*r_boot_ble,*r_boot_core;
-static lv_obj_t *r_gps,*r_lte,*r_sd,*r_ble,*r_flarm,*r_adsb,*r_coords,*r_bat_p1;
+static lv_obj_t *r_coords,*r_bat_p1;
+static lv_obj_t *r_sbox[6],*r_sico[6],*r_stxt[6]; // [0]GPS [1]LTE [2]SD [3]BLE [4]FLARM [5]ADS-B
 
 // ── Widget refs — Radar (page 1) ──────────────────────────────────────────────
 #define RAD_CX 240
@@ -225,6 +226,24 @@ void flashTab(lv_obj_t*lbl){
     lv_anim_set_values(&a,LV_OPA_COVER,LV_OPA_20);
     lv_anim_set_time(&a,160);lv_anim_set_playback_time(&a,160);
     lv_anim_set_repeat_count(&a,3);lv_anim_start(&a);}
+
+void mkSBox(lv_obj_t*p,int idx,int x,int y,const char*txt,bool ok){
+    lv_obj_t*box=lv_obj_create(p);lv_obj_set_size(box,22,22);lv_obj_set_pos(box,x,y);
+    lv_obj_set_style_radius(box,4,0);
+    lv_obj_set_style_bg_color(box,ok?C_GREEN:lv_color_hex(0x1e2b38),0);
+    lv_obj_set_style_border_color(box,ok?C_GREEN:TGREY(),0);lv_obj_set_style_border_width(box,1,0);
+    lv_obj_set_style_shadow_opa(box,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(box,0,0);
+    lv_obj_clear_flag(box,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t*ico=lv_label_create(box);lv_label_set_text(ico,ok?LV_SYMBOL_OK:"");
+    lv_obj_set_style_text_color(ico,TBG(),0);lv_obj_set_style_text_font(ico,&lv_font_montserrat_14,0);
+    lv_obj_center(ico);r_sbox[idx]=box;r_sico[idx]=ico;
+    r_stxt[idx]=mkLblP(p,txt,TGREY(),&lv_font_montserrat_14,x+28,y+4);}
+void updSBox(int idx,const char*txt,bool ok){
+    lv_obj_set_style_bg_color(r_sbox[idx],ok?C_GREEN:lv_color_hex(0x1e2b38),0);
+    lv_obj_set_style_border_color(r_sbox[idx],ok?C_GREEN:TGREY(),0);
+    lv_label_set_text(r_sico[idx],ok?LV_SYMBOL_OK:"");
+    lv_obj_set_style_text_color(r_stxt[idx],ok?TFG():TGREY(),0);
+    lv_label_set_text(r_stxt[idx],txt);}
 
 // ── Parsers ───────────────────────────────────────────────────────────────────
 void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
@@ -393,16 +412,13 @@ void buildStatusPage(){
     lv_obj_t*sl=lv_line_create(p);lv_line_set_points(sl,sep,2);
     lv_obj_set_style_line_color(sl,TGRID(),0);lv_obj_set_style_line_width(sl,1,0);
 
-    // ── Live status indicators (2 columns)
-    r_gps  =mkStat(p, 82,202,"GPS ---",false);
-    r_lte  =mkStat(p,252,202,"LTE ---",false);
-    r_sd   =mkStat(p, 82,228,"SD ---", false);
-    r_ble  =mkStat(p,252,228,"BLE",    false);
-    r_flarm=mkStat(p, 82,254,"FLARM",  false);
-    r_adsb =mkStat(p,252,254,"ADS-B",  false);
-    r_coords=mkLbl(p,"--- / ---",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,284);
-    mkLblP(p,"BAT",TGREY(),&lv_font_montserrat_14,82,310);
-    r_bat_p1=mkLblP(p,"---%",TGREY(),&lv_font_montserrat_14,252,310);
+    // ── Live status — boîtes carrées 22×22 + label (2 colonnes)
+    // col G x=68 (box) x=96 (txt)   col D x=252 (box) x=280 (txt)
+    mkSBox(p,0, 68,205,"GPS ---",false); mkSBox(p,1,252,205,"LTE ---",false);
+    mkSBox(p,2, 68,232,"SD ---", false); mkSBox(p,3,252,232,"BLE",    false);
+    mkSBox(p,4, 68,259,"FLARM",  false); mkSBox(p,5,252,259,"ADS-B",  false);
+    r_coords=mkLbl(p,"--- / ---",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,290);
+    r_bat_p1=mkLbl(p,"BAT  ---%",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,315);
     mkLbl(p,"v0.6  —  2026-05-04",TGREY(),&lv_font_montserrat_12,LV_ALIGN_BOTTOM_MID,0,-60);}
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
@@ -909,16 +925,15 @@ void updateAllPages(){
     lv_label_set_text(r_title,g_connected?"AT-CORE":"AT-VIEW");
     lv_obj_set_style_text_color(r_title,g_connected?C_GREEN:C_AMBER,0);
     if(g_status.valid){
-        snprintf(b,32,"GPS %dsat",g_status.gps_sat);updStat(r_gps,b,g_status.gps_fix);
-        snprintf(b,32,"LTE %d",g_status.csq);updStat(r_lte,b,g_status.csq>5);
-        snprintf(b,32,"SD %dfr",g_status.frames);updStat(r_sd,b,g_status.sd_ok);
-        updStat(r_ble,"BLE",g_connected);updStat(r_flarm,"FLARM",g_status.flarm_ok);
-        updStat(r_adsb,"ADS-B",g_status.adsb_ok);
+        snprintf(b,32,"GPS %dsat",g_status.gps_sat);updSBox(0,b,g_status.gps_fix);
+        snprintf(b,32,"LTE %d",g_status.csq);updSBox(1,b,g_status.csq>5);
+        snprintf(b,32,"SD %dfr",g_status.frames);updSBox(2,b,g_status.sd_ok);
+        updSBox(3,"BLE",g_connected);updSBox(4,"FLARM",g_status.flarm_ok);updSBox(5,"ADS-B",g_status.adsb_ok);
         if(g_status.gps_fix){snprintf(b,32,"%.4f / %.4f",g_status.lat,g_status.lon);lv_label_set_text(r_coords,b);}
-        if(g_status.bat<0){lv_label_set_text(r_bat_p1,"---%");lv_obj_set_style_text_color(r_bat_p1,TGREY(),0);}
-        else{snprintf(b,32,"%d%%",g_status.bat);lv_label_set_text(r_bat_p1,b);
+        if(g_status.bat<0){lv_label_set_text(r_bat_p1,"BAT  ---%");lv_obj_set_style_text_color(r_bat_p1,TGREY(),0);}
+        else{snprintf(b,32,"BAT  %d%%",g_status.bat);lv_label_set_text(r_bat_p1,b);
         lv_obj_set_style_text_color(r_bat_p1,g_status.bat>=50?C_GREEN:g_status.bat>=20?C_AMBER:C_RED,0);}
-    }else{updStat(r_ble,"BLE",g_connected);}
+    }else{updSBox(3,"BLE",g_connected);}
     // Header — connectivity tabs + battery — B&W scheme: active=bright bg+black icon, inactive=dark bg+gray icon
     {static bool prev_gps=false,prev_lte=false,prev_ble=false;
      bool gps_ok=g_status.valid&&g_status.gps_fix;
@@ -951,20 +966,14 @@ void updateAllPages(){
      // ADS-B
      {bool adsb_ok=g_connected&&g_status.valid&&g_status.adsb_ok;
       SET_PILL_TXT(r_hdr_adsb, adsb_ok);}
-     // Battery
-     if(!g_debug.valid||g_debug.bat_pct<0){
-         lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);
-         SET_PILL_TXT(r_hdr_bat, g_connected);
-     }else{
-         char bb[20];
-         const char*bi=g_debug.bat_pct>=75?LV_SYMBOL_BATTERY_FULL:
-                        g_debug.bat_pct>=50?LV_SYMBOL_BATTERY_3:
-                        g_debug.bat_pct>=25?LV_SYMBOL_BATTERY_2:
-                        g_debug.bat_pct>=10?LV_SYMBOL_BATTERY_1:LV_SYMBOL_BATTERY_EMPTY;
-         snprintf(bb,20,"%s%d%%",bi,g_debug.bat_pct);
-         lv_label_set_text(r_hdr_bat,bb);
-         bool bat_ok=g_debug.bat_pct>=20;
-         SET_PILL_TXT(r_hdr_bat, bat_ok);}
+     // Battery — g_status.bat (STATUS char, fréquent) prioritaire sur g_debug.bat_pct
+     {int bat=(g_status.valid&&g_status.bat>=0)?g_status.bat:
+              (g_debug.valid&&g_debug.bat_pct>=0)?g_debug.bat_pct:-1;
+      if(bat<0){lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);SET_PILL_TXT(r_hdr_bat,g_connected);}
+      else{const char*bi=bat>=75?LV_SYMBOL_BATTERY_FULL:bat>=50?LV_SYMBOL_BATTERY_3:
+                          bat>=25?LV_SYMBOL_BATTERY_2:bat>=10?LV_SYMBOL_BATTERY_1:LV_SYMBOL_BATTERY_EMPTY;
+           char bb[20];snprintf(bb,20,"%s%d%%",bi,bat);lv_label_set_text(r_hdr_bat,bb);
+           SET_PILL_TXT(r_hdr_bat,bat>=20);}}
      #undef SET_PILL_TXT
      #undef SET_PILL_IMG
      }
