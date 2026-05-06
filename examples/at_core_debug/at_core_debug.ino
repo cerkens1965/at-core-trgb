@@ -880,6 +880,9 @@ void updateRadarDR(){
     for(int i=0;i<MAX_TRF;i++){
         if(i<g_traffic.count){
             TrafficEntry&e=g_traffic.t[i];
+            // Filtre ground : masque les aéronefs à vitesse < 30 kt (taxi/stationnement).
+            // Seuil 30 kt valable si AT-CORE fournit le champ "s" (spd_kt) dans le JSON TRAFFIC.
+            // Si "s" absent, défaut = 100 kt → l'avion reste visible même filtré. Normal.
             if(!g_cfg.show_grnd&&e.spd_kt<30){
                 lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
                 lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
@@ -978,7 +981,9 @@ void updateAllPages(){
      // ADS-B
      {bool adsb_ok=g_connected&&g_status.valid&&g_status.adsb_ok;
       SET_PILL_TXT(r_hdr_adsb, adsb_ok);}
-     // Battery — g_status.bat (STATUS char, fréquent) prioritaire sur g_debug.bat_pct
+     // Battery — g_status.bat (STATUS char, ~1s) prioritaire sur g_debug.bat_pct (DEBUG char).
+     // Charging détecté par AT-CORE via tendance tension LiPo (champ "chg" JSON STATUS).
+     // ⚠ TEST EN COURS : brancher AT-CORE sur secteur et vérifier "BAT xx% ⚡" page Status.
      {int bat=(g_status.valid&&g_status.bat>=0)?g_status.bat:
               (g_debug.valid&&g_debug.bat_pct>=0)?g_debug.bat_pct:-1;
       if(bat<0){lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);SET_PILL_TXT(r_hdr_bat,g_connected);}
@@ -995,7 +1000,13 @@ void updateAllPages(){
     // Auto-navigate to radar once BLE+GPS ready (one-shot per connection)
     if(!g_autoNavDone&&g_connected&&g_status.valid&&g_status.gps_fix&&g_page==0){
         g_autoNavDone=true;g_navPending=true;g_navPage=1;}
-    // Radar — heading + cardinal labels
+    // Radar — cap GPS heading-up + rotation cardinaux N/E/S/W
+    // ⚠ TEST EN COURS : cap GPS valide uniquement en mouvement (>15 km/h).
+    // À l'arrêt AT-CORE envoie hdg=0 (track over ground non calculable).
+    // Si le cap reste bloqué à 0° en mouvement → vérifier que AT-CORE
+    // envoie bien g_status.hdg != 0 via le champ "hdg" du JSON STATUS.
+    // Évolution possible : ajouter un magnétomètre côté AT-CORE pour
+    // un cap indépendant de la vitesse (cap magnétique vs cap sol).
     if(g_status.valid){
         snprintf(b,32,"%d°",g_status.hdg);lv_label_set_text(r_radar_hdg,b);
         const int cbear[]={0,90,180,270};
