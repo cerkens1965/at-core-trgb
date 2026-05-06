@@ -49,7 +49,7 @@ static inline lv_color_t PILL_IC_ON() {return g_dark_theme?lv_color_hex(0xffffff
 // ── Data structs ──────────────────────────────────────────────────────────────
 struct StatusData {
     int mode,gps_sat,csq,frames,alt,spd,hdg,bat; float lat,lon;
-    bool gps_fix,sd_ok,flarm_ok,adsb_ok,valid; };
+    bool gps_fix,sd_ok,flarm_ok,adsb_ok,charging,valid; };
 struct FlightData  { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
 struct TrafficEntry { char cs[9]; int dist_m,alt_m,bear_deg,hdg_deg,spd_kt; bool visible; };
@@ -252,6 +252,7 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.hdg=d["hdg"]|0;g_status.bat=d["bat"]|-1;g_status.lat=d["lat"]|0.0f;g_status.lon=d["lon"]|0.0f;
     g_status.gps_fix=d["gps_fix"]|false;g_status.sd_ok=d["sd_ok"]|false;
     g_status.flarm_ok=d["flarm"]|false;g_status.adsb_ok=d["adsb"]|false;
+    g_status.charging=d["charging"]|false;
     g_status.valid=true;g_dataUpdated=true;}
 void parseFlight(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_flight.gforce_z=d["gf"]|1.0f;g_flight.co_ppm=d["co"]|0;
@@ -931,6 +932,7 @@ void updateAllPages(){
         updSBox(3,"BLE",g_connected);updSBox(4,"FLARM",g_status.flarm_ok);updSBox(5,"ADS-B",g_status.adsb_ok);
         if(g_status.gps_fix){snprintf(b,32,"%.4f / %.4f",g_status.lat,g_status.lon);lv_label_set_text(r_coords,b);}
         if(g_status.bat<0){lv_label_set_text(r_bat_p1,"BAT  ---%");lv_obj_set_style_text_color(r_bat_p1,TGREY(),0);}
+        else if(g_status.charging){snprintf(b,32,"BAT  %d%%  "LV_SYMBOL_CHARGE,g_status.bat);lv_label_set_text(r_bat_p1,b);lv_obj_set_style_text_color(r_bat_p1,C_GREEN,0);}
         else{snprintf(b,32,"BAT  %d%%",g_status.bat);lv_label_set_text(r_bat_p1,b);
         lv_obj_set_style_text_color(r_bat_p1,g_status.bat>=50?C_GREEN:g_status.bat>=20?C_AMBER:C_RED,0);}
     }else{updSBox(3,"BLE",g_connected);}
@@ -972,8 +974,11 @@ void updateAllPages(){
       if(bat<0){lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);SET_PILL_TXT(r_hdr_bat,g_connected);}
       else{const char*bi=bat>=75?LV_SYMBOL_BATTERY_FULL:bat>=50?LV_SYMBOL_BATTERY_3:
                           bat>=25?LV_SYMBOL_BATTERY_2:bat>=10?LV_SYMBOL_BATTERY_1:LV_SYMBOL_BATTERY_EMPTY;
-           char bb[20];snprintf(bb,20,"%s%d%%",bi,bat);lv_label_set_text(r_hdr_bat,bb);
-           SET_PILL_TXT(r_hdr_bat,bat>=20);}}
+           char bb[24];
+           if(g_status.charging)snprintf(bb,24,LV_SYMBOL_CHARGE"%s%d%%",bi,bat);
+           else snprintf(bb,24,"%s%d%%",bi,bat);
+           lv_label_set_text(r_hdr_bat,bb);
+           SET_PILL_TXT(r_hdr_bat,g_status.charging?true:bat>=20);}}
      #undef SET_PILL_TXT
      #undef SET_PILL_IMG
      }
