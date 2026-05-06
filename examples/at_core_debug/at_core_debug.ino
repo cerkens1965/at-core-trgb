@@ -63,8 +63,8 @@ struct DebugData    {
 
 static const uint8_t kScaleOpts[]={1,2,4,8,10,20,40};
 static const char*   kSrcNames[] ={"SSKY","FLRM","ADSB","ALL"};
-struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark; int16_t vfilt_ft; };
-static CfgData     g_cfg={4,16,3,true,true,true,2000};
+struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd; int16_t vfilt_ft; };
+static CfgData     g_cfg={4,16,3,true,true,true,true,2000};
 static Preferences g_prefs;
 
 static StatusData  g_status  = {};
@@ -137,7 +137,7 @@ static bool      g_auth_p2       = false;   // phase 2: instructor code for stud
 static char      g_auth_scode[5] = {};      // student code saved during phase 2
 
 // ── Widget refs — Settings (page 2) ───────────────────────────────────────────
-static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v,*s_theme_v;
+static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v,*s_theme_v,*s_grnd_v;
 
 // ── Widget refs — Debug (hidden) ──────────────────────────────────────────────
 static lv_obj_t *r_hbgps,*r_hblte,*r_hbsd,*r_p5csq,*r_http,*r_code;
@@ -354,6 +354,7 @@ void cfgLoad(){
     g_cfg.dist_nm   =g_prefs.getBool("dist_nm",true);
     g_cfg.alt_ft    =g_prefs.getBool("alt_ft",true);
     g_cfg.dark      =g_prefs.getBool("dark",true);
+    g_cfg.show_grnd =g_prefs.getBool("show_grnd",true);
     g_cfg.vfilt_ft  =g_prefs.getShort("vfilt",2000);
     g_prefs.end();
     g_dark_theme=g_cfg.dark;}
@@ -365,6 +366,7 @@ void cfgSave(){
     g_prefs.putBool("dist_nm",g_cfg.dist_nm);
     g_prefs.putBool("alt_ft",g_cfg.alt_ft);
     g_prefs.putBool("dark",g_cfg.dark);
+    g_prefs.putBool("show_grnd",g_cfg.show_grnd);
     g_prefs.putShort("vfilt",g_cfg.vfilt_ft);
     g_prefs.end();}
 
@@ -779,6 +781,7 @@ void updSetPage(){
     lv_label_set_text(s_alt_v,  g_cfg.alt_ft?"ft":"m");
     snprintf(b,16,"%d",g_cfg.brightness); lv_label_set_text(s_bright_v,b);
     lv_label_set_text(s_src_v,  kSrcNames[g_cfg.trf_src&3]);
+    lv_label_set_text(s_grnd_v, g_cfg.show_grnd?"ON":"OFF");
     lv_label_set_text(s_theme_v,g_cfg.dark?"DARK":"LIGHT");
     snprintf(b,12,"%dnm",g_cfg.scale_nm); lv_label_set_text(r_radar_scale_lbl,b);
     panel.setBrightness(g_cfg.brightness);}
@@ -798,6 +801,7 @@ static void cbSetBtn(lv_event_t*e){
         case 9:g_cfg.brightness=min((int)g_cfg.brightness+16,255);break;
         case 10:g_cfg.trf_src=(g_cfg.trf_src+3)%4;break;
         case 11:g_cfg.trf_src=(g_cfg.trf_src+1)%4;break;
+        case 14:case 15:g_cfg.show_grnd=!g_cfg.show_grnd;break;
         case 12:case 13:g_cfg.dark=!g_cfg.dark;g_rebuildPages=true;break;}
     cfgSave();
     if(!g_rebuildPages)updSetPage();}
@@ -831,9 +835,10 @@ void buildSettingsPage(){
     mkLbl(p,"DISPLAY",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,262);
     snprintf(b,16,"%d",g_cfg.brightness); s_bright_v=mkSetRow(p,"Bright",282,b,8,9);
     s_theme_v=mkSetRow(p,"Theme",322,g_cfg.dark?"DARK":"LIGHT",12,13);
-    mkLbl(p,"TRAFFIC",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,358);
-    s_src_v  =mkSetRow(p,"Source",378,kSrcNames[g_cfg.trf_src&3],10,11);
-    lv_obj_t*ver=mkLblP(p,"v0.6  ●  AT-VIEW",TGREY(),&lv_font_montserrat_14,160,418);
+    mkLbl(p,"TRAFFIC",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,348);
+    s_src_v  =mkSetRow(p,"Source",368,kSrcNames[g_cfg.trf_src&3],10,11);
+    s_grnd_v =mkSetRow(p,"Ground",408,g_cfg.show_grnd?"ON":"OFF",14,15);
+    lv_obj_t*ver=mkLblP(p,"v0.6  ●  AT-VIEW",TGREY(),&lv_font_montserrat_14,160,435);
     lv_obj_add_flag(ver,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(ver,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(ver,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);}
@@ -875,6 +880,10 @@ void updateRadarDR(){
     for(int i=0;i<MAX_TRF;i++){
         if(i<g_traffic.count){
             TrafficEntry&e=g_traffic.t[i];
+            if(!g_cfg.show_grnd&&e.spd_kt<30){
+                lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
+            } else {
             // Convert last-known polar position to cartesian (absolute north/east)
             float b_rad=(float)e.bear_deg*(float)M_PI/180.0f;
             float ex=(float)e.dist_m*sinf(b_rad);
@@ -915,6 +924,7 @@ void updateRadarDR(){
             lv_obj_set_pos(r_radar_alt[i],sx+12,sy+6);lv_label_set_text(r_radar_alt[i],b);
             lv_obj_set_style_text_color(r_radar_alt[i],col,0);
             lv_obj_clear_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
+            } // end else (not grounded)
         }else{
             lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
             lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);}}}
