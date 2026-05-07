@@ -11,7 +11,7 @@ import io
 import os
 from PIL import Image
 
-ICON_SIZE  = 32
+ICON_SIZE  = 48
 ICONS_DIR  = "public/icons"
 OUT_DIR    = "examples/at_core_debug"
 

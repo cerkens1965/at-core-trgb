@@ -64,8 +64,11 @@ struct DebugData    {
 
 static const uint8_t kScaleOpts[]={1,2,4,8,10,20,40};
 static const char*   kSrcNames[] ={"SSKY","FLRM","ADSB","ALL"};
-struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd; int16_t vfilt_ft; };
-static CfgData     g_cfg={4,16,3,true,true,true,true,2000};
+static const char*   kIconSzNames[]={"S","M","L"};
+static const uint16_t kIconZoom[]={171,213,256};  // zoom for 32/40/48 px from 48px base
+static const int8_t  kIconHalf[]={16,20,24};
+struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd; int16_t vfilt_ft; uint8_t icon_sz; };
+static CfgData     g_cfg={4,16,3,true,true,true,true,2000,1};
 static Preferences g_prefs;
 
 static StatusData  g_status  = {};
@@ -138,7 +141,7 @@ static bool      g_auth_p2       = false;   // phase 2: instructor code for stud
 static char      g_auth_scode[5] = {};      // student code saved during phase 2
 
 // ── Widget refs — Settings (page 2) ───────────────────────────────────────────
-static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v,*s_theme_v,*s_grnd_v;
+static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v,*s_theme_v,*s_grnd_v,*s_icon_sz_v;
 
 // ── Widget refs — Debug (hidden) ──────────────────────────────────────────────
 static lv_obj_t *r_hbgps,*r_hblte,*r_hbsd,*r_p5csq,*r_http,*r_code;
@@ -358,6 +361,7 @@ void cfgLoad(){
     g_cfg.dark      =g_prefs.getBool("dark",true);
     g_cfg.show_grnd =g_prefs.getBool("show_grnd",true);
     g_cfg.vfilt_ft  =g_prefs.getShort("vfilt",2000);
+    g_cfg.icon_sz   =g_prefs.getUChar("icon_sz",1);
     g_prefs.end();
     g_dark_theme=g_cfg.dark;}
 void cfgSave(){
@@ -370,6 +374,7 @@ void cfgSave(){
     g_prefs.putBool("dark",g_cfg.dark);
     g_prefs.putBool("show_grnd",g_cfg.show_grnd);
     g_prefs.putShort("vfilt",g_cfg.vfilt_ft);
+    g_prefs.putUChar("icon_sz",g_cfg.icon_sz);
     g_prefs.end();}
 
 // ── Forward declarations ──────────────────────────────────────────────────────
@@ -744,7 +749,8 @@ void buildRadarPage(){
         r_vect_pts[i][0]={RAD_CX,RAD_CY};r_vect_pts[i][1]={RAD_CX,RAD_CY};
         r_trf_img[i]=lv_img_create(p);
         lv_img_set_src(r_trf_img[i],&img_dot);
-        lv_img_set_pivot(r_trf_img[i],16,16);
+        lv_img_set_zoom(r_trf_img[i],kIconZoom[g_cfg.icon_sz]);
+        lv_img_set_pivot(r_trf_img[i],24,24);
         lv_obj_set_style_img_recolor(r_trf_img[i],C_CYAN,0);
         lv_obj_set_style_img_recolor_opa(r_trf_img[i],LV_OPA_COVER,0);
         lv_obj_set_style_shadow_opa(r_trf_img[i],LV_OPA_TRANSP,0);
@@ -785,6 +791,7 @@ void updSetPage(){
     lv_label_set_text(s_src_v,  kSrcNames[g_cfg.trf_src&3]);
     lv_label_set_text(s_grnd_v, g_cfg.show_grnd?"ON":"OFF");
     lv_label_set_text(s_theme_v,g_cfg.dark?"DARK":"LIGHT");
+    lv_label_set_text(s_icon_sz_v,kIconSzNames[g_cfg.icon_sz&2]);
     snprintf(b,12,"%dnm",g_cfg.scale_nm); lv_label_set_text(r_radar_scale_lbl,b);
     panel.setBrightness(g_cfg.brightness);}
 
@@ -804,7 +811,9 @@ static void cbSetBtn(lv_event_t*e){
         case 10:g_cfg.trf_src=(g_cfg.trf_src+3)%4;break;
         case 11:g_cfg.trf_src=(g_cfg.trf_src+1)%4;break;
         case 14:case 15:g_cfg.show_grnd=!g_cfg.show_grnd;break;
-        case 12:case 13:g_cfg.dark=!g_cfg.dark;g_rebuildPages=true;break;}
+        case 12:case 13:g_cfg.dark=!g_cfg.dark;g_rebuildPages=true;break;
+        case 16:g_cfg.icon_sz=max((int)g_cfg.icon_sz-1,0);break;
+        case 17:g_cfg.icon_sz=min((int)g_cfg.icon_sz+1,2);break;}
     cfgSave();
     if(!g_rebuildPages)updSetPage();}
 
@@ -839,8 +848,9 @@ void buildSettingsPage(){
     s_theme_v=mkSetRow(p,"Theme",322,g_cfg.dark?"DARK":"LIGHT",12,13);
     mkLbl(p,"TRAFFIC",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,348);
     s_src_v  =mkSetRow(p,"Source",368,kSrcNames[g_cfg.trf_src&3],10,11);
-    s_grnd_v =mkSetRow(p,"Ground",408,g_cfg.show_grnd?"ON":"OFF",14,15);
-    lv_obj_t*ver=mkLblP(p,"v0.6  ●  AT-VIEW",TGREY(),&lv_font_montserrat_14,160,435);
+    s_grnd_v  =mkSetRow(p,"Ground",408,g_cfg.show_grnd?"ON":"OFF",14,15);
+    s_icon_sz_v=mkSetRow(p,"Icons", 448,kIconSzNames[g_cfg.icon_sz&2],   16,17);
+    lv_obj_t*ver=mkLblP(p,"v0.6  ●  AT-VIEW",TGREY(),&lv_font_montserrat_14,160,472);
     lv_obj_add_flag(ver,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(ver,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(ver,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);}
@@ -913,14 +923,17 @@ void updateRadarDR(){
             float cs=cosf(hr),sn=sinf(hr);
             lv_color_t col=dr_dist<1000?C_RED:dr_dist<3000?C_AMBER:C_CYAN;
             lv_img_set_src(r_trf_img[i],getAircraftIcon(e.type));
-            lv_obj_set_pos(r_trf_img[i],sx-16,sy-16);
+            lv_img_set_zoom(r_trf_img[i],kIconZoom[g_cfg.icon_sz]);
+            int ih=kIconHalf[g_cfg.icon_sz];
+            lv_obj_set_pos(r_trf_img[i],sx-ih,sy-ih);
             lv_img_set_angle(r_trf_img[i],(int16_t)(rel_hdg*10));
             lv_obj_set_style_img_recolor(r_trf_img[i],col,0);
             lv_obj_clear_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);
             float px_per_nm=(float)RAD_R/(float)g_cfg.scale_nm;
             float vect_px=fmaxf(6.f,fminf((float)e.spd_kt/60.0f*px_per_nm,35.f));
-            r_vect_pts[i][0]={(lv_coord_t)(sx+(int)(15.f*sn)),(lv_coord_t)(sy-(int)(15.f*cs))};
-            r_vect_pts[i][1]={(lv_coord_t)(sx+(int)((15.f+vect_px)*sn)),(lv_coord_t)(sy-(int)((15.f+vect_px)*cs))};
+            float fih=(float)ih;
+            r_vect_pts[i][0]={(lv_coord_t)(sx+(int)(fih*sn)),(lv_coord_t)(sy-(int)(fih*cs))};
+            r_vect_pts[i][1]={(lv_coord_t)(sx+(int)((fih+vect_px)*sn)),(lv_coord_t)(sy-(int)((fih+vect_px)*cs))};
             lv_line_set_points(r_trf_vect[i],r_vect_pts[i],2);
             lv_obj_clear_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_pos(r_radar_cs[i],sx+12,sy-8);lv_label_set_text(r_radar_cs[i],e.cs);
