@@ -266,8 +266,8 @@ void buildPage3(){
         r_vect_pts[i][0]={RADAR_CX,RADAR_CY};r_vect_pts[i][1]={RADAR_CX,RADAR_CY};
         r_trf_img[i]=lv_img_create(p);
         lv_img_set_src(r_trf_img[i],&img_dot);
-        lv_img_set_recolor_opa(r_trf_img[i],LV_OPA_COVER);
-        lv_img_set_recolor(r_trf_img[i],C_GREEN);
+        lv_obj_set_style_img_recolor_opa(r_trf_img[i],LV_OPA_COVER,0);
+        lv_obj_set_style_img_recolor(r_trf_img[i],C_GREEN,0);
         lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);
         r_trf_vect[i]=mkRadarLine(p,r_vect_pts[i],C_AMBER);
         r_trf_lbl[i]=lv_label_create(p);lv_label_set_text(r_trf_lbl[i],"");
@@ -351,7 +351,7 @@ void updateAllPages(){
                 lv_color_t col=e.visible?C_GREEN:C_AMBER;
                 // icon centered at aircraft position
                 lv_img_set_src(r_trf_img[i],getAircraftIcon(e.type));
-                lv_img_set_recolor(r_trf_img[i],col);
+                lv_obj_set_style_img_recolor(r_trf_img[i],col,0);
                 lv_obj_set_pos(r_trf_img[i],sx-12,sy-12);
                 lv_obj_clear_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);
                 // heading vector: from icon edge outward in bearing direction
