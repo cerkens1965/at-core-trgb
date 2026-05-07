@@ -838,19 +838,19 @@ static lv_obj_t* mkSetRow(lv_obj_t*p,const char*k,int y,const char*v,int idn,int
 void buildSettingsPage(){
     lv_obj_t*p=g_pages[2];char b[16];
     mkLbl(p,"SETTINGS",C_AMBER,&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,55);
-    mkLbl(p,"CONFIG",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,88);
-    snprintf(b,16,"%dnm",g_cfg.scale_nm); s_scale_v=mkSetRow(p,"Scale", 108,b,0,1);
-    snprintf(b,16,"%dft",g_cfg.vfilt_ft); s_vfilt_v=mkSetRow(p,"V-Filt",148,b,2,3);
-    s_dist_v =mkSetRow(p,"Dist",  188,g_cfg.dist_nm?"NM":"km",4,5);
-    s_alt_v  =mkSetRow(p,"Alt",   228,g_cfg.alt_ft?"ft":"m",  6,7);
-    mkLbl(p,"DISPLAY",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,262);
-    snprintf(b,16,"%d",g_cfg.brightness); s_bright_v=mkSetRow(p,"Bright",282,b,8,9);
-    s_theme_v=mkSetRow(p,"Theme",322,g_cfg.dark?"DARK":"LIGHT",12,13);
-    mkLbl(p,"TRAFFIC",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,348);
-    s_src_v  =mkSetRow(p,"Source",368,kSrcNames[g_cfg.trf_src&3],10,11);
-    s_grnd_v  =mkSetRow(p,"Ground",408,g_cfg.show_grnd?"ON":"OFF",14,15);
-    s_icon_sz_v=mkSetRow(p,"Icons", 448,kIconSzNames[g_cfg.icon_sz&2],   16,17);
-    lv_obj_t*ver=mkLblP(p,"v0.6  ●  AT-VIEW",TGREY(),&lv_font_montserrat_14,160,472);
+    mkLbl(p,"CONFIG", TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0, 82);
+    snprintf(b,16,"%dnm",g_cfg.scale_nm); s_scale_v=mkSetRow(p,"Scale", 100,b,0,1);
+    snprintf(b,16,"%dft",g_cfg.vfilt_ft); s_vfilt_v=mkSetRow(p,"V-Filt",132,b,2,3);
+    s_dist_v =mkSetRow(p,"Dist",  164,g_cfg.dist_nm?"NM":"km",4,5);
+    s_alt_v  =mkSetRow(p,"Alt",   196,g_cfg.alt_ft?"ft":"m",  6,7);
+    mkLbl(p,"DISPLAY",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,226);
+    snprintf(b,16,"%d",g_cfg.brightness); s_bright_v=mkSetRow(p,"Bright",244,b,8,9);
+    s_theme_v=mkSetRow(p,"Theme",276,g_cfg.dark?"DARK":"LIGHT",12,13);
+    mkLbl(p,"TRAFFIC",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,306);
+    s_src_v   =mkSetRow(p,"Source",324,kSrcNames[g_cfg.trf_src&3],10,11);
+    s_grnd_v  =mkSetRow(p,"Ground",356,g_cfg.show_grnd?"ON":"OFF",14,15);
+    s_icon_sz_v=mkSetRow(p,"Icons", 388,kIconSzNames[g_cfg.icon_sz&2],16,17);
+    lv_obj_t*ver=mkLblP(p,"v0.6  ●  AT-VIEW",TGREY(),&lv_font_montserrat_14,160,420);
     lv_obj_add_flag(ver,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(ver,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(ver,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);}
