@@ -16,6 +16,7 @@
 #include <Preferences.h>
 #include <math.h>
 #include "img_vl3.h"
+#include "img_aircraft_icons.h"
 #include "img_safesky.h"
 #include "img_flarm.h"
 
@@ -52,7 +53,7 @@ struct StatusData {
     bool gps_fix,sd_ok,flarm_ok,adsb_ok,charging,valid; };
 struct FlightData  { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
-struct TrafficEntry { char cs[9]; int dist_m,alt_m,bear_deg,hdg_deg,spd_kt; bool visible; };
+struct TrafficEntry { char cs[9]; int dist_m,alt_m,bear_deg,hdg_deg,spd_kt,type; bool visible; };
 struct TrafficData  { TrafficEntry t[MAX_TRF]; int count; bool valid; uint32_t recv_ms; };
 struct AlertData    { bool co,gforce,rpm,traffic; char msg[64]; bool valid; };
 struct DebugData    {
@@ -265,7 +266,8 @@ void parseTraffic(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
         g_traffic.t[i].dist_m=d["t"][i]["d"]|0;g_traffic.t[i].alt_m=d["t"][i]["a"]|0;
         g_traffic.t[i].bear_deg=d["t"][i]["b"]|0;g_traffic.t[i].hdg_deg=d["t"][i]["c"]|0;
         g_traffic.t[i].spd_kt=d["t"][i]["s"]|100;
-        g_traffic.t[i].visible=d["t"][i]["v"]|true;}
+        g_traffic.t[i].visible=d["t"][i]["v"]|true;
+        g_traffic.t[i].type=d["t"][i]["tp"]|0;}
     g_traffic.valid=true;g_traffic.recv_ms=millis();g_dataUpdated=true;}
 void parseAlerts(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_alert.co=d["co"]|false;g_alert.gforce=d["gf"]|false;
@@ -741,8 +743,8 @@ void buildRadarPage(){
     for(int i=0;i<MAX_TRF;i++){
         r_vect_pts[i][0]={RAD_CX,RAD_CY};r_vect_pts[i][1]={RAD_CX,RAD_CY};
         r_trf_img[i]=lv_img_create(p);
-        lv_img_set_src(r_trf_img[i],&img_vl3);
-        lv_img_set_pivot(r_trf_img[i],20,20);
+        lv_img_set_src(r_trf_img[i],&img_dot);
+        lv_img_set_pivot(r_trf_img[i],12,12);
         lv_obj_set_style_img_recolor(r_trf_img[i],C_CYAN,0);
         lv_obj_set_style_img_recolor_opa(r_trf_img[i],LV_OPA_COVER,0);
         lv_obj_set_style_shadow_opa(r_trf_img[i],LV_OPA_TRANSP,0);
@@ -910,7 +912,8 @@ void updateRadarDR(){
             float hr=(float)rel_hdg*(float)M_PI/180.0f;
             float cs=cosf(hr),sn=sinf(hr);
             lv_color_t col=dr_dist<1000?C_RED:dr_dist<3000?C_AMBER:C_CYAN;
-            lv_obj_set_pos(r_trf_img[i],sx-20,sy-20);
+            lv_img_set_src(r_trf_img[i],getAircraftIcon(e.type));
+            lv_obj_set_pos(r_trf_img[i],sx-12,sy-12);
             lv_img_set_angle(r_trf_img[i],(int16_t)(rel_hdg*10));
             lv_obj_set_style_img_recolor(r_trf_img[i],col,0);
             lv_obj_clear_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);
