@@ -122,6 +122,7 @@ static lv_obj_t *r_card[4];
 static lv_obj_t *r_radar_cs[MAX_TRF],*r_radar_alt[MAX_TRF];
 static lv_obj_t *r_trf_img[MAX_TRF],*r_trf_vect[MAX_TRF];
 static lv_point_t r_vect_pts[MAX_TRF][2];
+static int r_trf_last_type[MAX_TRF];
 static lv_obj_t *r_alert_overlay, *r_aov_text;
 static lv_obj_t *r_co_val, *r_co_ball, *r_co_text;
 static lv_obj_t *r_hdr_bat;
@@ -751,6 +752,7 @@ void buildRadarPage(){
         lv_img_set_src(r_trf_img[i],&img_dot);
         lv_img_set_zoom(r_trf_img[i],kIconZoom[g_cfg.icon_sz]);
         lv_img_set_pivot(r_trf_img[i],24,24);
+        r_trf_last_type[i]=-1;
         lv_obj_set_style_img_recolor(r_trf_img[i],TFG(),0);
         lv_obj_set_style_img_recolor_opa(r_trf_img[i],LV_OPA_COVER,0);
         lv_obj_set_style_shadow_opa(r_trf_img[i],LV_OPA_TRANSP,0);
@@ -812,8 +814,8 @@ static void cbSetBtn(lv_event_t*e){
         case 11:g_cfg.trf_src=(g_cfg.trf_src+1)%4;break;
         case 14:case 15:g_cfg.show_grnd=!g_cfg.show_grnd;break;
         case 12:case 13:g_cfg.dark=!g_cfg.dark;g_rebuildPages=true;break;
-        case 16:g_cfg.icon_sz=max((int)g_cfg.icon_sz-1,0);break;
-        case 17:g_cfg.icon_sz=min((int)g_cfg.icon_sz+1,2);break;}
+        case 16:g_cfg.icon_sz=max((int)g_cfg.icon_sz-1,0);for(int i=0;i<MAX_TRF;i++)lv_img_set_zoom(r_trf_img[i],kIconZoom[g_cfg.icon_sz]);break;
+        case 17:g_cfg.icon_sz=min((int)g_cfg.icon_sz+1,2);for(int i=0;i<MAX_TRF;i++)lv_img_set_zoom(r_trf_img[i],kIconZoom[g_cfg.icon_sz]);break;}
     cfgSave();
     if(!g_rebuildPages)updSetPage();}
 
@@ -922,8 +924,9 @@ void updateRadarDR(){
             float hr=(float)rel_hdg*(float)M_PI/180.0f;
             float cs=cosf(hr),sn=sinf(hr);
             lv_color_t col=dr_dist<1000?C_RED:dr_dist<3000?C_AMBER:TFG();
-            lv_img_set_src(r_trf_img[i],getAircraftIcon(e.type));
-            lv_img_set_zoom(r_trf_img[i],kIconZoom[g_cfg.icon_sz]);
+            if(e.type!=r_trf_last_type[i]){
+                lv_img_set_src(r_trf_img[i],getAircraftIcon(e.type));
+                r_trf_last_type[i]=e.type;}
             int ih=kIconHalf[g_cfg.icon_sz];
             lv_obj_set_pos(r_trf_img[i],sx-ih,sy-ih);
             lv_img_set_angle(r_trf_img[i],(int16_t)(rel_hdg*10));
@@ -1123,5 +1126,6 @@ void loop(){
         if(g_page!=1)switchPage(1);}
     else if(!alert&&g_alertForced){g_alertForced=false;switchPage(g_prevPage);}
     if(g_navPending){g_navPending=false;switchPage(g_navPage);}
-    if(g_page==1)updateRadarDR();
-    lv_timer_handler();delay(2);}
+    static uint32_t drLast=0;
+    if(g_page==1&&now-drLast>=200){drLast=now;updateRadarDR();}
+    lv_timer_handler();delay(5);}
