@@ -11,9 +11,9 @@ import io
 import os
 from PIL import Image
 
-ICON_SIZE  = 24
+ICON_SIZE  = 32
 ICONS_DIR  = "public/icons"
-OUT_DIR    = "examples/at-core-trgb/at_core_debug"
+OUT_DIR    = "examples/at_core_debug"
 
 # SafeSky beacon_type int → (C name, svg filename)
 BEACON_MAP = [

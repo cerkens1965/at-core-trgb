@@ -744,7 +744,7 @@ void buildRadarPage(){
         r_vect_pts[i][0]={RAD_CX,RAD_CY};r_vect_pts[i][1]={RAD_CX,RAD_CY};
         r_trf_img[i]=lv_img_create(p);
         lv_img_set_src(r_trf_img[i],&img_dot);
-        lv_img_set_pivot(r_trf_img[i],12,12);
+        lv_img_set_pivot(r_trf_img[i],16,16);
         lv_obj_set_style_img_recolor(r_trf_img[i],C_CYAN,0);
         lv_obj_set_style_img_recolor_opa(r_trf_img[i],LV_OPA_COVER,0);
         lv_obj_set_style_shadow_opa(r_trf_img[i],LV_OPA_TRANSP,0);
@@ -913,7 +913,7 @@ void updateRadarDR(){
             float cs=cosf(hr),sn=sinf(hr);
             lv_color_t col=dr_dist<1000?C_RED:dr_dist<3000?C_AMBER:C_CYAN;
             lv_img_set_src(r_trf_img[i],getAircraftIcon(e.type));
-            lv_obj_set_pos(r_trf_img[i],sx-12,sy-12);
+            lv_obj_set_pos(r_trf_img[i],sx-16,sy-16);
             lv_img_set_angle(r_trf_img[i],(int16_t)(rel_hdg*10));
             lv_obj_set_style_img_recolor(r_trf_img[i],col,0);
             lv_obj_clear_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);
