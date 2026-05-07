@@ -68,7 +68,7 @@ static const char*   kIconSzNames[]={"S","M","L"};
 static const uint16_t kIconZoom[]={171,213,256};  // zoom for 32/40/48 px from 48px base
 static const int8_t  kIconHalf[]={16,20,24};
 struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd; int16_t vfilt_ft; uint8_t icon_sz; };
-static CfgData     g_cfg={4,16,3,true,true,true,true,2000,1};
+static CfgData     g_cfg={4,16,3,true,true,true,true,2000,2};
 static Preferences g_prefs;
 
 static StatusData  g_status  = {};
@@ -361,7 +361,7 @@ void cfgLoad(){
     g_cfg.dark      =g_prefs.getBool("dark",true);
     g_cfg.show_grnd =g_prefs.getBool("show_grnd",true);
     g_cfg.vfilt_ft  =g_prefs.getShort("vfilt",2000);
-    g_cfg.icon_sz   =g_prefs.getUChar("icon_sz",1);
+    g_cfg.icon_sz   =g_prefs.getUChar("icon_sz",2);
     g_prefs.end();
     g_dark_theme=g_cfg.dark;}
 void cfgSave(){
