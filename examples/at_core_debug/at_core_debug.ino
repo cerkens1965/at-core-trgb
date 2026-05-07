@@ -989,8 +989,8 @@ void updateAllPages(){
        if(bat<0){
           // Pas de données — symbole charge grisé
           lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);SET_PILL_TXT(r_hdr_bat,false);
-      }else if(g_status.charging){
-          // En charge — éclair seul, actif/bright
+      }else if(!g_status.charging){
+          // En charge (USB) — éclair seul, actif/bright
           lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);SET_PILL_TXT(r_hdr_bat,true);
       }else{
           // Sur batterie — jauge seule, sans %, rouge si <20%
