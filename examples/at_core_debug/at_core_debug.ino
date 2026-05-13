@@ -19,6 +19,7 @@
 #include "img_aircraft_icons.h"
 #include "img_safesky.h"
 #include "img_flarm.h"
+#include "img_logos.h"
 
 LilyGo_RGBPanel panel;
 
@@ -402,35 +403,51 @@ void rebuildAllPages(){
 void buildStatusPage(){
     lv_obj_t*p=g_pages[0];
 
-    // ── Brand header
-    r_title=mkLbl(p,"AT-VIEW",C_AMBER,&lv_font_montserrat_22,LV_ALIGN_TOP_MID,0,52);
-    mkLbl(p,"AeroTrace",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,80);
+    // ── Logos (white pixels → recolor via theme)
+    lv_obj_t*lAt=lv_img_create(p);
+    lv_img_set_src(lAt,&img_logo_aerotrace);
+    lv_obj_set_pos(lAt,120,78);
+    lv_obj_set_style_img_recolor(lAt,TFG(),0);
+    lv_obj_set_style_img_recolor_opa(lAt,LV_OPA_COVER,0);
 
-    // ── Boot checks (4 lines, compact, frozen after boot)
+    lv_obj_t*lVw=lv_img_create(p);
+    lv_img_set_src(lVw,&img_logo_atview);
+    lv_obj_set_pos(lVw,130,143);
+    lv_obj_set_style_img_recolor(lVw,C_AMBER,0);
+    lv_obj_set_style_img_recolor_opa(lVw,LV_OPA_COVER,0);
+
+    // ── Connection status (small, below logos)
+    r_title=mkLbl(p,"● SCAN",C_AMBER,&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,196);
+
+    // ── Separator
+    static lv_point_t sep1[2]={{110,210},{370,210}};
+    lv_obj_t*sl1=lv_line_create(p);lv_line_set_points(sl1,sep1,2);
+    lv_obj_set_style_line_color(sl1,TGRID(),0);lv_obj_set_style_line_width(sl1,1,0);
+
+    // ── Boot checks
     const char* bp_str = g_bootDone ? "● PANEL    OK" : "  PANEL    ...";
     const char* bl_str = g_bootDone ? "● LVGL     OK" : "  LVGL     ...";
     const char* bb_str = g_bootDone ? "● BLE      OK" : "  BLE      ...";
     const char* bc_str = g_bootDone ? "● AT-CORE  SCAN" : "  AT-CORE  ...";
     lv_color_t ok_col  = g_bootDone ? C_GREEN : TGREY();
     lv_color_t core_col= g_bootDone ? C_AMBER : TGREY();
-    r_boot_panel=mkLblP(p,bp_str,ok_col,  &lv_font_montserrat_14,120,108);
-    r_boot_lvgl =mkLblP(p,bl_str,ok_col,  &lv_font_montserrat_14,120,128);
-    r_boot_ble  =mkLblP(p,bb_str,ok_col,  &lv_font_montserrat_14,120,148);
-    r_boot_core =mkLblP(p,bc_str,core_col,&lv_font_montserrat_14,120,168);
+    r_boot_panel=mkLblP(p,bp_str,ok_col,  &lv_font_montserrat_14,120,224);
+    r_boot_lvgl =mkLblP(p,bl_str,ok_col,  &lv_font_montserrat_14,120,240);
+    r_boot_ble  =mkLblP(p,bb_str,ok_col,  &lv_font_montserrat_14,120,256);
+    r_boot_core =mkLblP(p,bc_str,core_col,&lv_font_montserrat_14,120,272);
 
-    // ── Separator line
-    static lv_point_t sep[2]={{100,192},{380,192}};
-    lv_obj_t*sl=lv_line_create(p);lv_line_set_points(sl,sep,2);
-    lv_obj_set_style_line_color(sl,TGRID(),0);lv_obj_set_style_line_width(sl,1,0);
+    // ── Separator 2
+    static lv_point_t sep2[2]={{110,286},{370,286}};
+    lv_obj_t*sl2=lv_line_create(p);lv_line_set_points(sl2,sep2,2);
+    lv_obj_set_style_line_color(sl2,TGRID(),0);lv_obj_set_style_line_width(sl2,1,0);
 
-    // ── Live status — boîtes carrées 22×22 + label (2 colonnes)
-    // col G x=68 (box) x=96 (txt)   col D x=252 (box) x=280 (txt)
-    mkSBox(p,0, 68,205,"GPS ---",false); mkSBox(p,1,252,205,"LTE ---",false);
-    mkSBox(p,2, 68,232,"SD ---", false); mkSBox(p,3,252,232,"BLE",    false);
-    mkSBox(p,4, 68,259,"FLARM",  false); mkSBox(p,5,252,259,"ADS-B",  false);
-    r_coords=mkLbl(p,"--- / ---",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,290);
-    r_bat_p1=mkLbl(p,"BAT  ---%",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,315);
-    mkLbl(p,"v0.6  —  2026-05-04",TGREY(),&lv_font_montserrat_12,LV_ALIGN_BOTTOM_MID,0,-60);}
+    // ── Live status — 2 colonnes
+    mkSBox(p,0, 68,300,"GPS ---",false); mkSBox(p,1,252,300,"LTE ---",false);
+    mkSBox(p,2, 68,327,"SD ---", false); mkSBox(p,3,252,327,"BLE",    false);
+    mkSBox(p,4, 68,354,"FLARM",  false); mkSBox(p,5,252,354,"ADS-B",  false);
+    r_coords=mkLbl(p,"--- / ---",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,380);
+    r_bat_p1=mkLbl(p,"BAT  ---%",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,400);
+    mkLbl(p,"v0.6  —  2026-05-13",TGREY(),&lv_font_montserrat_12,LV_ALIGN_BOTTOM_MID,0,-52);}
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
 void pilotDBLoad(){
@@ -585,42 +602,37 @@ void mkAuthOverlay(){
         lv_obj_center(lb);}}
 
 // Boot animation — runs on page 0 before it goes live
-// Does NOT clean the page — just animates the boot check labels
 void runBootOnPage(){
-    lv_obj_t*p=g_pages[0];
-
-    lv_timer_handler();delay(500);
+    // Logos visibles — pause splash
+    lv_timer_handler();delay(900);
 
     // PANEL
     lv_label_set_text(r_boot_panel,"  PANEL    ...");
-    lv_obj_set_style_text_color(r_boot_panel,TGREY(),0);lv_timer_handler();delay(350);
+    lv_obj_set_style_text_color(r_boot_panel,TGREY(),0);lv_timer_handler();delay(300);
     lv_label_set_text(r_boot_panel,"● PANEL    OK");
     lv_obj_set_style_text_color(r_boot_panel,C_GREEN,0);lv_timer_handler();
 
     // LVGL
     lv_label_set_text(r_boot_lvgl,"  LVGL     ...");
-    lv_obj_set_style_text_color(r_boot_lvgl,TGREY(),0);lv_timer_handler();delay(300);
+    lv_obj_set_style_text_color(r_boot_lvgl,TGREY(),0);lv_timer_handler();delay(250);
     lv_label_set_text(r_boot_lvgl,"● LVGL     OK");
     lv_obj_set_style_text_color(r_boot_lvgl,C_GREEN,0);lv_timer_handler();
 
     // BLE
     lv_label_set_text(r_boot_ble,"  BLE      ...");
-    lv_obj_set_style_text_color(r_boot_ble,TGREY(),0);lv_timer_handler();delay(300);
+    lv_obj_set_style_text_color(r_boot_ble,TGREY(),0);lv_timer_handler();delay(250);
     BLEDevice::init("ATCORE-TRGB");
     lv_label_set_text(r_boot_ble,"● BLE      OK");
     lv_obj_set_style_text_color(r_boot_ble,C_GREEN,0);lv_timer_handler();
 
     // AT-CORE scan
     lv_label_set_text(r_boot_core,"  AT-CORE  ...");
-    lv_obj_set_style_text_color(r_boot_core,TGREY(),0);lv_timer_handler();delay(400);
+    lv_obj_set_style_text_color(r_boot_core,TGREY(),0);lv_timer_handler();delay(350);
     startScan();
     lv_label_set_text(r_boot_core,"● AT-CORE  SCAN");
     lv_obj_set_style_text_color(r_boot_core,C_AMBER,0);lv_timer_handler();
-    delay(600);
+    delay(500);
     g_bootDone=true;
-
-    // Live status indicators are already on the page below — BLE/GPS/etc.
-    // will update as soon as data arrives
 }
 
 // ── Page 1 — Radar ────────────────────────────────────────────────────────────
@@ -897,7 +909,8 @@ void updateRadarDR(){
             // Filtre ground : masque les aéronefs à vitesse < 20 kt (taxi/stationnement).
             // Seuil 20 kt valable si AT-CORE fournit le champ "s" (spd_kt) dans le JSON TRAFFIC.
             // Si "s" absent, défaut = 100 kt → l'avion reste visible même filtré. Normal.
-            if(!g_cfg.show_grnd&&e.spd_kt<20){
+            float scale_m=(float)g_cfg.scale_nm*1852.0f;
+            if((!g_cfg.show_grnd&&e.spd_kt<20)||(e.dist_m>scale_m)){
                 lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
                 lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
             } else {
@@ -917,7 +930,7 @@ void updateRadarDR(){
             // Heading-up projection on screen
             int rb=((int)dr_bear-g_status.hdg+360)%360;
             float brd=(float)rb*(float)M_PI/180.0f;
-            float dpx=fminf(dr_dist*(float)RAD_R/((float)g_cfg.scale_nm*1852.0f),(float)(RAD_R-50));
+            float dpx=fminf(dr_dist*(float)RAD_R/scale_m,(float)(RAD_R-8));
             int sx=(int)(RAD_CX+sinf(brd)*dpx);
             int sy=(int)(RAD_CY-cosf(brd)*dpx);
             int rel_hdg=((e.hdg_deg-g_status.hdg)%360+360)%360;
@@ -955,7 +968,7 @@ void updateRadarDR(){
 void updateAllPages(){
     char b[32];
     // Status page
-    lv_label_set_text(r_title,g_connected?"AT-CORE":"AT-VIEW");
+    lv_label_set_text(r_title,g_connected?"● AT-CORE":"● SCAN");
     lv_obj_set_style_text_color(r_title,g_connected?C_GREEN:C_AMBER,0);
     if(g_status.valid){
         snprintf(b,32,"GPS %dsat",g_status.gps_sat);updSBox(0,b,g_status.gps_fix);
@@ -964,7 +977,7 @@ void updateAllPages(){
         updSBox(3,"BLE",g_connected);updSBox(4,"FLARM",g_status.flarm_ok);updSBox(5,"ADS-B",g_status.adsb_ok);
         if(g_status.gps_fix){snprintf(b,32,"%.4f / %.4f",g_status.lat,g_status.lon);lv_label_set_text(r_coords,b);}
         if(g_status.bat<0){lv_label_set_text(r_bat_p1,"BAT  ---%");lv_obj_set_style_text_color(r_bat_p1,TGREY(),0);}
-        else if(g_status.charging){snprintf(b,32,"BAT  %d%%  "LV_SYMBOL_CHARGE,g_status.bat);lv_label_set_text(r_bat_p1,b);lv_obj_set_style_text_color(r_bat_p1,C_GREEN,0);}
+        else if(g_status.charging){snprintf(b,32,"BAT  %d%%  " LV_SYMBOL_CHARGE,g_status.bat);lv_label_set_text(r_bat_p1,b);lv_obj_set_style_text_color(r_bat_p1,C_GREEN,0);}
         else{snprintf(b,32,"BAT  %d%%",g_status.bat);lv_label_set_text(r_bat_p1,b);
         lv_obj_set_style_text_color(r_bat_p1,g_status.bat>=50?C_GREEN:g_status.bat>=20?C_AMBER:C_RED,0);}
     }else{updSBox(3,"BLE",g_connected);}
