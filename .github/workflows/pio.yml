@@ -7,15 +7,19 @@ on:
     paths:
       - "src/**"
       - "examples/**"
-      - ".github/workflows/platformio.yml"
+      - ".github/workflows/pio.yml"
       - "platformio.ini"
 
 jobs:
   build:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         example:
+          # AT-CORE firmware (principal)
+          - examples/at_core_debug
+          # Exemples board standard
           - examples/AdjustBacklight
           - examples/BatteryVoltage
           - examples/lv_benchmark
@@ -27,26 +31,26 @@ jobs:
           - examples/lv_qrcode
           - examples/lv_slider
           - examples/RGBPanel
-          - examples/TFT_eSPI_Sprite
-          - examples/Touchpad
           - examples/DeepSleep
-          - examples/AdjustBacklight
 
     steps:
-      - uses: actions/checkout@v3
-      - uses: actions/cache@v3
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.cache/pip
             ~/.platformio/.cache
-          key: ${{ runner.os }}-pio
-      - uses: actions/setup-python@v4
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+
+      - uses: actions/setup-python@v5
         with:
-          python-version: "3.9"
-      - name: Install PlatformIO Core
+          python-version: "3.11"
+
+      - name: Install PlatformIO
         run: pip install --upgrade platformio
 
-      - name: Run PlatformIO
+      - name: Build
         run: pio run
         env:
           PLATFORMIO_SRC_DIR: ${{ matrix.example }}
