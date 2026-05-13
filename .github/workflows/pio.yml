@@ -1,4 +1,4 @@
-name: Build PlatformIO
+name: Build AT-VIEW (PlatformIO)
 
 on:
   workflow_dispatch:
@@ -6,32 +6,13 @@ on:
   push:
     paths:
       - "src/**"
-      - "examples/**"
+      - "examples/at_core_debug/**"
       - ".github/workflows/pio.yml"
       - "platformio.ini"
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        example:
-          # AT-CORE firmware (principal)
-          - examples/at_core_debug
-          # Exemples board standard
-          - examples/AdjustBacklight
-          - examples/BatteryVoltage
-          - examples/lv_benchmark
-          - examples/lv_factory
-          - examples/lv_helloworld
-          - examples/lv_gif
-          - examples/lv_images
-          - examples/lv_music
-          - examples/lv_qrcode
-          - examples/lv_slider
-          - examples/RGBPanel
-          - examples/DeepSleep
 
     steps:
       - uses: actions/checkout@v4
@@ -40,17 +21,13 @@ jobs:
         with:
           path: |
             ~/.cache/pip
-            ~/.platformio/.cache
+            ~/.platformio
           key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
 
       - name: Install PlatformIO
         run: pip install --upgrade platformio
 
-      - name: Build
-        run: pio run
+      - name: Build at_core_debug
+        run: pio run -e T-RGB
         env:
-          PLATFORMIO_SRC_DIR: ${{ matrix.example }}
+          PLATFORMIO_SRC_DIR: ${{ github.workspace }}/examples/at_core_debug
