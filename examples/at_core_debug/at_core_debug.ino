@@ -33,6 +33,7 @@ LilyGo_RGBPanel panel;
 #define BLE_CHR_ALERTS  "6E400006-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_DEBUG   "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_AUTH    "6E400007-B5A3-F393-E0A9-E50E24DCCA9E"
+#define BLE_CHR_PILOTS  "6E400008-B5A3-F393-E0A9-E50E24DCCA9E"
 // BLE identity — loaded from NVS namespace "unit" at boot
 static char g_unit_name[24]   = "ATVIEW-EBBY1-01";
 static char g_paired_mac[18]  = "";              // empty = connect to first ATCORE- found
@@ -100,7 +101,11 @@ static BLEClient*              g_client = nullptr;
 static BLERemoteService*       g_svc    = nullptr;
 static BLERemoteCharacteristic *g_chrS=nullptr,*g_chrF=nullptr,
                                 *g_chrT=nullptr,*g_chrA=nullptr,*g_chrD=nullptr,
-                                *g_chrW=nullptr;   // AUTH write (6E400007)
+                                *g_chrW=nullptr,   // AUTH write (6E400007)
+                                *g_chrP=nullptr;   // PILOTS notify (6E400008)
+// Pilot list BLE reassembly buffer
+static char    g_prx_buf[4096] = {};
+static int     g_prx_len       = 0;
 static volatile bool g_connected=false, g_doConnect=false, g_doReconnect=false;
 static BLEAdvertisedDevice*    g_target = nullptr;
 
@@ -434,6 +439,15 @@ static void notifyT(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){if(l>=BLE_
 static void notifyA(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){if(l>=BLE_BUF)return;static char b[BLE_BUF];memcpy(b,d,l);b[l]=0;parseAlerts(b);}
 static void notifyD(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){if(l>=BLE_BUF)return;static char b[BLE_BUF];memcpy(b,d,l);b[l]=0;parseDebug(b);}
 
+// PILOTS (6E400008) — framing: d[0]=0x01 start, 0x02 continue, 0x03 end+parse
+static void notifyP(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){
+    if(l<2)return;
+    uint8_t cmd=d[0];size_t dlen=l-1;const char*chunk=(const char*)(d+1);
+    if(cmd==0x01){g_prx_len=0;memset(g_prx_buf,0,sizeof(g_prx_buf));}
+    if(g_prx_len+dlen<sizeof(g_prx_buf)-1){
+        memcpy(g_prx_buf+g_prx_len,chunk,dlen);g_prx_len+=dlen;g_prx_buf[g_prx_len]=0;}
+    if(cmd==0x03){_parsePilotJSON(g_prx_buf);Serial.println("[Auth] source: BLE");}}
+
 class ATCCB:public BLEClientCallbacks{
     void onConnect(BLEClient*)override{g_connected=true;g_dataUpdated=true;Serial.println("[BLE] Connected");}
     void onDisconnect(BLEClient*)override{g_connected=false;g_autoNavDone=false;
@@ -462,11 +476,13 @@ bool connectBLE(){
     g_chrA=g_svc->getCharacteristic(BLE_CHR_ALERTS);
     g_chrD=g_svc->getCharacteristic(BLE_CHR_DEBUG);
     g_chrW=g_svc->getCharacteristic(BLE_CHR_AUTH);
+    g_chrP=g_svc->getCharacteristic(BLE_CHR_PILOTS);
     if(g_chrS&&g_chrS->canNotify())g_chrS->registerForNotify(notifyS);
     if(g_chrF&&g_chrF->canNotify())g_chrF->registerForNotify(notifyF);
     if(g_chrT&&g_chrT->canNotify())g_chrT->registerForNotify(notifyT);
     if(g_chrA&&g_chrA->canNotify())g_chrA->registerForNotify(notifyA);
     if(g_chrD&&g_chrD->canNotify())g_chrD->registerForNotify(notifyD);
+    if(g_chrP&&g_chrP->canNotify())g_chrP->registerForNotify(notifyP);
     return true;}
 void startScan(){BLEScan*s=BLEDevice::getScan();s->setAdvertisedDeviceCallbacks(new ATCAdv());s->setActiveScan(true);s->start(5,false);}
 
@@ -617,14 +633,10 @@ void buildStatusPage(){
     mkLbl(p,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_BOTTOM_MID,0,-52);}
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
-void pilotDBLoad(){
+static void _parsePilotJSON(const char* json){
     g_pilot_cnt=0;
-    if(!g_sd_ok)return;
-    File f=SD_MMC.open("/pilots.json");
-    if(!f){Serial.println("[Auth] No /pilots.json on SD");return;}
-    String db=f.readString();f.close();
     JsonDocument doc;
-    if(deserializeJson(doc,db)){Serial.println("[Auth] pilots.json parse error");return;}
+    if(deserializeJson(doc,json)){Serial.println("[Auth] pilot JSON parse error");return;}
     for(JsonObject e:doc.as<JsonArray>()){
         if(g_pilot_cnt>=MAX_PILOTS)break;
         PilotEntry&t=g_pilots[g_pilot_cnt++];
@@ -633,7 +645,15 @@ void pilotDBLoad(){
         strlcpy(t.status,       e["r"]|"pilot",sizeof(t.status));
         strlcpy(t.primary_icao, e["i"]|"",sizeof(t.primary_icao));
         strlcpy(t.trigram,      e["t"]|"",sizeof(t.trigram));}
-    Serial.printf("[Auth] %d pilots loaded from SD\n",g_pilot_cnt);}
+    Serial.printf("[Auth] %d pilots loaded\n",g_pilot_cnt);}
+
+void pilotDBLoad(){
+    if(!g_sd_ok)return;
+    File f=SD_MMC.open("/pilots.json");
+    if(!f){Serial.println("[Auth] No /pilots.json on SD");return;}
+    String db=f.readString();f.close();
+    _parsePilotJSON(db.c_str());
+    Serial.println("[Auth] source: SD");}
 
 PilotEntry* pilotFind(const char*code){
     for(int i=0;i<g_pilot_cnt;i++)if(strcmp(g_pilots[i].code,code)==0)return&g_pilots[i];
