@@ -142,8 +142,28 @@ static int       g_auth_len      = 0;
 static bool      g_auth_p2       = false;   // phase 2: instructor code for student
 static char      g_auth_scode[5] = {};      // student code saved during phase 2
 
+// ── Aircraft identity ─────────────────────────────────────────────────────────
+static const char* kOACITypes[] = {
+    "A320","AS350","B738","C172","DA40","DR400","EC135",
+    "FK9","MCR01","OTHER","PA28","R22","R44","TB20","ULAC","VL3"};
+#define N_OACI_TYPES 16
+char g_ac_reg[8]  = "";   // immatriculation ex "FJFVB"
+char g_ac_type[8] = "";   // code OACI ex "VL3"
+char g_ac_hex[7]  = "";   // hex transpondeur ex "38EDC5"
+static lv_obj_t* g_ac_ov      = nullptr;
+static lv_obj_t* g_ac_disp    = nullptr;
+static lv_obj_t* g_ac_hdr_reg = nullptr;
+static lv_obj_t* g_ac_hdr_typ = nullptr;
+static lv_obj_t* g_ac_hdr_hex = nullptr;
+static lv_obj_t* g_ac_ctn[3]  = {};
+static lv_obj_t* g_ac_tabs[3] = {};
+static lv_obj_t* g_ac_roller  = nullptr;
+static uint8_t   g_ac_tab     = 0;
+static char      g_ac_tmp[8]  = "";
+
 // ── Widget refs — Settings (page 2) ───────────────────────────────────────────
 static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v,*s_theme_v,*s_grnd_v,*s_icon_sz_v;
+static lv_obj_t *s_ac_v;
 
 // ── Widget refs — Debug (hidden) ──────────────────────────────────────────────
 static lv_obj_t *r_hbgps,*r_hblte,*r_hbsd,*r_p5csq,*r_http,*r_code;
@@ -386,6 +406,9 @@ void buildSettingsPage();
 void buildDebugPage();
 void createSwipeHandlers();
 void updSetPage();
+void mkAircraftOverlay();
+void acLoad();
+void acSave();
 
 // ── Theme rebuild ─────────────────────────────────────────────────────────────
 void rebuildAllPages(){
@@ -600,6 +623,227 @@ void mkAuthOverlay(){
         lv_obj_set_style_text_color(lb,TFG(),0);
         lv_obj_set_style_text_font(lb,&lv_font_montserrat_16,0);
         lv_obj_center(lb);}}
+
+// ── Aircraft identity overlay ─────────────────────────────────────────────────
+
+void acLoad(){
+    Preferences p;p.begin("aircraft",true);
+    p.getString("reg","").toCharArray(g_ac_reg,sizeof(g_ac_reg));
+    p.getString("type","").toCharArray(g_ac_type,sizeof(g_ac_type));
+    p.getString("hex24","").toCharArray(g_ac_hex,sizeof(g_ac_hex));
+    p.end();}
+
+void acSave(){
+    Preferences p;p.begin("aircraft",false);
+    p.putString("reg",g_ac_reg);
+    p.putString("type",g_ac_type);
+    p.putString("hex24",g_ac_hex);
+    p.end();}
+
+void acUpdateHeader(){
+    if(!g_ac_hdr_reg)return;
+    lv_label_set_text(g_ac_hdr_reg,g_ac_reg[0]?g_ac_reg:"---");
+    lv_label_set_text(g_ac_hdr_typ,g_ac_type[0]?g_ac_type:"---");
+    lv_label_set_text(g_ac_hdr_hex,g_ac_hex[0]?g_ac_hex:"------");}
+
+static void _ac_disp_refresh(){
+    if(!g_ac_disp)return;
+    if(g_ac_tab==2){
+        char d[8];int l=strlen(g_ac_tmp);
+        for(int i=0;i<6;i++)d[i]=(i<l)?g_ac_tmp[i]:'_';d[6]=0;
+        lv_label_set_text(g_ac_disp,d);
+    }else{lv_label_set_text(g_ac_disp,g_ac_tmp[0]?g_ac_tmp:"_");}}
+
+static void _ac_key_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    intptr_t d=(intptr_t)lv_event_get_user_data(e);
+    if(d==200){ // OK — save current tab, stay open
+        if(g_ac_tab==0){strlcpy(g_ac_reg,g_ac_tmp,sizeof(g_ac_reg));}
+        else if(g_ac_tab==2){
+            if(strlen(g_ac_tmp)!=6)return; // enforce 6 hex digits
+            strlcpy(g_ac_hex,g_ac_tmp,sizeof(g_ac_hex));}
+        acSave();acUpdateHeader();
+        if(s_ac_v){char t[20];snprintf(t,20,"%s  %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");lv_label_set_text(s_ac_v,t);}
+        return;}
+    if(d==202){lv_obj_del(g_ac_ov);g_ac_ov=nullptr;return;} // × close
+    if(d==201){int l=strlen(g_ac_tmp);if(l>0)g_ac_tmp[l-1]=0;}
+    else{int l=strlen(g_ac_tmp);int mx=(g_ac_tab==2)?6:7;
+        if(l<mx){g_ac_tmp[l]=(char)d;g_ac_tmp[l+1]=0;}}
+    _ac_disp_refresh();}
+
+static void _ac_roller_ok_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    if(!g_ac_roller)return;
+    uint16_t sel=lv_roller_get_selected(g_ac_roller);
+    if(sel<N_OACI_TYPES)strlcpy(g_ac_type,kOACITypes[sel],sizeof(g_ac_type));
+    acSave();acUpdateHeader();
+    if(s_ac_v){char t[20];snprintf(t,20,"%s  %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");lv_label_set_text(s_ac_v,t);}}
+
+void acSwitchTab(uint8_t tab){
+    g_ac_tab=tab;
+    lv_color_t abg=g_dark_theme?lv_color_hex(0x1f4068):lv_color_hex(0x94b4d4);
+    lv_color_t ibg=g_dark_theme?lv_color_hex(0x1a2332):lv_color_hex(0xdde3ea);
+    for(int i=0;i<3;i++)lv_obj_set_style_bg_color(g_ac_tabs[i],i==tab?abg:ibg,0);
+    for(int i=0;i<3;i++){
+        if(i==tab)lv_obj_clear_flag(g_ac_ctn[i],LV_OBJ_FLAG_HIDDEN);
+        else       lv_obj_add_flag(g_ac_ctn[i],LV_OBJ_FLAG_HIDDEN);}
+    if(tab==0)strlcpy(g_ac_tmp,g_ac_reg,sizeof(g_ac_tmp));
+    else if(tab==2)strlcpy(g_ac_tmp,g_ac_hex,sizeof(g_ac_tmp));
+    if(tab!=1){lv_obj_clear_flag(g_ac_disp,LV_OBJ_FLAG_HIDDEN);_ac_disp_refresh();}
+    else       lv_obj_add_flag(g_ac_disp,LV_OBJ_FLAG_HIDDEN);}
+
+static void _ac_tab_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    acSwitchTab((uint8_t)(intptr_t)lv_event_get_user_data(e));}
+
+lv_obj_t* mkAcKey(lv_obj_t*p,const char*t,int x,int y,int w,int h,intptr_t d){
+    lv_color_t bg=g_dark_theme?lv_color_hex(0x1e2b38):lv_color_hex(0xd0dce8);
+    lv_obj_t*b=lv_btn_create(p);lv_obj_set_size(b,w,h);lv_obj_set_pos(b,x,y);
+    lv_obj_set_style_bg_color(b,bg,0);
+    lv_obj_set_style_bg_color(b,lv_color_hex(0x2d4358),LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);lv_obj_set_style_radius(b,8,0);
+    lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(b,0,0);
+    lv_obj_set_style_pad_all(b,0,0);
+    lv_obj_add_event_cb(b,_ac_key_cb,LV_EVENT_CLICKED,(void*)d);
+    lv_obj_t*lb=lv_label_create(b);lv_label_set_text(lb,t);
+    lv_obj_set_style_text_color(lb,TFG(),0);
+    lv_obj_set_style_text_font(lb,&lv_font_montserrat_14,0);
+    lv_obj_center(lb);return b;}
+
+void mkAircraftOverlay(){
+    // Fullscreen overlay
+    g_ac_ov=lv_obj_create(lv_scr_act());
+    lv_obj_set_size(g_ac_ov,480,480);lv_obj_set_pos(g_ac_ov,0,0);
+    lv_obj_set_style_bg_color(g_ac_ov,TBG(),0);lv_obj_set_style_bg_opa(g_ac_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(g_ac_ov,0,0);lv_obj_set_style_radius(g_ac_ov,0,0);
+    lv_obj_set_style_shadow_opa(g_ac_ov,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(g_ac_ov,0,0);
+    lv_obj_clear_flag(g_ac_ov,LV_OBJ_FLAG_SCROLLABLE);
+
+    // Title
+    lv_obj_t*tl=lv_label_create(g_ac_ov);lv_label_set_text(tl,"APPAREIL");
+    lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_20,0);
+    lv_obj_align(tl,LV_ALIGN_TOP_MID,0,48);
+
+    // Close ×
+    lv_obj_t*xb=lv_btn_create(g_ac_ov);lv_obj_set_size(xb,36,36);lv_obj_set_pos(xb,390,44);
+    lv_obj_set_style_bg_color(xb,lv_color_hex(0x3d0000),0);lv_obj_set_style_radius(xb,18,0);
+    lv_obj_set_style_border_width(xb,0,0);lv_obj_set_style_shadow_opa(xb,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(xb,_ac_key_cb,LV_EVENT_CLICKED,(void*)202);
+    lv_obj_t*xl=lv_label_create(xb);lv_label_set_text(xl,LV_SYMBOL_CLOSE);
+    lv_obj_set_style_text_color(xl,C_RED,0);lv_obj_center(xl);
+
+    // Summary: IMMAT / TYPE / HEX current values
+    mkLblP(g_ac_ov,"IMMAT",TGREY(),&lv_font_montserrat_12,58,78);
+    g_ac_hdr_reg=mkLblP(g_ac_ov,g_ac_reg[0]?g_ac_reg:"---",TFG(),&lv_font_montserrat_12,58,92);
+    mkLblP(g_ac_ov,"TYPE",TGREY(),&lv_font_montserrat_12,198,78);
+    g_ac_hdr_typ=mkLblP(g_ac_ov,g_ac_type[0]?g_ac_type:"---",C_AMBER,&lv_font_montserrat_12,198,92);
+    mkLblP(g_ac_ov,"HEX",TGREY(),&lv_font_montserrat_12,322,78);
+    g_ac_hdr_hex=mkLblP(g_ac_ov,g_ac_hex[0]?g_ac_hex:"------",C_CYAN,&lv_font_montserrat_12,322,92);
+
+    // Separator
+    static lv_point_t ac_sep[2]={{100,112},{380,112}};
+    lv_obj_t*sep=lv_line_create(g_ac_ov);lv_line_set_points(sep,ac_sep,2);
+    lv_obj_set_style_line_color(sep,TGRID(),0);lv_obj_set_style_line_width(sep,1,0);
+
+    // Tab buttons
+    static const char*tNames[3]={"IMMAT","TYPE","HEX"};
+    lv_color_t abg=g_dark_theme?lv_color_hex(0x1f4068):lv_color_hex(0x94b4d4);
+    lv_color_t ibg=g_dark_theme?lv_color_hex(0x1a2332):lv_color_hex(0xdde3ea);
+    int tbw=100,tbh=30,tbg=8,tbx=(480-(3*tbw+2*tbg))/2;
+    for(int i=0;i<3;i++){
+        lv_obj_t*tb=lv_btn_create(g_ac_ov);lv_obj_set_size(tb,tbw,tbh);
+        lv_obj_set_pos(tb,tbx+i*(tbw+tbg),118);
+        lv_obj_set_style_bg_color(tb,i==0?abg:ibg,0);lv_obj_set_style_bg_opa(tb,LV_OPA_COVER,0);
+        lv_obj_set_style_radius(tb,8,0);lv_obj_set_style_border_width(tb,0,0);
+        lv_obj_set_style_shadow_opa(tb,LV_OPA_TRANSP,0);
+        lv_obj_add_event_cb(tb,_ac_tab_cb,LV_EVENT_CLICKED,(void*)(intptr_t)i);
+        lv_obj_t*tl2=lv_label_create(tb);lv_label_set_text(tl2,tNames[i]);
+        lv_obj_set_style_text_color(tl2,TFG(),0);lv_obj_set_style_text_font(tl2,&lv_font_montserrat_14,0);
+        lv_obj_center(tl2);g_ac_tabs[i]=tb;}
+
+    // Editing display (IMMAT / HEX value being typed)
+    g_ac_disp=lv_label_create(g_ac_ov);
+    lv_label_set_text(g_ac_disp,g_ac_reg[0]?g_ac_reg:"_");
+    lv_obj_set_style_text_color(g_ac_disp,C_GREEN,0);
+    lv_obj_set_style_text_font(g_ac_disp,&lv_font_montserrat_20,0);
+    lv_obj_align(g_ac_disp,LV_ALIGN_TOP_MID,0,158);
+
+    // 3 content containers at y=196, h=240
+    for(int i=0;i<3;i++){
+        g_ac_ctn[i]=lv_obj_create(g_ac_ov);lv_obj_set_size(g_ac_ctn[i],480,240);
+        lv_obj_set_pos(g_ac_ctn[i],0,196);
+        lv_obj_set_style_bg_opa(g_ac_ctn[i],LV_OPA_TRANSP,0);
+        lv_obj_set_style_border_width(g_ac_ctn[i],0,0);lv_obj_set_style_shadow_opa(g_ac_ctn[i],LV_OPA_TRANSP,0);
+        lv_obj_set_style_pad_all(g_ac_ctn[i],0,0);lv_obj_clear_flag(g_ac_ctn[i],LV_OBJ_FLAG_SCROLLABLE);
+        if(i>0)lv_obj_add_flag(g_ac_ctn[i],LV_OBJ_FLAG_HIDDEN);}
+
+    // ── Container 0: IMMAT keyboard ──────────────────────────────────────────
+    {lv_obj_t*p=g_ac_ctn[0];
+    int bw=38,bh=28,gp=3;
+    int x0=(480-(10*(bw+gp)-gp))/2; // center 10 keys
+    static const char row1[]="ABCDEFGHIJ";
+    static const char row2[]="KLMNOPQRST";
+    for(int i=0;i<10;i++){
+        char c1[2]={row1[i],0},c2[2]={row2[i],0};
+        mkAcKey(p,c1,x0+i*(bw+gp), 8,bw,bh,(intptr_t)row1[i]);
+        mkAcKey(p,c2,x0+i*(bw+gp),40,bw,bh,(intptr_t)row2[i]);}
+    // UVWXYZ- (7 keys, centered)
+    static const char row3[]="UVWXYZ-";
+    int r3x=(480-(7*(bw+gp)-gp))/2;
+    for(int i=0;i<7;i++){char c[2]={row3[i],0};mkAcKey(p,c,r3x+i*(bw+gp),72,bw,bh,(intptr_t)row3[i]);}
+    // 0-9 (10 keys)
+    static const char row4[]="0123456789";
+    for(int i=0;i<10;i++){char c[2]={row4[i],0};mkAcKey(p,c,x0+i*(bw+gp),104,bw,bh,(intptr_t)row4[i]);}
+    // ⌫ and OK
+    mkAcKey(p,LV_SYMBOL_BACKSPACE,104,142,100,32,201);
+    mkAcKey(p,"OK",         284,142,100,32,200);}
+
+    // ── Container 1: TYPE roller ──────────────────────────────────────────────
+    {lv_obj_t*p=g_ac_ctn[1];
+    char opts[N_OACI_TYPES*8]="";
+    for(int i=0;i<N_OACI_TYPES;i++){strcat(opts,kOACITypes[i]);if(i<N_OACI_TYPES-1)strcat(opts,"\n");}
+    g_ac_roller=lv_roller_create(p);
+    lv_roller_set_options(g_ac_roller,opts,LV_ROLLER_MODE_NORMAL);
+    lv_roller_set_visible_row_count(g_ac_roller,4);
+    lv_obj_set_size(g_ac_roller,180,132);
+    lv_obj_align(g_ac_roller,LV_ALIGN_TOP_MID,0,8);
+    lv_obj_set_style_bg_color(g_ac_roller,g_dark_theme?lv_color_hex(0x0d1117):lv_color_hex(0xf0f2f5),0);
+    lv_obj_set_style_text_color(g_ac_roller,TFG(),0);
+    lv_obj_set_style_text_font(g_ac_roller,&lv_font_montserrat_16,0);
+    lv_obj_set_style_border_color(g_ac_roller,TGREY(),0);lv_obj_set_style_border_width(g_ac_roller,1,0);
+    lv_obj_set_style_shadow_opa(g_ac_roller,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_color(g_ac_roller,C_AMBER,LV_PART_SELECTED);
+    lv_obj_set_style_text_color(g_ac_roller,TBG(),LV_PART_SELECTED);
+    lv_obj_set_style_bg_opa(g_ac_roller,LV_OPA_COVER,LV_PART_SELECTED);
+    for(int i=0;i<N_OACI_TYPES;i++){
+        if(strcmp(kOACITypes[i],g_ac_type)==0){lv_roller_set_selected(g_ac_roller,i,LV_ANIM_OFF);break;}}
+    lv_obj_t*ok=lv_btn_create(p);lv_obj_set_size(ok,120,36);
+    lv_obj_align(ok,LV_ALIGN_TOP_MID,0,152);
+    lv_obj_set_style_bg_color(ok,lv_color_hex(0x1f4068),0);lv_obj_set_style_radius(ok,10,0);
+    lv_obj_set_style_border_width(ok,0,0);lv_obj_set_style_shadow_opa(ok,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(ok,_ac_roller_ok_cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t*okl=lv_label_create(ok);lv_label_set_text(okl,"OK");
+    lv_obj_set_style_text_color(okl,TFG(),0);lv_obj_set_style_text_font(okl,&lv_font_montserrat_16,0);
+    lv_obj_center(okl);}
+
+    // ── Container 2: HEX keyboard (6 digits 0-9/A-F) ─────────────────────────
+    {lv_obj_t*p=g_ac_ctn[2];
+    int bw=64,bh=34,gp=8;
+    int x0=(480-(4*(bw+gp)-gp))/2;
+    static const char* hr[4]={"0123","4567","89AB","CDEF"};
+    for(int r=0;r<4;r++)for(int c=0;c<4;c++){
+        char ch[2]={hr[r][c],0};
+        mkAcKey(p,ch,x0+c*(bw+gp),8+r*(bh+gp),bw,bh,(intptr_t)hr[r][c]);}
+    mkAcKey(p,LV_SYMBOL_BACKSPACE,(480-256)/2,8+4*(bh+gp),110,34,201);
+    mkAcKey(p,"OK",(480-256)/2+126,8+4*(bh+gp),130,34,200);}
+
+    // init state
+    strlcpy(g_ac_tmp,g_ac_reg,sizeof(g_ac_tmp));
+    g_ac_tab=0;}
+
+static void _open_aircraft_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    if(!g_ac_ov)mkAircraftOverlay();}
 
 // Boot animation — runs on page 0 before it goes live
 void runBootOnPage(){
@@ -849,6 +1093,18 @@ static lv_obj_t* mkSetRow(lv_obj_t*p,const char*k,int y,const char*v,int idn,int
     lv_obj_set_style_text_color(lu,TFG(),0);lv_obj_center(lu);
     return vl;}
 
+static lv_obj_t* mkSetRowBtn(lv_obj_t*p,const char*k,int y,const char*v,lv_event_cb_t cb){
+    mkLblP(p,k,TGREY(),&lv_font_montserrat_16,88,y);
+    lv_obj_t*vl=mkLblP(p,v,TFG(),&lv_font_montserrat_14,215,y+1);
+    lv_color_t bg=g_dark_theme?lv_color_hex(0x1f4068):lv_color_hex(0xdde1e7);
+    lv_obj_t*b=lv_btn_create(p);lv_obj_set_size(b,80,30);lv_obj_set_pos(b,285,y-4);
+    lv_obj_set_style_bg_color(b,bg,0);lv_obj_set_style_border_width(b,0,0);
+    lv_obj_set_style_radius(b,6,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(b,cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,"EDIT");
+    lv_obj_set_style_text_color(l,TFG(),0);lv_obj_center(l);
+    return vl;}
+
 void buildSettingsPage(){
     lv_obj_t*p=g_pages[2];char b[16];
     mkLbl(p,"SETTINGS",C_AMBER,&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,55);
@@ -864,7 +1120,10 @@ void buildSettingsPage(){
     s_src_v   =mkSetRow(p,"Source",324,kSrcNames[g_cfg.trf_src&3],10,11);
     s_grnd_v  =mkSetRow(p,"Ground",356,g_cfg.show_grnd?"ON":"OFF",14,15);
     s_icon_sz_v=mkSetRow(p,"Icons", 388,kIconSzNames[g_cfg.icon_sz&2],16,17);
-    lv_obj_t*ver=mkLblP(p,"v0.6  ●  AT-VIEW",TGREY(),&lv_font_montserrat_14,160,420);
+    mkLbl(p,"AIRCRAFT",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,410);
+    {char t[20];snprintf(t,20,"%s  %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");
+    s_ac_v=mkSetRowBtn(p,"Aircraft",426,t,_open_aircraft_cb);}
+    lv_obj_t*ver=mkLblP(p,"v0.6  ●  AT-VIEW",TGREY(),&lv_font_montserrat_12,168,452);
     lv_obj_add_flag(ver,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(ver,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(ver,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);}
@@ -1100,7 +1359,7 @@ void setup(){
     if(!panel.begin()){while(1){Serial.println("Panel FAIL");delay(1000);}}
     Serial.printf("Touch: %s\n",panel.getTouchModelName());
     beginLvglHelper(panel);
-    cfgLoad();
+    cfgLoad();acLoad();
     g_dark_theme=g_cfg.dark;
     lv_obj_set_style_bg_color(lv_scr_act(),TBG(),0);
     panel.setBrightness(g_cfg.brightness);
