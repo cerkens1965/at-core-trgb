@@ -143,23 +143,103 @@ static bool      g_auth_p2       = false;   // phase 2: instructor code for stud
 static char      g_auth_scode[5] = {};      // student code saved during phase 2
 
 // ── Aircraft identity ─────────────────────────────────────────────────────────
-static const char* kOACITypes[] = {
-    "A320","AS350","B738","C172","DA40","DR400","EC135",
-    "FK9","MCR01","OTHER","PA28","R22","R44","TB20","ULAC","VL3"};
-#define N_OACI_TYPES 16
+#define N_AC_TYPES 193
+static const char* kACCodes[N_AC_TYPES] = {
+    "GLID","BALL","ULAC","UHEL","GYRO","SHIP","ZZZZ",
+    "VL3","STNG","MCR1","FK9","FK12","FK14","EV97","EV10",
+    "VIPI","PIVI","PIVE","ALPH","BSTL","CH60","CH70","SVAN","CARE","C42",
+    "RANS","FLTD","PION","SVGE","SHRK","A210","TWST","CTLS","CTSW","JABI","P92",
+    "C150","C162","C172","C177","C182","C185","C206","C207","C210",
+    "PA18","P28A","P28B","P28R","P28T","P32R","P32T","P46T","M101",
+    "M20P","M20T","BE23","BE24","BE33","BE35","BE36","BE55","BE58","BE76",
+    "BE9L","BE20","B350",
+    "DR40","DR22","HR10","R200","R300",
+    "TB9","TB10","TB20","TB21","TBM7","TBM8","TBM9",
+    "D11","D18","D140","SR20","SR22","EVSS",
+    "DA20","DA40","DV20","DA42","DA62",
+    "P2002","P2006","P2010","P2012",
+    "G109","G115","G120","T67","SV4","Z42","Z526",
+    "C310","C340","C402","C404","C414","C421","PA44","PA34","P68",
+    "PC12","PC6T","C208","PAY2","PAY3","C90",
+    "C25A","C25B","C25C","C510","C525","C550","C560","C680","C750",
+    "PHMR","E50P","E55P","PC24","SF50",
+    "LJ35","LJ45","LJ60","F2TH","F900","F7X","F8X",
+    "CL60","CL30","CL35","G150","G280",
+    "AT43","AT45","AT72","AT75","AT76",
+    "DH8A","DH8B","DH8C","DH8D",
+    "E135","E145","E170","E175","E190","E195",
+    "A318","A319","A320","A321",
+    "B732","B733","B734","B735","B736","B737","B738","B739","B37M","B38M","B39M",
+    "B752","B753",
+    "R22","R44","R66","B06","B407","B429","S76","S92",
+    "EC35","EC45","EC55","EC25","AS50","AS55","ALO2","ALO3","A109","A119","AW13"};
+static const char* kACLabels[N_AC_TYPES] = {
+    "Glider / Planeur","Balloon / Ballon","ULM avion","ULM helicoptere",
+    "Gyrocopter","Airship / Dirigeable","Autre type (ZZZZ)",
+    "VL-3 / VL3 Evolution","TL-3000 Sting S4","MCR-01 UL/Club/VLA",
+    "FK-9 Mk IV/V","FK-12 Comet","FK-14 Polaris","EV-97 Eurostar","EV-10 Raven",
+    "Virus SW","Virus 912/914","Virus (electric)","Alpha Trainer","Bristell B23",
+    "CH-601 Zodiac","CH-700/750 Cruzer","Savannah / Savannah VG","Calidus/MTO Sport","C42",
+    "S-6 Coyote / S-7 Courier","Quik GTR / Quik R","Pioneer 200/300",
+    "Savage Cub/Classic","Shark","AT01 (A210)","Twister","CT LS/CT SW","CT SW",
+    "J120/J160/J170","P92 Echo/JS/RG",
+    "150/152","162 Skycatcher","172 Skyhawk","177 Cardinal","182 Skylane",
+    "185 Skywagon","206 Stationair","207 Skywagon","210 Centurion",
+    "PA-18 Super Cub","PA-28 Cherokee/Archer","PA-28R Arrow",
+    "PA-28R-201 Arrow III","PA-28R-201T Turbo Arrow",
+    "PA-32R Lance/Saratoga","PA-32RT-300 Turbo Lance","PA-46-500TP Meridian",
+    "PA-46-350P Malibu Mirage","M20 F/G/J/K","M20TN Acclaim/Ovation",
+    "Musketeer/Sport/Sundowner","Musketeer Super/Sierra",
+    "Bonanza V35/F33/G33","Bonanza 35","Bonanza A36/G36",
+    "Baron 55","Baron 58/58P/58TC","Duchess",
+    "King Air 90","King Air 200/B200","King Air 350",
+    "DR 400","DR 220/221","HR 100","HR 200 / R 2000","R 3000",
+    "TB 9 Tampico","TB 10 Tobago","TB 20 Trinidad","TB 21 Trinidad TC",
+    "TBM 700","TBM 850/900","TBM 960",
+    "Jodel D.11/112/113","Jodel D.18","Jodel D.140 Mousquetaire",
+    "SR20","SR22/SR22T","Vision SF50 (jet)",
+    "DA 20 Katana","DA 40 Star","DV 20 Katana (Rotax)","DA 42 Twin Star","DA 62",
+    "P2002 Sierra","P2006T","P2010","P2012 Traveller",
+    "G 109/109B Ranger","G 115/115T Acro","G 120 TP","T67 Firefly","SV-4 biplanes",
+    "Z 42/43","Z 526 Trener",
+    "Cessna 310","Cessna 340","Cessna 402","Cessna 404 Titan",
+    "Cessna 414 Chancellor","Cessna 421 Golden Eagle","PA-44 Seminole","PA-34 Seneca",
+    "P.68 Victor/Observer","PC-12/PC-12NG","PC-6 Turbo Porter","208 Caravan",
+    "PA-42 Cheyenne II","PA-42 Cheyenne III","King Air C90",
+    "Citation CJ2","Citation CJ3","Citation CJ4","Citation Mustang",
+    "CitationJet CJ1","Citation II/Bravo","Citation V/Ultra","Citation Sovereign",
+    "Citation X","HA-420 HondaJet","Phenom 100","Phenom 300","PC-24","Vision SF50",
+    "Learjet 35/36","Learjet 45","Learjet 60",
+    "Falcon 2000","Falcon 900/900EX","Falcon 7X","Falcon 8X",
+    "Challenger 600","Challenger 300","Challenger 350",
+    "Gulfstream G150/Galaxy","Gulfstream G280",
+    "ATR 42-300/320","ATR 42-500","ATR 72","ATR 72-500","ATR 72-600",
+    "Dash 8 Q100","Dash 8 Q200","Dash 8 Q300","Dash 8 Q400",
+    "ERJ 135","ERJ 145","Embraer 170","Embraer 175","Embraer 190","Embraer 195",
+    "A318","A319/A319neo","A320/A320neo","A321/A321neo",
+    "737-200","737-300","737-400","737-500","737-600",
+    "737-700/700W","737-800/800W","737-900/900ER","737 MAX 7","737 MAX 8","737 MAX 9",
+    "757-200","757-300",
+    "Robinson R22","Robinson R44","Robinson R66",
+    "Bell 206 JetRanger","Bell 407","Bell 429",
+    "Sikorsky S-76","Sikorsky S-92",
+    "H135 (EC135)","H145 (EC145)","H155 (EC155)","H225 Super Puma",
+    "H125 AS350 Ecureuil","H130 (EC130)",
+    "Alouette II","Alouette III","AW109","AW119 Koala","AW139"};
 char g_ac_reg[8]  = "";   // immatriculation ex "FJFVB"
 char g_ac_type[8] = "";   // code OACI ex "VL3"
 char g_ac_hex[7]  = "";   // hex transpondeur ex "38EDC5"
-static lv_obj_t* g_ac_ov      = nullptr;
-static lv_obj_t* g_ac_disp    = nullptr;
-static lv_obj_t* g_ac_hdr_reg = nullptr;
-static lv_obj_t* g_ac_hdr_typ = nullptr;
-static lv_obj_t* g_ac_hdr_hex = nullptr;
-static lv_obj_t* g_ac_ctn[3]  = {};
-static lv_obj_t* g_ac_tabs[3] = {};
-static lv_obj_t* g_ac_roller  = nullptr;
-static uint8_t   g_ac_tab     = 0;
-static char      g_ac_tmp[8]  = "";
+static lv_obj_t* g_ac_ov       = nullptr;
+static lv_obj_t* g_ac_disp     = nullptr;
+static lv_obj_t* g_ac_hdr_reg  = nullptr;
+static lv_obj_t* g_ac_hdr_typ  = nullptr;
+static lv_obj_t* g_ac_hdr_hex  = nullptr;
+static lv_obj_t* g_ac_ctn[3]   = {};
+static lv_obj_t* g_ac_tabs[3]  = {};
+static lv_obj_t* g_ac_roller   = nullptr;
+static lv_obj_t* g_ac_type_desc= nullptr;
+static uint8_t   g_ac_tab      = 0;
+static char      g_ac_tmp[8]   = "";
 
 // ── Widget refs — Settings (page 2) ───────────────────────────────────────────
 static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v,*s_theme_v,*s_grnd_v,*s_icon_sz_v;
@@ -675,9 +755,15 @@ static void _ac_roller_ok_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
     if(!g_ac_roller)return;
     uint16_t sel=lv_roller_get_selected(g_ac_roller);
-    if(sel<N_OACI_TYPES)strlcpy(g_ac_type,kOACITypes[sel],sizeof(g_ac_type));
+    if(sel<N_AC_TYPES)strlcpy(g_ac_type,kACCodes[sel],sizeof(g_ac_type));
     acSave();acUpdateHeader();
     if(s_ac_v){char t[20];snprintf(t,20,"%s  %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");lv_label_set_text(s_ac_v,t);}}
+
+static void _ac_roller_change_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_VALUE_CHANGED)return;
+    if(!g_ac_roller||!g_ac_type_desc)return;
+    uint16_t sel=lv_roller_get_selected(g_ac_roller);
+    if(sel<N_AC_TYPES)lv_label_set_text(g_ac_type_desc,kACLabels[sel]);}
 
 void acSwitchTab(uint8_t tab){
     g_ac_tab=tab;
@@ -798,14 +884,16 @@ void mkAircraftOverlay(){
     mkAcKey(p,LV_SYMBOL_BACKSPACE,104,142,100,32,201);
     mkAcKey(p,"OK",         284,142,100,32,200);}
 
-    // ── Container 1: TYPE roller ──────────────────────────────────────────────
+    // ── Container 1: TYPE roller (kACCodes, 193 entries) ─────────────────────
     {lv_obj_t*p=g_ac_ctn[1];
-    char opts[N_OACI_TYPES*8]="";
-    for(int i=0;i<N_OACI_TYPES;i++){strcat(opts,kOACITypes[i]);if(i<N_OACI_TYPES-1)strcat(opts,"\n");}
+    // Build roller options string (codes only, ~950 bytes)
+    static char ac_opts[1024]="";
+    ac_opts[0]=0;
+    for(int i=0;i<N_AC_TYPES;i++){strcat(ac_opts,kACCodes[i]);if(i<N_AC_TYPES-1)strcat(ac_opts,"\n");}
     g_ac_roller=lv_roller_create(p);
-    lv_roller_set_options(g_ac_roller,opts,LV_ROLLER_MODE_NORMAL);
+    lv_roller_set_options(g_ac_roller,ac_opts,LV_ROLLER_MODE_NORMAL);
     lv_roller_set_visible_row_count(g_ac_roller,4);
-    lv_obj_set_size(g_ac_roller,180,132);
+    lv_obj_set_size(g_ac_roller,120,120);
     lv_obj_align(g_ac_roller,LV_ALIGN_TOP_MID,0,8);
     lv_obj_set_style_bg_color(g_ac_roller,g_dark_theme?lv_color_hex(0x0d1117):lv_color_hex(0xf0f2f5),0);
     lv_obj_set_style_text_color(g_ac_roller,TFG(),0);
@@ -815,10 +903,23 @@ void mkAircraftOverlay(){
     lv_obj_set_style_bg_color(g_ac_roller,C_AMBER,LV_PART_SELECTED);
     lv_obj_set_style_text_color(g_ac_roller,TBG(),LV_PART_SELECTED);
     lv_obj_set_style_bg_opa(g_ac_roller,LV_OPA_COVER,LV_PART_SELECTED);
-    for(int i=0;i<N_OACI_TYPES;i++){
-        if(strcmp(kOACITypes[i],g_ac_type)==0){lv_roller_set_selected(g_ac_roller,i,LV_ANIM_OFF);break;}}
-    lv_obj_t*ok=lv_btn_create(p);lv_obj_set_size(ok,120,36);
-    lv_obj_align(ok,LV_ALIGN_TOP_MID,0,152);
+    lv_obj_add_event_cb(g_ac_roller,_ac_roller_change_cb,LV_EVENT_VALUE_CHANGED,NULL);
+    // Pre-select current type
+    int presel=0;
+    for(int i=0;i<N_AC_TYPES;i++){if(strcmp(kACCodes[i],g_ac_type)==0){presel=i;break;}}
+    lv_roller_set_selected(g_ac_roller,presel,LV_ANIM_OFF);
+    // Description label (updates on scroll)
+    g_ac_type_desc=lv_label_create(p);
+    lv_label_set_text(g_ac_type_desc,kACLabels[presel]);
+    lv_obj_set_style_text_color(g_ac_type_desc,TGREY(),0);
+    lv_obj_set_style_text_font(g_ac_type_desc,&lv_font_montserrat_12,0);
+    lv_obj_set_width(g_ac_type_desc,280);
+    lv_obj_set_style_text_align(g_ac_type_desc,LV_TEXT_ALIGN_CENTER,0);
+    lv_label_set_long_mode(g_ac_type_desc,LV_LABEL_LONG_WRAP);
+    lv_obj_align(g_ac_type_desc,LV_ALIGN_TOP_MID,0,136);
+    // OK button
+    lv_obj_t*ok=lv_btn_create(p);lv_obj_set_size(ok,120,34);
+    lv_obj_align(ok,LV_ALIGN_TOP_MID,0,168);
     lv_obj_set_style_bg_color(ok,lv_color_hex(0x1f4068),0);lv_obj_set_style_radius(ok,10,0);
     lv_obj_set_style_border_width(ok,0,0);lv_obj_set_style_shadow_opa(ok,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(ok,_ac_roller_ok_cb,LV_EVENT_CLICKED,NULL);
