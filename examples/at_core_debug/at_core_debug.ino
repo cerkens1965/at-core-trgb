@@ -149,8 +149,6 @@ static char      g_auth_buf[5]   = {};
 static int       g_auth_len      = 0;
 static bool      g_auth_p2       = false;   // phase 2: instructor entry
 static char      g_auth_scode[5] = {};      // pilot code saved during phase 2
-static bool      g_auth_instr    = false;   // instructor toggle in popup
-static lv_obj_t* g_auth_instr_lbl= nullptr; // label "SOLO" / "AVEC INSTR."
 
 // ── Aircraft identity ─────────────────────────────────────────────────────────
 #define N_AC_TYPES 193
@@ -640,14 +638,13 @@ PilotEntry* pilotFind(const char*code){
     return nullptr;}
 
 bool checkOwnerNVS(){
-    if(!g_aircraft_icao[0])return false;
     Preferences p;p.begin("auth",true);
     String oc=p.getString("owner","");p.end();
     if(oc.length()!=4)return false;
     char cb[5];oc.toCharArray(cb,5);
     PilotEntry*pe=pilotFind(cb);
-    if(!pe||strcmp(pe->primary_icao,g_aircraft_icao)!=0)return false;
-    strlcpy(g_session.name,pe->name,32);strlcpy(g_session.status,pe->status,12);
+    if(!pe||strcmp(pe->status,"owner")!=0)return false;
+    strlcpy(g_session.name,pe->name,32);strlcpy(g_session.status,"owner",12);
     g_session.is_owner=true;g_session.valid=true;return true;}
 
 void authUpdateDots(){
@@ -672,50 +669,55 @@ void authError(const char*msg){
     g_auth_len=0;memset(g_auth_buf,0,5);
     lv_timer_create(_auth_err_cb,1500,nullptr);}
 
-void authSuccess(PilotEntry*pe){
-    strlcpy(g_session.name,pe->name,32);strlcpy(g_session.status,pe->status,12);
-    bool owner=g_aircraft_icao[0]&&pe->primary_icao[0]&&strcmp(pe->primary_icao,g_aircraft_icao)==0;
-    g_session.is_owner=owner;g_session.valid=true;
-    if(owner){Preferences p;p.begin("auth",false);p.putString("owner",pe->code);p.end();}
-    else{Preferences p;p.begin("auth",false);p.putString("owner","");p.end();}
-    if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}}
 
 static void _authCloseOv(lv_timer_t*t){
     lv_timer_del(t);
     if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}}
 
 static void _authSendBLE(const char*pc,const char*ic){
-    char payload[64];
-    if(ic&&ic[0])snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"ic\":\"%s\"}",pc,ic);
-    else         snprintf(payload,sizeof(payload),"{\"pc\":\"%s\"}",pc);
-    if(g_chrW&&g_chrW->canWrite())g_chrW->writeValue((uint8_t*)payload,strlen(payload),false);
-    // Local DB lookup for name display
     PilotEntry*pe=pilotFind(pc);
     PilotEntry*ie=(ic&&ic[0])?pilotFind(ic):nullptr;
-    g_session.valid=true;
+    const char* role=pe?pe->status:"unknown";
+    char payload[96];
+    if(ic&&ic[0])snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"ic\":\"%s\",\"role\":\"%s\"}",pc,ic,role);
+    else         snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"role\":\"%s\"}",pc,role);
+    if(g_chrW&&g_chrW->canWrite())g_chrW->writeValue((uint8_t*)payload,strlen(payload),false);
+    // Owner → save to NVS, popup won't show again at next boot
+    bool isOwner=(strcmp(role,"owner")==0);
+    if(isOwner){Preferences p;p.begin("auth",false);p.putString("owner",pc);p.end();}
+    g_session.valid=true;g_session.is_owner=isOwner;
     strlcpy(g_session.name,pe?pe->name:pc,sizeof(g_session.name));
-    strlcpy(g_session.status,ie?"student":pe?pe->status:"pilot",sizeof(g_session.status));
-    // Show name(s) in popup for 1.5s then auto-close
+    strlcpy(g_session.status,role,sizeof(g_session.status));
+    // Role label + color for feedback display
+    const char* roleLabel=isOwner?"Proprietaire":
+        strcmp(role,"student")==0?"Etudiant":
+        strcmp(role,"instructor")==0?"Instructeur":
+        strcmp(role,"pilot_location")==0?"Location":"";
+    lv_color_t roleCol=isOwner?C_GREEN:
+        (strcmp(role,"student")==0||strcmp(role,"instructor")==0)?C_AMBER:TGREY();
     if(g_auth_prompt)lv_label_set_text(g_auth_prompt,"Bienvenue");
     if(g_auth_name){
         if(ie){char nb[64];snprintf(nb,sizeof(nb),"%s\n+ %s",pe?pe->name:pc,ie->name);
                lv_label_set_text(g_auth_name,nb);}
         else   lv_label_set_text(g_auth_name,pe?pe->name:pc);}
+    if(g_auth_msg){
+        lv_label_set_text(g_auth_msg,roleLabel);
+        lv_obj_set_style_text_color(g_auth_msg,roleCol,0);}
     lv_timer_create(_authCloseOv,1500,nullptr);}
 
 void authValidate(){
     if(g_auth_len<4)return;
     if(!g_auth_p2){
-        if(g_auth_instr){
-            // Phase 2 — save pilot code and ask for instructor code
+        PilotEntry*pe=pilotFind(g_auth_buf);
+        bool isStudent=pe&&strcmp(pe->status,"student")==0;
+        if(isStudent){
             strlcpy(g_auth_scode,g_auth_buf,5);
             g_auth_p2=true;g_auth_len=0;memset(g_auth_buf,0,5);
             authUpdateDots();
             lv_label_set_text(g_auth_prompt,"Code instructeur");
-            {PilotEntry*pe=pilotFind(g_auth_scode);
-             lv_label_set_text(g_auth_name,pe?pe->name:"");}
-            lv_label_set_text(g_auth_msg,"");
-            if(g_auth_instr_lbl)lv_obj_add_flag(lv_obj_get_parent(g_auth_instr_lbl),LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(g_auth_name,pe->name);
+            if(g_auth_msg){lv_label_set_text(g_auth_msg,"Etudiant");
+                           lv_obj_set_style_text_color(g_auth_msg,C_AMBER,0);}
         }else{
             _authSendBLE(g_auth_buf,nullptr);}
     }else{
@@ -741,7 +743,7 @@ void mkAuthOverlay(){
     lv_obj_clear_flag(g_auth_ov,LV_OBJ_FLAG_SCROLLABLE);
     // Card — centered (170px half-width, 200px half-height → center at 240,236)
     lv_obj_t*card=lv_obj_create(g_auth_ov);
-    lv_obj_set_size(card,340,444);lv_obj_set_pos(card,70,20);
+    lv_obj_set_size(card,340,400);lv_obj_set_pos(card,70,40);
     lv_obj_set_style_bg_color(card,lv_color_hex(0x0f1923),0); // auth popup always dark
     lv_obj_set_style_bg_opa(card,LV_OPA_COVER,0);
     lv_obj_set_style_border_color(card,TRING(),0);lv_obj_set_style_border_width(card,1,0);
@@ -750,7 +752,7 @@ void mkAuthOverlay(){
     lv_obj_clear_flag(card,LV_OBJ_FLAG_SCROLLABLE);
     // ICAO label
     lv_obj_t*il=lv_label_create(card);
-    lv_label_set_text(il,g_aircraft_icao[0]?g_aircraft_icao:"AT-VIEW");
+    lv_label_set_text(il,g_ac_reg[0]?g_ac_reg:"AT-VIEW");
     lv_obj_set_style_text_color(il,TGREY(),0);
     lv_obj_set_style_text_font(il,&lv_font_montserrat_14,0);
     lv_obj_align(il,LV_ALIGN_TOP_MID,0,18);
@@ -787,35 +789,14 @@ void mkAuthOverlay(){
     lv_obj_set_style_text_color(g_auth_msg,C_RED,0);
     lv_obj_set_style_text_font(g_auth_msg,&lv_font_montserrat_12,0);
     lv_obj_align(g_auth_msg,LV_ALIGN_TOP_MID,0,148);
-    // Instructor toggle — pill button centered, y=170
-    g_auth_instr=false;
-    {lv_obj_t*tb=lv_btn_create(card);
-     lv_obj_set_size(tb,200,28);lv_obj_set_pos(tb,70,170);
-     lv_obj_set_style_bg_color(tb,lv_color_hex(0x1e2b38),0);
-     lv_obj_set_style_bg_color(tb,lv_color_hex(0x2d4358),LV_STATE_PRESSED);
-     lv_obj_set_style_bg_opa(tb,LV_OPA_COVER,0);
-     lv_obj_set_style_border_color(tb,TRING(),0);lv_obj_set_style_border_width(tb,1,0);
-     lv_obj_set_style_radius(tb,14,0);lv_obj_set_style_shadow_opa(tb,LV_OPA_TRANSP,0);
-     g_auth_instr_lbl=lv_label_create(tb);
-     lv_label_set_text(g_auth_instr_lbl,"SOLO");
-     lv_obj_set_style_text_color(g_auth_instr_lbl,TGREY(),0);
-     lv_obj_set_style_text_font(g_auth_instr_lbl,&lv_font_montserrat_12,0);
-     lv_obj_center(g_auth_instr_lbl);
-     lv_obj_add_event_cb(tb,[](lv_event_t*e){
-         g_auth_instr=!g_auth_instr;
-         if(g_auth_instr_lbl){
-             lv_label_set_text(g_auth_instr_lbl,g_auth_instr?"AVEC INSTR.":"SOLO");
-             lv_obj_set_style_text_color(g_auth_instr_lbl,
-                 g_auth_instr?C_AMBER:TGREY(),0);}
-     },LV_EVENT_CLICKED,nullptr);}
-    // Keypad 3×4 — BW=68 BH=50 BG=8 → cols 220px, KX=(340-220)/2=60, top y=208
+    // Keypad 3×4 — BW=68 BH=50 BG=8 → cols 220px, KX=(340-220)/2=60, top y=168
     static const char*kL[12]={"1","2","3","4","5","6","7","8","9","<","0","OK"};
     static const intptr_t kV[12]={1,2,3,4,5,6,7,8,9,10,0,11};
     for(int i=0;i<12;i++){
         int r=i/3,c=i%3;
         lv_obj_t*btn=lv_btn_create(card);
         lv_obj_set_size(btn,68,50);
-        lv_obj_set_pos(btn,60+c*76,208+r*58);
+        lv_obj_set_pos(btn,60+c*76,168+r*58);
         lv_obj_set_style_bg_color(btn,lv_color_hex(0x1e2b38),0);
         lv_obj_set_style_bg_color(btn,lv_color_hex(0x2d4358),LV_STATE_PRESSED);
         lv_obj_set_style_bg_opa(btn,LV_OPA_COVER,0);
