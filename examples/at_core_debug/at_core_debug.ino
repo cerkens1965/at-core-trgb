@@ -15,6 +15,9 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <math.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
 #include "img_vl3.h"
 #include "img_aircraft_icons.h"
 #include "img_safesky.h"
@@ -29,7 +32,10 @@ LilyGo_RGBPanel panel;
 #define BLE_CHR_TRAFFIC "6E400005-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_ALERTS  "6E400006-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_DEBUG   "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
-#define BLE_TARGET      "AT-CORE"
+// BLE identity — loaded from NVS namespace "unit" at boot
+static char g_unit_name[24]   = "ATVIEW-EBBY1-01";
+static char g_paired_mac[18]  = "";              // empty = connect to first ATCORE- found
+static char g_peer_name[24]   = "";              // name of the connected AT-CORE (cleared on disconnect)
 
 #define C_AMBER  lv_color_hex(0xF5A623)
 #define C_GREEN  lv_color_hex(0x22c55e)
@@ -43,7 +49,7 @@ static inline lv_color_t TBG()  {return g_dark_theme?lv_color_hex(0x000000):lv_c
 static inline lv_color_t TFG()  {return g_dark_theme?lv_color_hex(0xFFFFFF):lv_color_hex(0x0f172a);}
 static inline lv_color_t TGREY(){return g_dark_theme?lv_color_hex(0x6b7280):lv_color_hex(0x6b7280);}
 static inline lv_color_t TGRID(){return g_dark_theme?lv_color_hex(0x2a2a2a):lv_color_hex(0xd0d0d0);}
-static inline lv_color_t TRING(){return g_dark_theme?lv_color_hex(0x555555):lv_color_hex(0x9ca3af);}
+static inline lv_color_t TRING(){return g_dark_theme?lv_color_hex(0x888888):lv_color_hex(0x9ca3af);}
 static inline lv_color_t THDG() {return g_dark_theme?lv_color_hex(0x0d1b2a):lv_color_hex(0xe2e8f0);}
 static inline lv_color_t PILL_IC_OFF(){return g_dark_theme?lv_color_hex(0x2d3f52):lv_color_hex(0xb0bcc8);}
 static inline lv_color_t PILL_IC_ON() {return g_dark_theme?lv_color_hex(0xffffff):lv_color_hex(0x0d1117);}
@@ -68,8 +74,8 @@ static const char*   kSrcNames[] ={"SSKY","FLRM","ADSB","ALL"};
 static const char*   kIconSzNames[]={"S","M","L"};
 static const uint16_t kIconZoom[]={171,213,256};  // zoom for 32/40/48 px from 48px base
 static const int8_t  kIconHalf[]={16,20,24};
-struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd; int16_t vfilt_ft; uint8_t icon_sz; };
-static CfgData     g_cfg={4,16,3,true,true,true,true,2000,2};
+struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd,wifi_en,aip_en,ad_heli; int16_t vfilt_ft; uint8_t icon_sz; };
+static CfgData     g_cfg={4,16,3,true,true,true,true,false,true,false,2000,2};
 static Preferences g_prefs;
 
 static StatusData  g_status  = {};
@@ -144,88 +150,86 @@ static char      g_auth_scode[5] = {};      // student code saved during phase 2
 
 // ── Aircraft identity ─────────────────────────────────────────────────────────
 #define N_AC_TYPES 193
+// Sorted alphabetically by ICAO code
 static const char* kACCodes[N_AC_TYPES] = {
-    "GLID","BALL","ULAC","UHEL","GYRO","SHIP","ZZZZ",
-    "VL3","STNG","MCR1","FK9","FK12","FK14","EV97","EV10",
-    "VIPI","PIVI","PIVE","ALPH","BSTL","CH60","CH70","SVAN","CARE","C42",
-    "RANS","FLTD","PION","SVGE","SHRK","A210","TWST","CTLS","CTSW","JABI","P92",
-    "C150","C162","C172","C177","C182","C185","C206","C207","C210",
-    "PA18","P28A","P28B","P28R","P28T","P32R","P32T","P46T","M101",
-    "M20P","M20T","BE23","BE24","BE33","BE35","BE36","BE55","BE58","BE76",
-    "BE9L","BE20","B350",
-    "DR40","DR22","HR10","R200","R300",
-    "TB9","TB10","TB20","TB21","TBM7","TBM8","TBM9",
-    "D11","D18","D140","SR20","SR22","EVSS",
-    "DA20","DA40","DV20","DA42","DA62",
-    "P2002","P2006","P2010","P2012",
-    "G109","G115","G120","T67","SV4","Z42","Z526",
-    "C310","C340","C402","C404","C414","C421","PA44","PA34","P68",
-    "PC12","PC6T","C208","PAY2","PAY3","C90",
-    "C25A","C25B","C25C","C510","C525","C550","C560","C680","C750",
-    "PHMR","E50P","E55P","PC24","SF50",
-    "LJ35","LJ45","LJ60","F2TH","F900","F7X","F8X",
-    "CL60","CL30","CL35","G150","G280",
-    "AT43","AT45","AT72","AT75","AT76",
-    "DH8A","DH8B","DH8C","DH8D",
-    "E135","E145","E170","E175","E190","E195",
-    "A318","A319","A320","A321",
-    "B732","B733","B734","B735","B736","B737","B738","B739","B37M","B38M","B39M",
-    "B752","B753",
-    "R22","R44","R66","B06","B407","B429","S76","S92",
-    "EC35","EC45","EC55","EC25","AS50","AS55","ALO2","ALO3","A109","A119","AW13"};
+    "A109","A119","A210","A318","A319","A320","A321","ALO2",
+    "ALO3","ALPH","AS50","AS55","AT43","AT45","AT72","AT75",
+    "AT76","AW13","B06","B350","B37M","B38M","B39M","B407",
+    "B429","B732","B733","B734","B735","B736","B737","B738",
+    "B739","B752","B753","BALL","BE20","BE23","BE24","BE33",
+    "BE35","BE36","BE55","BE58","BE76","BE9L","BSTL","C150",
+    "C162","C172","C177","C182","C185","C206","C207","C208",
+    "C210","C25A","C25B","C25C","C310","C340","C402","C404",
+    "C414","C42","C421","C510","C525","C550","C560","C680",
+    "C750","C90","CARE","CH60","CH70","CL30","CL35","CL60",
+    "CTLS","CTSW","D11","D140","D18","DA20","DA40","DA42",
+    "DA62","DH8A","DH8B","DH8C","DH8D","DR22","DR40","DV20",
+    "E135","E145","E170","E175","E190","E195","E50P","E55P",
+    "EC25","EC35","EC45","EC55","EV10","EV97","EVSS","F2TH",
+    "F7X","F8X","F900","FK12","FK14","FK9","FLTD","G109",
+    "G115","G120","G150","G280","GLID","GYRO","HR10","JABI",
+    "LJ35","LJ45","LJ60","M101","M20P","M20T","MCR1","P2002",
+    "P2006","P2010","P2012","P28A","P28B","P28R","P28T","P32R",
+    "P32T","P46T","P68","P92","PA18","PA34","PA44","PAY2",
+    "PAY3","PC12","PC24","PC6T","PHMR","PION","PIVE","PIVI",
+    "R200","R22","R300","R44","R66","RANS","S76","S92",
+    "SF50","SHIP","SHRK","SR20","SR22","STNG","SV4","SVAN",
+    "SVGE","T67","TB10","TB20","TB21","TB9","TBM7","TBM8",
+    "TBM9","TWST","UHEL","ULAC","VIPI","VL3","Z42","Z526",
+    "ZZZZ"};
 static const char* kACLabels[N_AC_TYPES] = {
-    "Glider / Planeur","Balloon / Ballon","ULM avion","ULM helicoptere",
-    "Gyrocopter","Airship / Dirigeable","Autre type (ZZZZ)",
-    "VL-3 / VL3 Evolution","TL-3000 Sting S4","MCR-01 UL/Club/VLA",
-    "FK-9 Mk IV/V","FK-12 Comet","FK-14 Polaris","EV-97 Eurostar","EV-10 Raven",
-    "Virus SW","Virus 912/914","Virus (electric)","Alpha Trainer","Bristell B23",
-    "CH-601 Zodiac","CH-700/750 Cruzer","Savannah / Savannah VG","Calidus/MTO Sport","C42",
-    "S-6 Coyote / S-7 Courier","Quik GTR / Quik R","Pioneer 200/300",
-    "Savage Cub/Classic","Shark","AT01 (A210)","Twister","CT LS/CT SW","CT SW",
-    "J120/J160/J170","P92 Echo/JS/RG",
-    "150/152","162 Skycatcher","172 Skyhawk","177 Cardinal","182 Skylane",
-    "185 Skywagon","206 Stationair","207 Skywagon","210 Centurion",
-    "PA-18 Super Cub","PA-28 Cherokee/Archer","PA-28R Arrow",
-    "PA-28R-201 Arrow III","PA-28R-201T Turbo Arrow",
-    "PA-32R Lance/Saratoga","PA-32RT-300 Turbo Lance","PA-46-500TP Meridian",
-    "PA-46-350P Malibu Mirage","M20 F/G/J/K","M20TN Acclaim/Ovation",
+    "AW109","AW119 Koala","AT01 (A210)",
+    "A318","A319/A319neo","A320/A320neo","A321/A321neo",
+    "Alouette II","Alouette III","Alpha Trainer",
+    "H125 AS350 Ecureuil","H130 (EC130)",
+    "ATR 42-300/320","ATR 42-500","ATR 72","ATR 72-500","ATR 72-600","AW139",
+    "Bell 206 JetRanger","King Air 350",
+    "737 MAX 7","737 MAX 8","737 MAX 9","Bell 407","Bell 429",
+    "737-200","737-300","737-400","737-500","737-600",
+    "737-700/700W","737-800/800W","737-900/900ER","757-200","757-300",
+    "Balloon / Ballon","King Air 200/B200",
     "Musketeer/Sport/Sundowner","Musketeer Super/Sierra",
     "Bonanza V35/F33/G33","Bonanza 35","Bonanza A36/G36",
-    "Baron 55","Baron 58/58P/58TC","Duchess",
-    "King Air 90","King Air 200/B200","King Air 350",
-    "DR 400","DR 220/221","HR 100","HR 200 / R 2000","R 3000",
-    "TB 9 Tampico","TB 10 Tobago","TB 20 Trinidad","TB 21 Trinidad TC",
-    "TBM 700","TBM 850/900","TBM 960",
-    "Jodel D.11/112/113","Jodel D.18","Jodel D.140 Mousquetaire",
-    "SR20","SR22/SR22T","Vision SF50 (jet)",
-    "DA 20 Katana","DA 40 Star","DV 20 Katana (Rotax)","DA 42 Twin Star","DA 62",
-    "P2002 Sierra","P2006T","P2010","P2012 Traveller",
-    "G 109/109B Ranger","G 115/115T Acro","G 120 TP","T67 Firefly","SV-4 biplanes",
-    "Z 42/43","Z 526 Trener",
+    "Baron 55","Baron 58/58P/58TC","Duchess","King Air 90","Bristell B23",
+    "150/152","162 Skycatcher","172 Skyhawk","177 Cardinal","182 Skylane",
+    "185 Skywagon","206 Stationair","207 Skywagon","208 Caravan","210 Centurion",
+    "Citation CJ2","Citation CJ3","Citation CJ4",
     "Cessna 310","Cessna 340","Cessna 402","Cessna 404 Titan",
-    "Cessna 414 Chancellor","Cessna 421 Golden Eagle","PA-44 Seminole","PA-34 Seneca",
-    "P.68 Victor/Observer","PC-12/PC-12NG","PC-6 Turbo Porter","208 Caravan",
-    "PA-42 Cheyenne II","PA-42 Cheyenne III","King Air C90",
-    "Citation CJ2","Citation CJ3","Citation CJ4","Citation Mustang",
-    "CitationJet CJ1","Citation II/Bravo","Citation V/Ultra","Citation Sovereign",
-    "Citation X","HA-420 HondaJet","Phenom 100","Phenom 300","PC-24","Vision SF50",
-    "Learjet 35/36","Learjet 45","Learjet 60",
-    "Falcon 2000","Falcon 900/900EX","Falcon 7X","Falcon 8X",
-    "Challenger 600","Challenger 300","Challenger 350",
-    "Gulfstream G150/Galaxy","Gulfstream G280",
-    "ATR 42-300/320","ATR 42-500","ATR 72","ATR 72-500","ATR 72-600",
+    "Cessna 414 Chancellor","C42","Cessna 421 Golden Eagle",
+    "Citation Mustang","CitationJet CJ1","Citation II/Bravo",
+    "Citation V/Ultra","Citation Sovereign","Citation X","King Air C90",
+    "Calidus/MTO Sport","CH-601 Zodiac","CH-700/750 Cruzer",
+    "Challenger 300","Challenger 350","Challenger 600",
+    "CT LS/CT SW","CT SW",
+    "Jodel D.11/112/113","Jodel D.140 Mousquetaire","Jodel D.18",
+    "DA 20 Katana","DA 40 Star","DA 42 Twin Star","DA 62",
     "Dash 8 Q100","Dash 8 Q200","Dash 8 Q300","Dash 8 Q400",
+    "DR 220/221","DR 400","DV 20 Katana (Rotax)",
     "ERJ 135","ERJ 145","Embraer 170","Embraer 175","Embraer 190","Embraer 195",
-    "A318","A319/A319neo","A320/A320neo","A321/A321neo",
-    "737-200","737-300","737-400","737-500","737-600",
-    "737-700/700W","737-800/800W","737-900/900ER","737 MAX 7","737 MAX 8","737 MAX 9",
-    "757-200","757-300",
-    "Robinson R22","Robinson R44","Robinson R66",
-    "Bell 206 JetRanger","Bell 407","Bell 429",
-    "Sikorsky S-76","Sikorsky S-92",
-    "H135 (EC135)","H145 (EC145)","H155 (EC155)","H225 Super Puma",
-    "H125 AS350 Ecureuil","H130 (EC130)",
-    "Alouette II","Alouette III","AW109","AW119 Koala","AW139"};
+    "Phenom 100","Phenom 300",
+    "H225 Super Puma","H135 (EC135)","H145 (EC145)","H155 (EC155)",
+    "EV-10 Raven","EV-97 Eurostar","Vision SF50 (jet)",
+    "Falcon 2000","Falcon 7X","Falcon 8X","Falcon 900/900EX",
+    "FK-12 Comet","FK-14 Polaris","FK-9 Mk IV/V","Quik GTR / Quik R",
+    "G 109/109B Ranger","G 115/115T Acro","G 120 TP",
+    "Gulfstream G150/Galaxy","Gulfstream G280",
+    "Glider / Planeur","Gyrocopter","HR 100","J120/J160/J170",
+    "Learjet 35/36","Learjet 45","Learjet 60",
+    "PA-46-350P Malibu Mirage","M20 F/G/J/K","M20TN Acclaim/Ovation","MCR-01 UL/Club/VLA",
+    "P2002 Sierra","P2006T","P2010","P2012 Traveller",
+    "PA-28 Cherokee/Archer","PA-28R Arrow","PA-28R-201 Arrow III","PA-28R-201T Turbo Arrow",
+    "PA-32R Lance/Saratoga","PA-32RT-300 Turbo Lance","PA-46-500TP Meridian",
+    "P.68 Victor/Observer","P92 Echo/JS/RG","PA-18 Super Cub","PA-34 Seneca","PA-44 Seminole",
+    "PA-42 Cheyenne II","PA-42 Cheyenne III","PC-12/PC-12NG","PC-24","PC-6 Turbo Porter",
+    "HA-420 HondaJet","Pioneer 200/300","Virus (electric)","Virus 912/914",
+    "HR 200 / R 2000","Robinson R22","R 3000","Robinson R44","Robinson R66",
+    "S-6 Coyote / S-7 Courier","Sikorsky S-76","Sikorsky S-92",
+    "Vision SF50","Airship / Dirigeable","Shark","SR20","SR22/SR22T",
+    "TL-3000 Sting S4","SV-4 biplanes","Savannah / Savannah VG","Savage Cub/Classic",
+    "T67 Firefly","TB 10 Tobago","TB 20 Trinidad","TB 21 Trinidad TC","TB 9 Tampico",
+    "TBM 700","TBM 850/900","TBM 960","Twister",
+    "ULM helicoptere","ULM avion","Virus SW","VL-3 / VL3 Evolution",
+    "Z 42/43","Z 526 Trener","Autre type (ZZZZ)"};
 char g_ac_reg[8]  = "";   // immatriculation ex "FJFVB"
 char g_ac_type[8] = "";   // code OACI ex "VL3"
 char g_ac_hex[7]  = "";   // hex transpondeur ex "38EDC5"
@@ -239,11 +243,43 @@ static lv_obj_t* g_ac_tabs[3]  = {};
 static lv_obj_t* g_ac_roller   = nullptr;
 static lv_obj_t* g_ac_type_desc= nullptr;
 static uint8_t   g_ac_tab      = 0;
-static char      g_ac_tmp[8]   = "";
+static char      g_ac_tmp[8]    = "";
+static char      g_ac_search[5] = "";
+static lv_obj_t* g_ac_search_disp = nullptr;
 
 // ── Widget refs — Settings (page 2) ───────────────────────────────────────────
 static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v,*s_theme_v,*s_grnd_v,*s_icon_sz_v;
-static lv_obj_t *s_ac_v;
+static lv_obj_t *s_ac_v,*s_wifi_v,*s_sd_v;
+static lv_obj_t *s_pg[2]  = {};
+static lv_obj_t *s_pg_ind = nullptr;
+static uint8_t   s_pg_idx = 0;
+
+// ── SD card (AT-VIEW local) ───────────────────────────────────────────────────
+static bool     g_sd_ok = false;
+
+// ── AIP overlay data (PSRAM) ─────────────────────────────────────────────────
+struct AipCtrEntry { uint16_t pt_start,n_pts; uint8_t type_id; };
+#define AIP_MAX_CTR 1024
+#define AIP_MAX_PTS 24000
+#define AIP_MAX_AD  5500
+static AipCtrEntry g_aip_ctr[AIP_MAX_CTR];
+static int32_t*    g_aip_lat    = nullptr;   // ps_malloc, lat×1e6
+static int32_t*    g_aip_lon    = nullptr;   // ps_malloc, lon×1e6
+static uint16_t    g_aip_ctr_cnt= 0;
+static uint16_t    g_aip_pts_cnt= 0;
+struct AipAd { char icao[5]; int32_t lat_e6,lon_e6; uint8_t type_id; };
+static AipAd*      g_aip_ads    = nullptr;   // ps_malloc
+static uint16_t    g_aip_ad_cnt = 0;
+static bool        g_aip_loaded = false;
+static lv_obj_t*   r_aip_layer  = nullptr;
+static lv_obj_t*   s_aip_v      = nullptr;
+static lv_obj_t*   s_heli_v     = nullptr;
+static uint32_t g_sd_gb = 0;
+
+// ── WiFi AP + Web server ──────────────────────────────────────────────────────
+static WebServer* g_webserver  = nullptr;
+static bool       g_wifi_active = false;
+static char       g_wifi_pass[16] = "atview1234"; // NVS unit/wifi_pass
 
 // ── Widget refs — Debug (hidden) ──────────────────────────────────────────────
 static lv_obj_t *r_hbgps,*r_hblte,*r_hbsd,*r_p5csq,*r_http,*r_code;
@@ -400,14 +436,22 @@ class ATCCB:public BLEClientCallbacks{
     void onConnect(BLEClient*)override{g_connected=true;g_dataUpdated=true;Serial.println("[BLE] Connected");}
     void onDisconnect(BLEClient*)override{g_connected=false;g_autoNavDone=false;
         g_status.valid=g_flight.valid=g_traffic.valid=g_alert.valid=g_debug.valid=false;
+        g_peer_name[0]=0;
         g_dataUpdated=true;g_doReconnect=true;Serial.println("[BLE] Disconnected");}};
 class ATCAdv:public BLEAdvertisedDeviceCallbacks{
     void onResult(BLEAdvertisedDevice dev)override{
-        if(dev.getName()==BLE_TARGET){BLEDevice::getScan()->stop();
-            g_target=new BLEAdvertisedDevice(dev);g_doConnect=true;}}};
+        String nm=dev.getName().c_str();
+        if(!nm.startsWith("ATCORE-"))return;
+        if(g_paired_mac[0]!=0){
+            if(dev.getAddress().toString()!=std::string(g_paired_mac))return;}
+        BLEDevice::getScan()->stop();
+        g_target=new BLEAdvertisedDevice(dev);g_doConnect=true;}};
 bool connectBLE(){
     if(!g_client){g_client=BLEDevice::createClient();g_client->setClientCallbacks(new ATCCB());}
     if(!g_client->connect(g_target))return false;
+    // Persist paired MAC + remember peer name
+    unitSaveMac(g_target->getAddress().toString().c_str());
+    strlcpy(g_peer_name, g_target->getName().c_str(), sizeof(g_peer_name));
     g_client->setMTU(512);g_svc=g_client->getService(BLE_SVC_UUID);
     if(!g_svc){g_client->disconnect();return false;}
     g_chrS=g_svc->getCharacteristic(BLE_CHR_STATUS);
@@ -462,6 +506,9 @@ void cfgLoad(){
     g_cfg.alt_ft    =g_prefs.getBool("alt_ft",true);
     g_cfg.dark      =g_prefs.getBool("dark",true);
     g_cfg.show_grnd =g_prefs.getBool("show_grnd",true);
+    g_cfg.wifi_en   =g_prefs.getBool("wifi_en",false);
+    g_cfg.aip_en    =g_prefs.getBool("aip_en",true);
+    g_cfg.ad_heli   =g_prefs.getBool("ad_heli",false);
     g_cfg.vfilt_ft  =g_prefs.getShort("vfilt",2000);
     g_cfg.icon_sz   =g_prefs.getUChar("icon_sz",2);
     g_prefs.end();
@@ -475,9 +522,22 @@ void cfgSave(){
     g_prefs.putBool("alt_ft",g_cfg.alt_ft);
     g_prefs.putBool("dark",g_cfg.dark);
     g_prefs.putBool("show_grnd",g_cfg.show_grnd);
+    g_prefs.putBool("wifi_en",g_cfg.wifi_en);
+    g_prefs.putBool("aip_en",g_cfg.aip_en);
+    g_prefs.putBool("ad_heli",g_cfg.ad_heli);
     g_prefs.putShort("vfilt",g_cfg.vfilt_ft);
     g_prefs.putUChar("icon_sz",g_cfg.icon_sz);
     g_prefs.end();}
+
+void unitLoad(){
+    Preferences p;p.begin("unit",true);
+    p.getString("name","ATVIEW-EBBY1-01").toCharArray(g_unit_name,sizeof(g_unit_name));
+    p.getString("paired_mac","").toCharArray(g_paired_mac,sizeof(g_paired_mac));
+    p.getString("wifi_pass","atview1234").toCharArray(g_wifi_pass,sizeof(g_wifi_pass));
+    p.end();}
+void unitSaveMac(const char*mac){
+    strlcpy(g_paired_mac,mac,sizeof(g_paired_mac));
+    Preferences p;p.begin("unit",false);p.putString("paired_mac",mac);p.end();}
 
 // ── Forward declarations ──────────────────────────────────────────────────────
 void buildStatusPage();
@@ -751,19 +811,13 @@ static void _ac_key_cb(lv_event_t*e){
         if(l<mx){g_ac_tmp[l]=(char)d;g_ac_tmp[l+1]=0;}}
     _ac_disp_refresh();}
 
-static void _ac_roller_ok_cb(lv_event_t*e){
-    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
-    if(!g_ac_roller)return;
-    uint16_t sel=lv_roller_get_selected(g_ac_roller);
-    if(sel<N_AC_TYPES)strlcpy(g_ac_type,kACCodes[sel],sizeof(g_ac_type));
-    acSave();acUpdateHeader();
-    if(s_ac_v){char t[20];snprintf(t,20,"%s  %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");lv_label_set_text(s_ac_v,t);}}
-
 static void _ac_roller_change_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_VALUE_CHANGED)return;
     if(!g_ac_roller||!g_ac_type_desc)return;
     uint16_t sel=lv_roller_get_selected(g_ac_roller);
-    if(sel<N_AC_TYPES)lv_label_set_text(g_ac_type_desc,kACLabels[sel]);}
+    if(sel<N_AC_TYPES)lv_label_set_text(g_ac_type_desc,kACLabels[sel]);
+    g_ac_search[0]=0;
+    if(g_ac_search_disp)lv_label_set_text(g_ac_search_disp,"_");}
 
 void acSwitchTab(uint8_t tab){
     g_ac_tab=tab;
@@ -794,6 +848,46 @@ lv_obj_t* mkAcKey(lv_obj_t*p,const char*t,int x,int y,int w,int h,intptr_t d){
     lv_obj_t*lb=lv_label_create(b);lv_label_set_text(lb,t);
     lv_obj_set_style_text_color(lb,TFG(),0);
     lv_obj_set_style_text_font(lb,&lv_font_montserrat_14,0);
+    lv_obj_center(lb);return b;}
+
+static void _ac_search_key_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    intptr_t d=(intptr_t)lv_event_get_user_data(e);
+    if(d==200){
+        if(!g_ac_roller)return;
+        uint16_t sel=lv_roller_get_selected(g_ac_roller);
+        if(sel<N_AC_TYPES)strlcpy(g_ac_type,kACCodes[sel],sizeof(g_ac_type));
+        acSave();acUpdateHeader();
+        if(s_ac_v){char t[20];snprintf(t,20,"%s  %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");lv_label_set_text(s_ac_v,t);}
+        g_ac_search[0]=0;
+        if(g_ac_search_disp)lv_label_set_text(g_ac_search_disp,"_");
+        return;}
+    if(d==201){int l=strlen(g_ac_search);if(l>0)g_ac_search[l-1]=0;}
+    else{int l=strlen(g_ac_search);if(l<4){g_ac_search[l]=(char)d;g_ac_search[l+1]=0;}}
+    if(g_ac_search_disp){
+        char s[8];snprintf(s,8,"%s_",g_ac_search[0]?g_ac_search:"");
+        lv_label_set_text(g_ac_search_disp,s);}
+    if(!g_ac_roller)return;
+    int slen=strlen(g_ac_search);if(slen==0)return;
+    for(int i=0;i<N_AC_TYPES;i++){
+        if(strncmp(kACCodes[i],g_ac_search,slen)==0){
+            lv_roller_set_selected(g_ac_roller,i,LV_ANIM_ON);
+            if(g_ac_type_desc)lv_label_set_text(g_ac_type_desc,kACLabels[i]);
+            break;}}}
+
+lv_obj_t* mkSrchKey(lv_obj_t*p,const char*t,int x,int y,int w,int h,intptr_t d){
+    lv_color_t bg=(d==200)?lv_color_hex(0x1f4068):
+        (g_dark_theme?lv_color_hex(0x1e2b38):lv_color_hex(0xd0dce8));
+    lv_obj_t*b=lv_btn_create(p);lv_obj_set_size(b,w,h);lv_obj_set_pos(b,x,y);
+    lv_obj_set_style_bg_color(b,bg,0);
+    lv_obj_set_style_bg_color(b,lv_color_hex(0x2d4358),LV_STATE_PRESSED);
+    lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);lv_obj_set_style_radius(b,8,0);
+    lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(b,0,0);
+    lv_obj_set_style_pad_all(b,0,0);
+    lv_obj_add_event_cb(b,_ac_search_key_cb,LV_EVENT_CLICKED,(void*)d);
+    lv_obj_t*lb=lv_label_create(b);lv_label_set_text(lb,t);
+    lv_obj_set_style_text_color(lb,TFG(),0);
+    lv_obj_set_style_text_font(lb,&lv_font_montserrat_12,0);
     lv_obj_center(lb);return b;}
 
 void mkAircraftOverlay(){
@@ -884,31 +978,30 @@ void mkAircraftOverlay(){
     mkAcKey(p,LV_SYMBOL_BACKSPACE,104,142,100,32,201);
     mkAcKey(p,"OK",         284,142,100,32,200);}
 
-    // ── Container 1: TYPE roller (kACCodes, 193 entries) ─────────────────────
+    // ── Container 1: TYPE roller + A-Z search keyboard ───────────────────────
     {lv_obj_t*p=g_ac_ctn[1];
-    // Build roller options string (codes only, ~950 bytes)
+    // Roller (codes only)
     static char ac_opts[1024]="";
     ac_opts[0]=0;
     for(int i=0;i<N_AC_TYPES;i++){strcat(ac_opts,kACCodes[i]);if(i<N_AC_TYPES-1)strcat(ac_opts,"\n");}
     g_ac_roller=lv_roller_create(p);
     lv_roller_set_options(g_ac_roller,ac_opts,LV_ROLLER_MODE_NORMAL);
-    lv_roller_set_visible_row_count(g_ac_roller,4);
-    lv_obj_set_size(g_ac_roller,120,120);
-    lv_obj_align(g_ac_roller,LV_ALIGN_TOP_MID,0,8);
+    lv_roller_set_visible_row_count(g_ac_roller,3);
+    lv_obj_set_width(g_ac_roller,120);
+    lv_obj_align(g_ac_roller,LV_ALIGN_TOP_MID,0,6);
     lv_obj_set_style_bg_color(g_ac_roller,g_dark_theme?lv_color_hex(0x0d1117):lv_color_hex(0xf0f2f5),0);
     lv_obj_set_style_text_color(g_ac_roller,TFG(),0);
-    lv_obj_set_style_text_font(g_ac_roller,&lv_font_montserrat_16,0);
+    lv_obj_set_style_text_font(g_ac_roller,&lv_font_montserrat_14,0);
     lv_obj_set_style_border_color(g_ac_roller,TGREY(),0);lv_obj_set_style_border_width(g_ac_roller,1,0);
     lv_obj_set_style_shadow_opa(g_ac_roller,LV_OPA_TRANSP,0);
     lv_obj_set_style_bg_color(g_ac_roller,C_AMBER,LV_PART_SELECTED);
     lv_obj_set_style_text_color(g_ac_roller,TBG(),LV_PART_SELECTED);
     lv_obj_set_style_bg_opa(g_ac_roller,LV_OPA_COVER,LV_PART_SELECTED);
     lv_obj_add_event_cb(g_ac_roller,_ac_roller_change_cb,LV_EVENT_VALUE_CHANGED,NULL);
-    // Pre-select current type
     int presel=0;
     for(int i=0;i<N_AC_TYPES;i++){if(strcmp(kACCodes[i],g_ac_type)==0){presel=i;break;}}
     lv_roller_set_selected(g_ac_roller,presel,LV_ANIM_OFF);
-    // Description label (updates on scroll)
+    // Description label
     g_ac_type_desc=lv_label_create(p);
     lv_label_set_text(g_ac_type_desc,kACLabels[presel]);
     lv_obj_set_style_text_color(g_ac_type_desc,TGREY(),0);
@@ -916,16 +1009,27 @@ void mkAircraftOverlay(){
     lv_obj_set_width(g_ac_type_desc,280);
     lv_obj_set_style_text_align(g_ac_type_desc,LV_TEXT_ALIGN_CENTER,0);
     lv_label_set_long_mode(g_ac_type_desc,LV_LABEL_LONG_WRAP);
-    lv_obj_align(g_ac_type_desc,LV_ALIGN_TOP_MID,0,136);
-    // OK button
-    lv_obj_t*ok=lv_btn_create(p);lv_obj_set_size(ok,120,34);
-    lv_obj_align(ok,LV_ALIGN_TOP_MID,0,168);
-    lv_obj_set_style_bg_color(ok,lv_color_hex(0x1f4068),0);lv_obj_set_style_radius(ok,10,0);
-    lv_obj_set_style_border_width(ok,0,0);lv_obj_set_style_shadow_opa(ok,LV_OPA_TRANSP,0);
-    lv_obj_add_event_cb(ok,_ac_roller_ok_cb,LV_EVENT_CLICKED,NULL);
-    lv_obj_t*okl=lv_label_create(ok);lv_label_set_text(okl,"OK");
-    lv_obj_set_style_text_color(okl,TFG(),0);lv_obj_set_style_text_font(okl,&lv_font_montserrat_16,0);
-    lv_obj_center(okl);}
+    lv_obj_align(g_ac_type_desc,LV_ALIGN_TOP_MID,0,88);
+    // Search display (typed prefix + cursor)
+    g_ac_search[0]=0;
+    g_ac_search_disp=lv_label_create(p);
+    lv_label_set_text(g_ac_search_disp,"_");
+    lv_obj_set_style_text_color(g_ac_search_disp,C_GREEN,0);
+    lv_obj_set_style_text_font(g_ac_search_disp,&lv_font_montserrat_14,0);
+    lv_obj_align(g_ac_search_disp,LV_ALIGN_TOP_MID,0,108);
+    // A-Z jump keyboard: 4 rows, bw=32 bh=22 gp=3 → 7 keys=242px, x_start=119
+    int bw=32,bh=22,gp=3;
+    int kx=(480-(7*(bw+gp)-gp))/2;
+    static const char* kr[3]={"ABCDEFG","HIJKLMN","OPQRSTU"};
+    int ky[4]={130,155,180,205};
+    for(int r=0;r<3;r++)for(int c=0;c<7;c++){
+        char ch[2]={kr[r][c],0};
+        mkSrchKey(p,ch,kx+c*(bw+gp),ky[r],bw,bh,(intptr_t)kr[r][c]);}
+    // Row 4: V W X Y Z ⌫ OK
+    static const char row4[]="VWXYZ";
+    for(int c=0;c<5;c++){char ch[2]={row4[c],0};mkSrchKey(p,ch,kx+c*(bw+gp),ky[3],bw,bh,(intptr_t)row4[c]);}
+    mkSrchKey(p,LV_SYMBOL_BACKSPACE,kx+5*(bw+gp),ky[3],bw,bh,201);
+    mkSrchKey(p,"OK",kx+6*(bw+gp),ky[3],bw,bh,200);}
 
     // ── Container 2: HEX keyboard (6 digits 0-9/A-F) ─────────────────────────
     {lv_obj_t*p=g_ac_ctn[2];
@@ -966,7 +1070,7 @@ void runBootOnPage(){
     // BLE
     lv_label_set_text(r_boot_ble,"  BLE      ...");
     lv_obj_set_style_text_color(r_boot_ble,TGREY(),0);lv_timer_handler();delay(250);
-    BLEDevice::init("ATCORE-TRGB");
+    BLEDevice::init(g_unit_name);
     lv_label_set_text(r_boot_ble,"● BLE      OK");
     lv_obj_set_style_text_color(r_boot_ble,C_GREEN,0);lv_timer_handler();
 
@@ -979,6 +1083,117 @@ void runBootOnPage(){
     delay(500);
     g_bootDone=true;
 }
+
+// ── AIP loading ───────────────────────────────────────────────────────────────
+static void _aipLoadCtrFile(File& f){
+    char magic[4];f.read((uint8_t*)magic,4);
+    if(memcmp(magic,"CTR\x00",4)!=0)return;
+    uint16_t cnt;f.read((uint8_t*)&cnt,2);
+    for(int i=0;i<cnt&&g_aip_ctr_cnt<AIP_MAX_CTR;i++){
+        uint8_t nlen;f.read(&nlen,1);f.seek(f.position()+nlen);
+        uint8_t tid;f.read(&tid,1);
+        uint16_t npts;f.read((uint8_t*)&npts,2);
+        if(g_aip_pts_cnt+npts>AIP_MAX_PTS){f.seek(f.position()+npts*8);continue;}
+        g_aip_ctr[g_aip_ctr_cnt]={g_aip_pts_cnt,npts,tid};
+        g_aip_ctr_cnt++;
+        for(int j=0;j<npts;j++){
+            int32_t la,lo;f.read((uint8_t*)&la,4);f.read((uint8_t*)&lo,4);
+            g_aip_lat[g_aip_pts_cnt]=la;g_aip_lon[g_aip_pts_cnt]=lo;
+            g_aip_pts_cnt++;}}}
+
+static void _aipLoadAdFile(File& f){
+    char magic[4];f.read((uint8_t*)magic,4);
+    if(memcmp(magic,"ADP2",4)!=0)return;  // format v2: includes type_id
+    uint16_t cnt;f.read((uint8_t*)&cnt,2);
+    for(int i=0;i<cnt&&g_aip_ad_cnt<AIP_MAX_AD;i++){
+        char ic[4];f.read((uint8_t*)ic,4);
+        int32_t la,lo;f.read((uint8_t*)&la,4);f.read((uint8_t*)&lo,4);
+        uint8_t tid;f.read(&tid,1);
+        memcpy(g_aip_ads[g_aip_ad_cnt].icao,ic,4);g_aip_ads[g_aip_ad_cnt].icao[4]=0;
+        g_aip_ads[g_aip_ad_cnt].lat_e6=la;g_aip_ads[g_aip_ad_cnt].lon_e6=lo;
+        g_aip_ads[g_aip_ad_cnt].type_id=tid;
+        g_aip_ad_cnt++;}}
+
+void aipLoad(){
+    if(!g_sd_ok)return;
+    g_aip_lat=(int32_t*)ps_malloc(AIP_MAX_PTS*sizeof(int32_t));
+    g_aip_lon=(int32_t*)ps_malloc(AIP_MAX_PTS*sizeof(int32_t));
+    g_aip_ads=(AipAd*)ps_malloc(AIP_MAX_AD*sizeof(AipAd));
+    if(!g_aip_lat||!g_aip_lon||!g_aip_ads){Serial.println("[AIP] PSRAM alloc failed");return;}
+    File dir=SD_MMC.open("/aip");if(!dir)return;
+    File f;
+    while((f=dir.openNextFile())){
+        String nm=String(f.name());
+        if(nm.endsWith("_ctr.bin"))_aipLoadCtrFile(f);
+        else if(nm.endsWith("aerodromes.bin"))_aipLoadAdFile(f);
+        f.close();}
+    dir.close();
+    g_aip_loaded=(g_aip_ctr_cnt>0||g_aip_ad_cnt>0);
+    Serial.printf("[AIP] %d CTR/ATZ (%d pts), %d aerodromes\n",g_aip_ctr_cnt,g_aip_pts_cnt,g_aip_ad_cnt);}
+
+// ── AIP overlay draw ──────────────────────────────────────────────────────────
+static inline bool latlon_to_screen(int32_t lat_e6,int32_t lon_e6,
+    float own_lat,float own_lon,float cos_lat,int hdg,float scale_m,int&sx,int&sy){
+    float dlat_m=(lat_e6/1e6f-own_lat)*111319.0f;
+    float dlon_m=(lon_e6/1e6f-own_lon)*111319.0f*cos_lat;
+    float d2=dlat_m*dlat_m+dlon_m*dlon_m;
+    float sm15=scale_m*1.5f;
+    if(d2>sm15*sm15)return false;
+    float dist=sqrtf(d2);
+    float bear=atan2f(dlon_m,dlat_m)*180.0f/(float)M_PI;
+    if(bear<0)bear+=360.0f;
+    int rb=((int)bear-hdg+360)%360;
+    float brd=(float)rb*(float)M_PI/180.0f;
+    float dpx=dist*(float)RAD_R/scale_m;
+    sx=(int)(RAD_CX+sinf(brd)*dpx);sy=(int)(RAD_CY-cosf(brd)*dpx);
+    return true;}
+
+static void aipDrawCb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_DRAW_MAIN_END)return;
+    if(!g_cfg.aip_en||!g_aip_loaded||!g_status.valid||!g_status.gps_fix)return;
+    lv_draw_ctx_t*ctx=lv_event_get_draw_ctx(e);
+    // Clip all AIP drawing to the radar circle
+    lv_draw_mask_radius_param_t cmask;
+    lv_area_t carea={RAD_CX-RAD_R,RAD_CY-RAD_R,RAD_CX+RAD_R-1,RAD_CY+RAD_R-1};
+    lv_draw_mask_radius_init(&cmask,&carea,LV_RADIUS_CIRCLE,false);
+    int16_t mid=lv_draw_mask_add(&cmask,NULL);
+    float own_lat=g_status.lat,own_lon=g_status.lon;
+    float cos_lat=cosf(own_lat*(float)M_PI/180.0f);
+    float scale_m=(float)g_cfg.scale_nm*1852.0f;
+    int   hdg=g_status.hdg;
+    // CTR polygons
+    lv_draw_line_dsc_t ctr_d,atz_d;
+    lv_draw_line_dsc_init(&ctr_d);
+    ctr_d.color=lv_color_hex(0x9ca3af);ctr_d.width=1;
+    atz_d=ctr_d;atz_d.color=lv_color_hex(0xb0bcc8);
+    for(int c=0;c<g_aip_ctr_cnt;c++){
+        lv_draw_line_dsc_t&dsc=(g_aip_ctr[c].type_id==13)?atz_d:ctr_d;
+        int psx=0,psy=0;bool pok=false;
+        uint16_t end=g_aip_ctr[c].pt_start+g_aip_ctr[c].n_pts;
+        for(uint16_t pi=g_aip_ctr[c].pt_start;pi<end;pi++){
+            int sx,sy;
+            bool ok=latlon_to_screen(g_aip_lat[pi],g_aip_lon[pi],
+                                     own_lat,own_lon,cos_lat,hdg,scale_m,sx,sy);
+            if(ok&&pok){lv_point_t p1={(lv_coord_t)psx,(lv_coord_t)psy},
+                                    p2={(lv_coord_t)sx,(lv_coord_t)sy};
+                lv_draw_line(ctx,&dsc,&p1,&p2);}
+            psx=sx;psy=sy;pok=ok;}}
+    // Aerodromes — small amber dot
+    lv_draw_rect_dsc_t ad_d;lv_draw_rect_dsc_init(&ad_d);
+    ad_d.bg_color=lv_color_hex(0xFBBF24);ad_d.bg_opa=LV_OPA_COVER;
+    ad_d.radius=LV_RADIUS_CIRCLE;ad_d.border_width=0;
+    for(uint16_t a=0;a<g_aip_ad_cnt;a++){
+        uint8_t tid=g_aip_ads[a].type_id;
+        // Héliports (7) + hydrobases (10) masqués si ad_heli=OFF
+        if(!g_cfg.ad_heli&&(tid==7||tid==10))continue;
+        int sx,sy;
+        if(latlon_to_screen(g_aip_ads[a].lat_e6,g_aip_ads[a].lon_e6,
+                            own_lat,own_lon,cos_lat,hdg,scale_m,sx,sy)){
+            lv_area_t ar={(lv_coord_t)(sx-2),(lv_coord_t)(sy-2),
+                          (lv_coord_t)(sx+2),(lv_coord_t)(sy+2)};
+            lv_draw_rect(ctx,&ad_d,&ar);}}
+    lv_draw_mask_free_param(&cmask);
+    lv_draw_mask_remove_id(mid);}
 
 // ── Page 1 — Radar ────────────────────────────────────────────────────────────
 void buildRadarPage(){
@@ -1016,14 +1231,14 @@ void buildRadarPage(){
     lv_obj_t*ro=lv_obj_create(p);lv_obj_set_size(ro,RAD_R*2,RAD_R*2);
     lv_obj_set_pos(ro,RAD_CX-RAD_R,RAD_CY-RAD_R);lv_obj_set_style_radius(ro,LV_RADIUS_CIRCLE,0);
     lv_obj_set_style_bg_opa(ro,LV_OPA_TRANSP,0);lv_obj_set_style_border_color(ro,TRING(),0);
-    lv_obj_set_style_border_width(ro,1,0);lv_obj_set_style_shadow_opa(ro,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_width(ro,2,0);lv_obj_set_style_shadow_opa(ro,LV_OPA_TRANSP,0);
     lv_obj_set_style_pad_all(ro,0,0);lv_obj_clear_flag(ro,LV_OBJ_FLAG_SCROLLABLE);
 
     // Inner ring (half scale)
     lv_obj_t*ri=lv_obj_create(p);lv_obj_set_size(ri,RAD_R,RAD_R);
     lv_obj_set_pos(ri,RAD_CX-RAD_R/2,RAD_CY-RAD_R/2);lv_obj_set_style_radius(ri,LV_RADIUS_CIRCLE,0);
-    lv_obj_set_style_bg_opa(ri,LV_OPA_TRANSP,0);lv_obj_set_style_border_color(ri,TGRID(),0);
-    lv_obj_set_style_border_width(ri,1,0);lv_obj_set_style_shadow_opa(ri,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_opa(ri,LV_OPA_TRANSP,0);lv_obj_set_style_border_color(ri,TRING(),0);
+    lv_obj_set_style_border_width(ri,2,0);lv_obj_set_style_shadow_opa(ri,LV_OPA_TRANSP,0);
     lv_obj_set_style_pad_all(ri,0,0);lv_obj_clear_flag(ri,LV_OBJ_FLAG_SCROLLABLE);
 
     // Tick marks — cardinal (every 90°) longer and brighter
@@ -1064,6 +1279,15 @@ void buildRadarPage(){
     // Scale label — clearly below the ring (ring bottom ~y=415, label top ~y=446)
     char scl[12];snprintf(scl,12,"%dnm",g_cfg.scale_nm);
     r_radar_scale_lbl=mkLbl(p,scl,TGREY(),&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-20);
+
+    // AIP overlay — transparent layer between grid and traffic icons
+    r_aip_layer=lv_obj_create(p);
+    lv_obj_set_size(r_aip_layer,480,480);lv_obj_set_pos(r_aip_layer,0,0);
+    lv_obj_set_style_bg_opa(r_aip_layer,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_width(r_aip_layer,0,0);lv_obj_set_style_pad_all(r_aip_layer,0,0);
+    lv_obj_set_style_shadow_opa(r_aip_layer,LV_OPA_TRANSP,0);
+    lv_obj_clear_flag(r_aip_layer,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(r_aip_layer,aipDrawCb,LV_EVENT_DRAW_MAIN_END,NULL);
 
     // CO arc gauge — 3 fixed color bands (30° total) in bottom-right quadrant
     // LVGL arc convention: 0°=right(3h), increases CW → compass120°=LVGL30°, compass150°=LVGL60°
@@ -1151,6 +1375,9 @@ void updSetPage(){
     lv_label_set_text(s_grnd_v, g_cfg.show_grnd?"ON":"OFF");
     lv_label_set_text(s_theme_v,g_cfg.dark?"DARK":"LIGHT");
     lv_label_set_text(s_icon_sz_v,kIconSzNames[g_cfg.icon_sz&2]);
+    lv_label_set_text(s_wifi_v,g_wifi_active?"192.168.4.1":g_cfg.wifi_en?"ON":"OFF");
+    if(s_aip_v)lv_label_set_text(s_aip_v,!g_aip_loaded?"NO DATA":g_cfg.aip_en?"ON":"OFF");
+    if(s_heli_v)lv_label_set_text(s_heli_v,g_cfg.ad_heli?"ON":"OFF");
     snprintf(b,12,"%dnm",g_cfg.scale_nm); lv_label_set_text(r_radar_scale_lbl,b);
     panel.setBrightness(g_cfg.brightness);}
 
@@ -1172,7 +1399,13 @@ static void cbSetBtn(lv_event_t*e){
         case 14:case 15:g_cfg.show_grnd=!g_cfg.show_grnd;break;
         case 12:case 13:g_cfg.dark=!g_cfg.dark;g_rebuildPages=true;break;
         case 16:g_cfg.icon_sz=max((int)g_cfg.icon_sz-1,0);for(int i=0;i<MAX_TRF;i++)lv_img_set_zoom(r_trf_img[i],kIconZoom[g_cfg.icon_sz]);break;
-        case 17:g_cfg.icon_sz=min((int)g_cfg.icon_sz+1,2);for(int i=0;i<MAX_TRF;i++)lv_img_set_zoom(r_trf_img[i],kIconZoom[g_cfg.icon_sz]);break;}
+        case 17:g_cfg.icon_sz=min((int)g_cfg.icon_sz+1,2);for(int i=0;i<MAX_TRF;i++)lv_img_set_zoom(r_trf_img[i],kIconZoom[g_cfg.icon_sz]);break;
+        case 18:case 19:g_cfg.wifi_en=!g_cfg.wifi_en;
+            if(g_cfg.wifi_en)wifiStart();else wifiStop();break;
+        case 20:case 21:if(g_aip_loaded){g_cfg.aip_en=!g_cfg.aip_en;
+            if(r_aip_layer)lv_obj_invalidate(r_aip_layer);}break;
+        case 22:case 23:g_cfg.ad_heli=!g_cfg.ad_heli;
+            if(r_aip_layer)lv_obj_invalidate(r_aip_layer);break;}
     cfgSave();
     if(!g_rebuildPages)updSetPage();}
 
@@ -1206,28 +1439,85 @@ static lv_obj_t* mkSetRowBtn(lv_obj_t*p,const char*k,int y,const char*v,lv_event
     lv_obj_set_style_text_color(l,TFG(),0);lv_obj_center(l);
     return vl;}
 
+static void _s_pg_nav_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    uint8_t np=(s_pg_idx+1)%2;
+    lv_obj_add_flag(s_pg[s_pg_idx],LV_OBJ_FLAG_HIDDEN);
+    s_pg_idx=np;
+    lv_obj_clear_flag(s_pg[s_pg_idx],LV_OBJ_FLAG_HIDDEN);
+    char ind[4];snprintf(ind,4,"%d/2",s_pg_idx+1);
+    lv_label_set_text(s_pg_ind,ind);}
+
 void buildSettingsPage(){
-    lv_obj_t*p=g_pages[2];char b[16];
+    lv_obj_t*p=g_pages[2]; char b[16];
+    s_pg_idx=0;
+
+    // ── Title (always visible)
     mkLbl(p,"SETTINGS",C_AMBER,&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,55);
-    mkLbl(p,"CONFIG", TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0, 82);
-    snprintf(b,16,"%dnm",g_cfg.scale_nm); s_scale_v=mkSetRow(p,"Scale", 100,b,0,1);
-    snprintf(b,16,"%dft",g_cfg.vfilt_ft); s_vfilt_v=mkSetRow(p,"V-Filt",132,b,2,3);
-    s_dist_v =mkSetRow(p,"Dist",  164,g_cfg.dist_nm?"NM":"km",4,5);
-    s_alt_v  =mkSetRow(p,"Alt",   196,g_cfg.alt_ft?"ft":"m",  6,7);
-    mkLbl(p,"DISPLAY",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,226);
-    snprintf(b,16,"%d",g_cfg.brightness); s_bright_v=mkSetRow(p,"Bright",244,b,8,9);
-    s_theme_v=mkSetRow(p,"Theme",276,g_cfg.dark?"DARK":"LIGHT",12,13);
-    mkLbl(p,"TRAFFIC",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,306);
-    s_src_v   =mkSetRow(p,"Source",324,kSrcNames[g_cfg.trf_src&3],10,11);
-    s_grnd_v  =mkSetRow(p,"Ground",356,g_cfg.show_grnd?"ON":"OFF",14,15);
-    s_icon_sz_v=mkSetRow(p,"Icons", 388,kIconSzNames[g_cfg.icon_sz&2],16,17);
-    mkLbl(p,"AIRCRAFT",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,410);
+
+    // ── Sub-page navigation (< 1/2 >)
+    lv_color_t nbg=g_dark_theme?lv_color_hex(0x1f2937):lv_color_hex(0xdde1e7);
+    lv_obj_t*nbl_btn=lv_btn_create(p);lv_obj_set_size(nbl_btn,34,24);lv_obj_set_pos(nbl_btn,155,73);
+    lv_obj_set_style_bg_color(nbl_btn,nbg,0);lv_obj_set_style_border_width(nbl_btn,0,0);
+    lv_obj_set_style_radius(nbl_btn,6,0);lv_obj_set_style_shadow_opa(nbl_btn,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(nbl_btn,_s_pg_nav_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(nbl_btn);lv_label_set_text(l,LV_SYMBOL_LEFT);
+    lv_obj_set_style_text_color(l,TFG(),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);lv_obj_center(l);}
+    s_pg_ind=lv_label_create(p);lv_label_set_text(s_pg_ind,"1/2");
+    lv_obj_set_style_text_color(s_pg_ind,TGREY(),0);
+    lv_obj_set_style_text_font(s_pg_ind,&lv_font_montserrat_12,0);
+    lv_obj_align(s_pg_ind,LV_ALIGN_TOP_MID,0,78);
+    lv_obj_t*nbr_btn=lv_btn_create(p);lv_obj_set_size(nbr_btn,34,24);lv_obj_set_pos(nbr_btn,291,73);
+    lv_obj_set_style_bg_color(nbr_btn,nbg,0);lv_obj_set_style_border_width(nbr_btn,0,0);
+    lv_obj_set_style_radius(nbr_btn,6,0);lv_obj_set_style_shadow_opa(nbr_btn,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(nbr_btn,_s_pg_nav_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(nbr_btn);lv_label_set_text(l,LV_SYMBOL_RIGHT);
+    lv_obj_set_style_text_color(l,TFG(),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);lv_obj_center(l);}
+
+    // ── Sub-page containers (transparent, non-scrollable, touch pass-through)
+    for(int i=0;i<2;i++){
+        s_pg[i]=lv_obj_create(p);
+        lv_obj_set_size(s_pg[i],480,390);lv_obj_set_pos(s_pg[i],0,93);
+        lv_obj_set_style_bg_opa(s_pg[i],LV_OPA_TRANSP,0);
+        lv_obj_set_style_border_width(s_pg[i],0,0);lv_obj_set_style_pad_all(s_pg[i],0,0);
+        lv_obj_clear_flag(s_pg[i],LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(s_pg[i],LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(s_pg[i],swipeCb,LV_EVENT_ALL,NULL);
+        if(i!=0)lv_obj_add_flag(s_pg[i],LV_OBJ_FLAG_HIDDEN);}
+
+    // ── Sub-page 0: RADAR + DISPLAY ──────────────────────────────────────────
+    {lv_obj_t*p=s_pg[0];
+    mkLbl(p,"RADAR",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,2);
+    snprintf(b,16,"%dnm",g_cfg.scale_nm); s_scale_v =mkSetRow(p,"Scale", 20,b,0,1);
+    snprintf(b,16,"%dft",g_cfg.vfilt_ft); s_vfilt_v =mkSetRow(p,"V-Filt",52,b,2,3);
+    s_dist_v=mkSetRow(p,"Dist",84,g_cfg.dist_nm?"NM":"km",4,5);
+    s_alt_v =mkSetRow(p,"Alt",116,g_cfg.alt_ft?"ft":"m",6,7);
+    mkLbl(p,"DISPLAY",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,150);
+    snprintf(b,16,"%d",g_cfg.brightness); s_bright_v=mkSetRow(p,"Bright",168,b,8,9);
+    s_theme_v=mkSetRow(p,"Theme",200,g_cfg.dark?"DARK":"LIGHT",12,13);}
+
+    // ── Sub-page 1: TRAFFIC + AIRCRAFT + SYSTEM ──────────────────────────────
+    {lv_obj_t*p=s_pg[1];
+    mkLbl(p,"TRAFFIC",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,2);
+    s_src_v    =mkSetRow(p,"Source",20,kSrcNames[g_cfg.trf_src&3],10,11);
+    s_grnd_v   =mkSetRow(p,"Ground",52,g_cfg.show_grnd?"ON":"OFF",14,15);
+    s_icon_sz_v=mkSetRow(p,"Icons", 84,kIconSzNames[g_cfg.icon_sz&2],16,17);
+    {const char*aip_v=!g_aip_loaded?"NO DATA":g_cfg.aip_en?"ON":"OFF";
+    s_aip_v=mkSetRow(p,"AIP",116,aip_v,20,21);}
+    s_heli_v=mkSetRow(p,"Heliports",148,g_cfg.ad_heli?"ON":"OFF",22,23);
+    mkLbl(p,"AIRCRAFT",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,182);
     {char t[20];snprintf(t,20,"%s  %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");
-    s_ac_v=mkSetRowBtn(p,"Aircraft",426,t,_open_aircraft_cb);}
-    lv_obj_t*ver=mkLblP(p,"v0.6  ●  AT-VIEW",TGREY(),&lv_font_montserrat_12,168,452);
+    s_ac_v=mkSetRowBtn(p,"Aircraft",200,t,_open_aircraft_cb);}
+    mkLbl(p,"SYSTEM",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,234);
+    s_wifi_v=mkSetRow(p,"WiFi",252,g_cfg.wifi_en?"ON":"OFF",18,19);
+    {char sd_str[12];
+     if(g_sd_ok)snprintf(sd_str,12,"%u GB",g_sd_gb);else strlcpy(sd_str,"NO CARD",12);
+     mkLblP(p,"SD card",TGREY(),&lv_font_montserrat_16,88,284);
+     s_sd_v=mkLblP(p,sd_str,g_sd_ok?C_GREEN:TGREY(),&lv_font_montserrat_16,215,284);}
+    lv_obj_t*ver=mkLblP(p,"v0.7  ●  AT-VIEW",TGREY(),&lv_font_montserrat_12,168,328);
     lv_obj_add_flag(ver,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(ver,LV_OPA_TRANSP,0);
-    lv_obj_add_event_cb(ver,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);}
+    lv_obj_add_event_cb(ver,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);}}
 
 // ── Debug page (hidden) ───────────────────────────────────────────────────────
 void buildDebugPage(){
@@ -1328,8 +1618,14 @@ void updateRadarDR(){
 void updateAllPages(){
     char b[32];
     // Status page
-    lv_label_set_text(r_title,g_connected?"● AT-CORE":"● SCAN");
+    {char _t[28];snprintf(_t,28,"● %s",g_connected?(g_peer_name[0]?g_peer_name:"AT-CORE"):"SCAN");
+    lv_label_set_text(r_title,_t);}
     lv_obj_set_style_text_color(r_title,g_connected?C_GREEN:C_AMBER,0);
+    {char _c[32];
+    if(g_connected&&g_peer_name[0])snprintf(_c,32,"● %s  OK",g_peer_name);
+    else snprintf(_c,32,"● AT-CORE  SCAN");
+    lv_label_set_text(r_boot_core,_c);
+    lv_obj_set_style_text_color(r_boot_core,g_connected?C_GREEN:C_AMBER,0);}
     if(g_status.valid){
         snprintf(b,32,"GPS %dsat",g_status.gps_sat);updSBox(0,b,g_status.gps_fix);
         snprintf(b,32,"LTE %d",g_status.csq);updSBox(1,b,g_status.csq>5);
@@ -1454,13 +1750,111 @@ void updateAllPages(){
 
 bool hasAlert(){return g_alert.valid&&(g_alert.co||g_alert.gforce||g_alert.rpm||g_alert.traffic);}
 
+// ── WiFi AP — handlers & control ─────────────────────────────────────────────
+static String sdFileListHtml(){
+    if(!g_sd_ok)return "<li>SD non montée</li>";
+    File dir=SD_MMC.open("/aip");
+    if(!dir||!dir.isDirectory())return "<li class='grey'>Répertoire /aip vide</li>";
+    String h="";int n=0;
+    File f=dir.openNextFile();
+    while(f){
+        if(!f.isDirectory()){
+            String nm=String(f.name());
+            int sl=nm.lastIndexOf('/');if(sl>=0)nm=nm.substring(sl+1);
+            h+="<li>"+nm+" <span style='color:#6b7280'>("+String(f.size()/1024)+" KB)</span></li>";
+            n++;}
+        f=dir.openNextFile();}
+    dir.close();
+    return n?h:"<li class='grey'>Aucun fichier</li>";}
+
+static void handleRoot(){
+    String page=F("<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>AT-VIEW AeroTrace</title><style>"
+        "body{font-family:sans-serif;background:#0d1117;color:#e6edf3;max-width:480px;margin:0 auto;padding:16px}"
+        "h1{color:#F5A623;margin-bottom:4px}h2{color:#60a5fa;font-size:.9em;margin-top:20px}"
+        "form{background:#1f2937;padding:16px;border-radius:8px}"
+        "input[type=file]{width:100%;padding:8px;background:#374151;color:#e6edf3;"
+        "border:1px solid #4b5563;border-radius:4px;box-sizing:border-box}"
+        "input[type=submit]{width:100%;padding:12px;background:#1f4068;color:#fff;"
+        "border:none;border-radius:4px;font-size:1em;cursor:pointer;margin-top:8px}"
+        "ul{list-style:none;padding:0}li{background:#1f2937;padding:8px 12px;"
+        "border-radius:4px;margin:4px 0;font-size:.85em}.grey{color:#6b7280}"
+        "</style></head><body>"
+        "<h1>AT-VIEW AeroTrace</h1>"
+        "<p style='color:#6b7280;font-size:.8em'>SSID : ");
+    page+=g_unit_name;
+    page+=F("</p><h2>Upload fichier AIP → /aip/</h2>"
+        "<form method='POST' action='/upload' enctype='multipart/form-data'>"
+        "<input type='file' name='file'><br>"
+        "<input type='submit' value='Envoyer sur la carte SD'></form>"
+        "<h2>Fichiers dans /aip/</h2><ul>");
+    page+=sdFileListHtml();
+    page+="</ul></body></html>";
+    g_webserver->send(200,"text/html",page);}
+
+static File g_upload_file;
+static void handleUploadData(){
+    HTTPUpload& u=g_webserver->upload();
+    if(u.status==UPLOAD_FILE_START){
+        String path="/aip/"+u.filename;
+        g_upload_file=SD_MMC.open(path.c_str(),FILE_WRITE);
+        Serial.printf("[WiFi] Upload start: %s\n",path.c_str());
+    }else if(u.status==UPLOAD_FILE_WRITE){
+        if(g_upload_file)g_upload_file.write(u.buf,u.currentSize);
+    }else if(u.status==UPLOAD_FILE_END){
+        if(g_upload_file){g_upload_file.close();}
+        Serial.printf("[WiFi] Upload done: %u bytes\n",u.totalSize);}}
+
+static void handleUploadDone(){
+    g_webserver->send(200,"text/html",
+        "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+        "<meta name='viewport' content='width=device-width,initial-scale=1'></head>"
+        "<body style='background:#0d1117;color:#22c55e;font-family:sans-serif;padding:20px'>"
+        "<h2>&#10003; Upload OK</h2>"
+        "<a style='color:#60a5fa' href='/'>&#8592; Retour</a></body></html>");}
+
+void wifiStart(){
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(g_unit_name,g_wifi_pass);
+    MDNS.begin("atview");
+    g_webserver=new WebServer(80);
+    g_webserver->on("/",HTTP_GET,handleRoot);
+    g_webserver->on("/upload",HTTP_POST,handleUploadDone,handleUploadData);
+    g_webserver->begin();
+    g_wifi_active=true;
+    if(s_wifi_v)lv_label_set_text(s_wifi_v,"192.168.4.1");
+    Serial.printf("[WiFi] AP: %s  pass: %s\n",g_unit_name,g_wifi_pass);}
+
+void wifiStop(){
+    if(g_webserver){g_webserver->stop();delete g_webserver;g_webserver=nullptr;}
+    MDNS.end();
+    WiFi.softAPdisconnect(true);WiFi.mode(WIFI_OFF);
+    g_wifi_active=false;
+    if(s_wifi_v)lv_label_set_text(s_wifi_v,"OFF");
+    Serial.println("[WiFi] Stopped");}
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 void setup(){
     Serial.begin(115200);
     if(!panel.begin()){while(1){Serial.println("Panel FAIL");delay(1000);}}
     Serial.printf("Touch: %s\n",panel.getTouchModelName());
+    // SD card — before beginLvglHelper (factory example order).
+    // panel.installSD() tries SDMMC_FREQ_HIGHSPEED (40MHz) by default.
+    // If that fails, retry at SDMMC_FREQ_DEFAULT (20MHz) — XL9555 CS stays set.
+    delay(50); // card power-on stabilization
+    g_sd_ok=panel.installSD();
+    if(!g_sd_ok){
+        SD_MMC.setPins(39,40,38);
+        g_sd_ok=SD_MMC.begin("/sdcard",true,false,SDMMC_FREQ_DEFAULT);
+    }
+    if(g_sd_ok){
+        g_sd_gb=(uint32_t)(SD_MMC.totalBytes()/(1024ULL*1024*1024));
+        if(!SD_MMC.exists("/aip"))SD_MMC.mkdir("/aip");
+        Serial.printf("[SD] OK %uGB\n",g_sd_gb);
+    }else{Serial.println("[SD] No card");}
     beginLvglHelper(panel);
-    cfgLoad();acLoad();
+    cfgLoad();acLoad();unitLoad();if(g_sd_ok)aipLoad();
     g_dark_theme=g_cfg.dark;
     lv_obj_set_style_bg_color(lv_scr_act(),TBG(),0);
     panel.setBrightness(g_cfg.brightness);
@@ -1500,5 +1894,7 @@ void loop(){
     else if(!alert&&g_alertForced){g_alertForced=false;switchPage(g_prevPage);}
     if(g_navPending){g_navPending=false;switchPage(g_navPage);}
     static uint32_t drLast=0;
-    if(g_page==1&&now-drLast>=200){drLast=now;updateRadarDR();}
+    if(g_page==1&&now-drLast>=200){drLast=now;updateRadarDR();
+        if(g_cfg.aip_en&&r_aip_layer&&g_status.valid)lv_obj_invalidate(r_aip_layer);}
+    if(g_wifi_active&&g_webserver)g_webserver->handleClient();
     lv_timer_handler();delay(5);}
