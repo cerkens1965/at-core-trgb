@@ -119,7 +119,7 @@ static bool             g_autoNavDone=false;
 // ── Widget refs — Status page (page 0) ───────────────────────────────────────
 static lv_obj_t *r_title;
 static lv_obj_t *r_boot_panel,*r_boot_lvgl,*r_boot_ble,*r_boot_core;
-static lv_obj_t *r_coords,*r_bat_p1;
+static lv_obj_t *r_coords,*r_bat_p1,*r_pilot_lbl;
 static lv_obj_t *r_sbox[6],*r_sico[6],*r_stxt[6]; // [0]GPS [1]LTE [2]SD [3]BLE [4]FLARM [5]ADS-B
 
 // ── Widget refs — Radar (page 1) ──────────────────────────────────────────────
@@ -613,7 +613,8 @@ void buildStatusPage(){
     mkSBox(p,4, 68,354,"FLARM",  false); mkSBox(p,5,252,354,"ADS-B",  false);
     r_coords=mkLbl(p,"--- / ---",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,380);
     r_bat_p1=mkLbl(p,"BAT  ---%",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,400);
-    mkLbl(p,"v0.6  —  2026-05-13",TGREY(),&lv_font_montserrat_12,LV_ALIGN_BOTTOM_MID,0,-52);}
+    r_pilot_lbl=mkLbl(p,"",C_GREEN,&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,420);
+    mkLbl(p,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_BOTTOM_MID,0,-52);}
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
 void pilotDBLoad(){
@@ -1682,6 +1683,14 @@ void updateAllPages(){
         else{snprintf(b,32,"BAT  %d%%",g_status.bat);lv_label_set_text(r_bat_p1,b);
         lv_obj_set_style_text_color(r_bat_p1,g_status.bat>=50?C_GREEN:g_status.bat>=20?C_AMBER:C_RED,0);}
     }else{updSBox(3,"BLE",g_connected);}
+    // Pilot name label
+    if(r_pilot_lbl){
+        if(g_session.valid&&g_session.name[0]){
+            char pb[48];snprintf(pb,sizeof(pb),"● %s",g_session.name);
+            lv_label_set_text(r_pilot_lbl,pb);
+            bool isOwner=strcmp(g_session.status,"owner")==0;
+            lv_obj_set_style_text_color(r_pilot_lbl,isOwner?C_GREEN:C_AMBER,0);
+        }else{lv_label_set_text(r_pilot_lbl,"");}}
     // Header — connectivity tabs + battery — B&W scheme: active=bright bg+black icon, inactive=dark bg+gray icon
     {static bool prev_gps=false,prev_lte=false,prev_ble=false;
      bool gps_ok=g_status.valid&&g_status.gps_fix;
