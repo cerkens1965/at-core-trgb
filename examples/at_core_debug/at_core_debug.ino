@@ -1415,16 +1415,16 @@ void buildRadarPage(){
         lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);}
 
     // Alert overlay
-    r_alert_overlay=lv_obj_create(p);lv_obj_set_size(r_alert_overlay,300,40);
-    lv_obj_set_pos(r_alert_overlay,90,358);
-    lv_obj_set_style_bg_color(r_alert_overlay,lv_color_hex(0x3d0000),0);
-    lv_obj_set_style_bg_opa(r_alert_overlay,LV_OPA_90,0);
-    lv_obj_set_style_border_color(r_alert_overlay,C_RED,0);lv_obj_set_style_border_width(r_alert_overlay,1,0);
-    lv_obj_set_style_radius(r_alert_overlay,8,0);lv_obj_set_style_shadow_opa(r_alert_overlay,LV_OPA_TRANSP,0);
+    r_alert_overlay=lv_obj_create(p);lv_obj_set_size(r_alert_overlay,300,44);
+    lv_obj_set_pos(r_alert_overlay,90,356);
+    lv_obj_set_style_bg_color(r_alert_overlay,C_RED,0);
+    lv_obj_set_style_bg_opa(r_alert_overlay,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(r_alert_overlay,0,0);
+    lv_obj_set_style_radius(r_alert_overlay,10,0);lv_obj_set_style_shadow_opa(r_alert_overlay,LV_OPA_TRANSP,0);
     lv_obj_set_style_pad_all(r_alert_overlay,0,0);lv_obj_clear_flag(r_alert_overlay,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);
     r_aov_text=lv_label_create(r_alert_overlay);lv_label_set_text(r_aov_text,"");
-    lv_obj_set_style_text_color(r_aov_text,C_RED,0);
+    lv_obj_set_style_text_color(r_aov_text,lv_color_hex(0xFFFFFF),0);
     lv_obj_set_style_text_font(r_aov_text,&lv_font_montserrat_16,0);lv_obj_center(r_aov_text);}
 
 // ── Page 2 — Settings ─────────────────────────────────────────────────────────
@@ -1789,8 +1789,8 @@ void updateAllPages(){
     if(g_alert.valid){
         bool any=g_alert.co||g_alert.gforce||g_alert.rpm||g_alert.traffic;
         if(any){char ab[48]="";
-            if(g_alert.co)strcat(ab,"! CO  ");if(g_alert.gforce)strcat(ab,"! G  ");
-            if(g_alert.rpm)strcat(ab,"! RPM  ");if(g_alert.traffic)strcat(ab,"! TFC");
+            if(g_alert.co)strcat(ab,"CO  ");if(g_alert.gforce)strcat(ab,"G-FORCE  ");
+            if(g_alert.rpm)strcat(ab,"RPM  ");if(g_alert.traffic)strcat(ab,"TRAFFIC");
             lv_label_set_text(r_aov_text,ab);lv_obj_clear_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);
         }else{lv_obj_add_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);}}
     // Debug
