@@ -32,6 +32,7 @@ LilyGo_RGBPanel panel;
 #define BLE_CHR_TRAFFIC "6E400005-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_ALERTS  "6E400006-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_DEBUG   "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
+#define BLE_CHR_AUTH    "6E400007-B5A3-F393-E0A9-E50E24DCCA9E"
 // BLE identity — loaded from NVS namespace "unit" at boot
 static char g_unit_name[24]   = "ATVIEW-EBBY1-01";
 static char g_paired_mac[18]  = "";              // empty = connect to first ATCORE- found
@@ -98,7 +99,8 @@ static AuthSession g_session = {};
 static BLEClient*              g_client = nullptr;
 static BLERemoteService*       g_svc    = nullptr;
 static BLERemoteCharacteristic *g_chrS=nullptr,*g_chrF=nullptr,
-                                *g_chrT=nullptr,*g_chrA=nullptr,*g_chrD=nullptr;
+                                *g_chrT=nullptr,*g_chrA=nullptr,*g_chrD=nullptr,
+                                *g_chrW=nullptr;   // AUTH write (6E400007)
 static volatile bool g_connected=false, g_doConnect=false, g_doReconnect=false;
 static BLEAdvertisedDevice*    g_target = nullptr;
 
@@ -145,8 +147,10 @@ static lv_obj_t* g_auth_name     = nullptr;
 static lv_obj_t* g_auth_msg      = nullptr;
 static char      g_auth_buf[5]   = {};
 static int       g_auth_len      = 0;
-static bool      g_auth_p2       = false;   // phase 2: instructor code for student
-static char      g_auth_scode[5] = {};      // student code saved during phase 2
+static bool      g_auth_p2       = false;   // phase 2: instructor entry
+static char      g_auth_scode[5] = {};      // pilot code saved during phase 2
+static bool      g_auth_instr    = false;   // instructor toggle in popup
+static lv_obj_t* g_auth_instr_lbl= nullptr; // label "SOLO" / "AVEC INSTR."
 
 // ── Aircraft identity ─────────────────────────────────────────────────────────
 #define N_AC_TYPES 193
@@ -459,6 +463,7 @@ bool connectBLE(){
     g_chrT=g_svc->getCharacteristic(BLE_CHR_TRAFFIC);
     g_chrA=g_svc->getCharacteristic(BLE_CHR_ALERTS);
     g_chrD=g_svc->getCharacteristic(BLE_CHR_DEBUG);
+    g_chrW=g_svc->getCharacteristic(BLE_CHR_AUTH);
     if(g_chrS&&g_chrS->canNotify())g_chrS->registerForNotify(notifyS);
     if(g_chrF&&g_chrF->canNotify())g_chrF->registerForNotify(notifyF);
     if(g_chrT&&g_chrT->canNotify())g_chrT->registerForNotify(notifyT);
@@ -673,23 +678,32 @@ void authSuccess(PilotEntry*pe){
     else{Preferences p;p.begin("auth",false);p.putString("owner","");p.end();}
     if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}}
 
+static void _authSendBLE(const char*pc,const char*ic){
+    char payload[64];
+    if(ic&&ic[0])snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"ic\":\"%s\"}",pc,ic);
+    else         snprintf(payload,sizeof(payload),"{\"pc\":\"%s\"}",pc);
+    if(g_chrW&&g_chrW->canWrite())g_chrW->writeValue((uint8_t*)payload,strlen(payload),false);
+    g_session.valid=true;
+    strlcpy(g_session.name,pc,sizeof(g_session.name));
+    strlcpy(g_session.status,ic&&ic[0]?"student":"pilot",sizeof(g_session.status));
+    if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}}
+
 void authValidate(){
+    if(g_auth_len<4)return;
     if(!g_auth_p2){
-        PilotEntry*pe=pilotFind(g_auth_buf);
-        if(!pe){authError("Code inconnu - Retry");return;}
-        if(strcmp(pe->status,"student")==0){
+        if(g_auth_instr){
+            // Phase 2 — save pilot code and ask for instructor code
             strlcpy(g_auth_scode,g_auth_buf,5);
             g_auth_p2=true;g_auth_len=0;memset(g_auth_buf,0,5);
             authUpdateDots();
-            lv_label_set_text(g_auth_prompt,"Code Instructeur");
-            lv_label_set_text(g_auth_name,pe->name);
+            lv_label_set_text(g_auth_prompt,"Code instructeur");
+            lv_label_set_text(g_auth_name,"");
             lv_label_set_text(g_auth_msg,"");
-        }else{authSuccess(pe);}
+            if(g_auth_instr_lbl)lv_obj_add_flag(lv_obj_get_parent(g_auth_instr_lbl),LV_OBJ_FLAG_HIDDEN);
+        }else{
+            _authSendBLE(g_auth_buf,nullptr);}
     }else{
-        PilotEntry*inst=pilotFind(g_auth_buf);
-        if(!inst||strcmp(inst->status,"instructor")!=0){authError("Code instructeur invalide");return;}
-        PilotEntry*stud=pilotFind(g_auth_scode);
-        if(stud)authSuccess(stud);else authError("Erreur session");}}
+        _authSendBLE(g_auth_scode,g_auth_buf);}}
 
 static void _auth_btn_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
@@ -700,30 +714,43 @@ static void _auth_btn_cb(lv_event_t*e){
         authUpdateDots();if(g_auth_len==4)authValidate();}}}
 
 void mkAuthOverlay(){
+    g_auth_len=0;memset(g_auth_buf,0,5);g_auth_p2=false;memset(g_auth_scode,0,5);
+    // Backdrop — full screen, semi-transparent, absorbs all touches
     g_auth_ov=lv_obj_create(lv_scr_act());
     lv_obj_set_size(g_auth_ov,480,480);lv_obj_set_pos(g_auth_ov,0,0);
-    lv_obj_set_style_bg_color(g_auth_ov,TBG(),0);lv_obj_set_style_bg_opa(g_auth_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_bg_color(g_auth_ov,lv_color_hex(0x000000),0);
+    lv_obj_set_style_bg_opa(g_auth_ov,LV_OPA_70,0);
     lv_obj_set_style_border_width(g_auth_ov,0,0);lv_obj_set_style_radius(g_auth_ov,0,0);
     lv_obj_set_style_shadow_opa(g_auth_ov,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(g_auth_ov,0,0);
     lv_obj_clear_flag(g_auth_ov,LV_OBJ_FLAG_SCROLLABLE);
-    // ICAO + title
-    lv_obj_t*il=lv_label_create(g_auth_ov);
+    // Card — centered (170px half-width, 200px half-height → center at 240,236)
+    lv_obj_t*card=lv_obj_create(g_auth_ov);
+    lv_obj_set_size(card,340,444);lv_obj_set_pos(card,70,20);
+    lv_obj_set_style_bg_color(card,g_dark_theme?lv_color_hex(0x0f1923):lv_color_hex(0xf0f4f8),0);
+    lv_obj_set_style_bg_opa(card,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(card,TRING(),0);lv_obj_set_style_border_width(card,1,0);
+    lv_obj_set_style_radius(card,20,0);
+    lv_obj_set_style_shadow_opa(card,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(card,0,0);
+    lv_obj_clear_flag(card,LV_OBJ_FLAG_SCROLLABLE);
+    // ICAO label
+    lv_obj_t*il=lv_label_create(card);
     lv_label_set_text(il,g_aircraft_icao[0]?g_aircraft_icao:"AT-VIEW");
     lv_obj_set_style_text_color(il,TGREY(),0);
     lv_obj_set_style_text_font(il,&lv_font_montserrat_14,0);
-    lv_obj_align(il,LV_ALIGN_TOP_MID,0,46);
-    g_auth_prompt=lv_label_create(g_auth_ov);
-    lv_label_set_text(g_auth_prompt,"Identification");
+    lv_obj_align(il,LV_ALIGN_TOP_MID,0,18);
+    // Prompt
+    g_auth_prompt=lv_label_create(card);
+    lv_label_set_text(g_auth_prompt,"Code pilote");
     lv_obj_set_style_text_color(g_auth_prompt,TFG(),0);
     lv_obj_set_style_text_font(g_auth_prompt,&lv_font_montserrat_16,0);
-    lv_obj_align(g_auth_prompt,LV_ALIGN_TOP_MID,0,76);
-    // 4 PIN dots — container centered
-    lv_obj_t*dc=lv_obj_create(g_auth_ov);
+    lv_obj_align(g_auth_prompt,LV_ALIGN_TOP_MID,0,48);
+    // 4 PIN dots
+    lv_obj_t*dc=lv_obj_create(card);
     lv_obj_set_size(dc,130,28);
     lv_obj_set_style_bg_opa(dc,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(dc,0,0);
     lv_obj_set_style_shadow_opa(dc,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(dc,0,0);
     lv_obj_clear_flag(dc,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_align(dc,LV_ALIGN_TOP_MID,0,114);
+    lv_obj_align(dc,LV_ALIGN_TOP_MID,0,86);
     for(int i=0;i<4;i++){
         g_auth_dots[i]=lv_obj_create(dc);
         lv_obj_set_size(g_auth_dots[i],22,22);lv_obj_set_pos(g_auth_dots[i],i*36,3);
@@ -735,23 +762,44 @@ void mkAuthOverlay(){
         lv_obj_set_style_shadow_opa(g_auth_dots[i],LV_OPA_TRANSP,0);
         lv_obj_set_style_pad_all(g_auth_dots[i],0,0);
         lv_obj_clear_flag(g_auth_dots[i],LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);}
-    // Name hint + error
-    g_auth_name=lv_label_create(g_auth_ov);lv_label_set_text(g_auth_name,"");
+    // Name + error
+    g_auth_name=lv_label_create(card);lv_label_set_text(g_auth_name,"");
     lv_obj_set_style_text_color(g_auth_name,C_GREEN,0);
     lv_obj_set_style_text_font(g_auth_name,&lv_font_montserrat_14,0);
-    lv_obj_align(g_auth_name,LV_ALIGN_TOP_MID,0,156);
-    g_auth_msg=lv_label_create(g_auth_ov);lv_label_set_text(g_auth_msg,"");
+    lv_obj_align(g_auth_name,LV_ALIGN_TOP_MID,0,126);
+    g_auth_msg=lv_label_create(card);lv_label_set_text(g_auth_msg,"");
     lv_obj_set_style_text_color(g_auth_msg,C_RED,0);
     lv_obj_set_style_text_font(g_auth_msg,&lv_font_montserrat_12,0);
-    lv_obj_align(g_auth_msg,LV_ALIGN_TOP_MID,0,184);
-    // Keypad 3×4 — BW=68 BH=54 BG=8 → width=220 KX=130 bottom=450 (within circle ✓)
+    lv_obj_align(g_auth_msg,LV_ALIGN_TOP_MID,0,148);
+    // Instructor toggle — pill button centered, y=170
+    g_auth_instr=false;
+    {lv_obj_t*tb=lv_btn_create(card);
+     lv_obj_set_size(tb,200,28);lv_obj_set_pos(tb,70,170);
+     lv_obj_set_style_bg_color(tb,lv_color_hex(0x1e2b38),0);
+     lv_obj_set_style_bg_color(tb,lv_color_hex(0x2d4358),LV_STATE_PRESSED);
+     lv_obj_set_style_bg_opa(tb,LV_OPA_COVER,0);
+     lv_obj_set_style_border_color(tb,TRING(),0);lv_obj_set_style_border_width(tb,1,0);
+     lv_obj_set_style_radius(tb,14,0);lv_obj_set_style_shadow_opa(tb,LV_OPA_TRANSP,0);
+     g_auth_instr_lbl=lv_label_create(tb);
+     lv_label_set_text(g_auth_instr_lbl,"SOLO");
+     lv_obj_set_style_text_color(g_auth_instr_lbl,TGREY(),0);
+     lv_obj_set_style_text_font(g_auth_instr_lbl,&lv_font_montserrat_12,0);
+     lv_obj_center(g_auth_instr_lbl);
+     lv_obj_add_event_cb(tb,[](lv_event_t*e){
+         g_auth_instr=!g_auth_instr;
+         if(g_auth_instr_lbl){
+             lv_label_set_text(g_auth_instr_lbl,g_auth_instr?"AVEC INSTR.":"SOLO");
+             lv_obj_set_style_text_color(g_auth_instr_lbl,
+                 g_auth_instr?C_AMBER:TGREY(),0);}
+     },LV_EVENT_CLICKED,nullptr);}
+    // Keypad 3×4 — BW=68 BH=50 BG=8 → cols 220px, KX=(340-220)/2=60, top y=208
     static const char*kL[12]={"1","2","3","4","5","6","7","8","9","<","0","OK"};
     static const intptr_t kV[12]={1,2,3,4,5,6,7,8,9,10,0,11};
     for(int i=0;i<12;i++){
         int r=i/3,c=i%3;
-        lv_obj_t*btn=lv_btn_create(g_auth_ov);
-        lv_obj_set_size(btn,68,54);
-        lv_obj_set_pos(btn,130+c*76,210+r*62);
+        lv_obj_t*btn=lv_btn_create(card);
+        lv_obj_set_size(btn,68,50);
+        lv_obj_set_pos(btn,60+c*76,208+r*58);
         lv_obj_set_style_bg_color(btn,lv_color_hex(0x1e2b38),0);
         lv_obj_set_style_bg_color(btn,lv_color_hex(0x2d4358),LV_STATE_PRESSED);
         lv_obj_set_style_bg_opa(btn,LV_OPA_COVER,0);
@@ -1688,6 +1736,11 @@ void updateAllPages(){
      #undef SET_PILL_TXT
      #undef SET_PILL_IMG
      }
+    // Auth popup — once BLE+GPS ready, if session not yet established
+    {static bool s_authShown=false;
+     if(!s_authShown&&!g_auth_ov&&!g_session.valid
+        &&g_connected&&g_status.valid&&g_status.gps_fix){
+         s_authShown=true;mkAuthOverlay();}}
     // Auto-navigate to radar once BLE+GPS ready (one-shot per connection)
     if(!g_autoNavDone&&g_connected&&g_status.valid&&g_status.gps_fix&&g_page==0){
         g_autoNavDone=true;g_navPending=true;g_navPage=1;}
@@ -1871,9 +1924,9 @@ void setup(){
     // Build remaining pages
     buildRadarPage();buildSettingsPage();buildDebugPage();
     createSwipeHandlers();updSetPage();
-    // Auth — show overlay unless owner auto-login from NVS
+    // Auth — load DB + restore cached session; popup shown when BLE+GPS ready
     pilotDBLoad();
-    if(g_pilot_cnt>0 && !checkOwnerNVS()) mkAuthOverlay();
+    checkOwnerNVS();
     Serial.println("Ready");}
 
 // ── Loop ──────────────────────────────────────────────────────────────────────
