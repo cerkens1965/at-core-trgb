@@ -87,12 +87,12 @@ static DebugData   g_debug   = {};
 static volatile bool g_dataUpdated = false;
 
 // ── Pilot DB / Auth ───────────────────────────────────────────────────────────
-struct PilotEntry { char code[5]; char name[32]; char status[12]; char primary_icao[8]; };
+struct PilotEntry { char code[5]; char name[32]; char status[12]; char primary_icao[8]; char trigram[4]; };
 #define MAX_PILOTS 24
 static PilotEntry  g_pilots[MAX_PILOTS] = {};
 static int         g_pilot_cnt = 0;
 static char        g_aircraft_icao[8] = "";
-struct AuthSession { char name[32]; char status[12]; bool is_owner; bool valid; };
+struct AuthSession { char name[32]; char status[12]; char trigram[4]; bool is_owner; bool valid; };
 static AuthSession g_session = {};
 
 // ── BLE state ─────────────────────────────────────────────────────────────────
@@ -631,7 +631,8 @@ void pilotDBLoad(){
         strlcpy(t.code,         e["c"]|"",sizeof(t.code));
         strlcpy(t.name,         e["n"]|"",sizeof(t.name));
         strlcpy(t.status,       e["r"]|"pilot",sizeof(t.status));
-        strlcpy(t.primary_icao, e["i"]|"",sizeof(t.primary_icao));}
+        strlcpy(t.primary_icao, e["i"]|"",sizeof(t.primary_icao));
+        strlcpy(t.trigram,      e["t"]|"",sizeof(t.trigram));}
     Serial.printf("[Auth] %d pilots loaded from SD\n",g_pilot_cnt);}
 
 PilotEntry* pilotFind(const char*code){
@@ -646,6 +647,7 @@ bool checkOwnerNVS(){
     PilotEntry*pe=pilotFind(cb);
     if(!pe||strcmp(pe->status,"owner")!=0)return false;
     strlcpy(g_session.name,pe->name,32);strlcpy(g_session.status,"owner",12);
+    strlcpy(g_session.trigram,pe->trigram,sizeof(g_session.trigram));
     g_session.is_owner=true;g_session.valid=true;return true;}
 
 void authUpdateDots(){
@@ -680,8 +682,9 @@ static void _authSendBLE(const char*pc,const char*ic){
     PilotEntry*ie=(ic&&ic[0])?pilotFind(ic):nullptr;
     const char* role=pe?pe->status:"unknown";
     char payload[96];
-    if(ic&&ic[0])snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"ic\":\"%s\",\"role\":\"%s\"}",pc,ic,role);
-    else         snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"role\":\"%s\"}",pc,role);
+    const char* trig=pe?pe->trigram:"";
+    if(ic&&ic[0])snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"ic\":\"%s\",\"role\":\"%s\",\"t\":\"%s\"}",pc,ic,role,trig);
+    else         snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"role\":\"%s\",\"t\":\"%s\"}",pc,role,trig);
     if(g_chrW&&g_chrW->canWrite())g_chrW->writeValue((uint8_t*)payload,strlen(payload),false);
     // Owner → save to NVS, popup won't show again at next boot
     bool isOwner=(strcmp(role,"owner")==0);
@@ -689,6 +692,7 @@ static void _authSendBLE(const char*pc,const char*ic){
     g_session.valid=true;g_session.is_owner=isOwner;
     strlcpy(g_session.name,pe?pe->name:pc,sizeof(g_session.name));
     strlcpy(g_session.status,role,sizeof(g_session.status));
+    strlcpy(g_session.trigram,pe?pe->trigram:"",sizeof(g_session.trigram));
     // Role label + color for feedback display
     const char* roleLabel=isOwner?"Proprietaire":
         strcmp(role,"student")==0?"Etudiant":
@@ -1686,7 +1690,9 @@ void updateAllPages(){
     // Pilot name label
     if(r_pilot_lbl){
         if(g_session.valid&&g_session.name[0]){
-            char pb[48];snprintf(pb,sizeof(pb),"● %s",g_session.name);
+            char pb[52];
+            if(g_session.trigram[0])snprintf(pb,sizeof(pb),"● %s  (%s)",g_session.name,g_session.trigram);
+            else                    snprintf(pb,sizeof(pb),"● %s",g_session.name);
             lv_label_set_text(r_pilot_lbl,pb);
             bool isOwner=strcmp(g_session.status,"owner")==0;
             lv_obj_set_style_text_color(r_pilot_lbl,isOwner?C_GREEN:C_AMBER,0);
