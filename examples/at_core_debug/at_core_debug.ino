@@ -1961,10 +1961,18 @@ void loop(){
     if(g_rebuildPages){g_rebuildPages=false;rebuildAllPages();}
     if(g_dataUpdated){g_dataUpdated=false;updateAllPages();}
     bool alert=hasAlert();
-    if(alert&&!g_alertForced&&!g_inDebug){
-        g_prevPage=g_page;g_alertForced=true;
-        if(g_page!=1)switchPage(1);}
-    else if(!alert&&g_alertForced){g_alertForced=false;switchPage(g_prevPage);}
+    {static uint8_t s_prevScale=4;
+     if(alert&&!g_alertForced&&!g_inDebug){
+         g_prevPage=g_page;g_alertForced=true;
+         s_prevScale=g_cfg.scale_nm;
+         if(g_cfg.scale_nm!=2){g_cfg.scale_nm=2;
+             if(r_radar_scale_lbl){char b[8];snprintf(b,8,"2nm");lv_label_set_text(r_radar_scale_lbl,b);}}
+         if(g_page!=1)switchPage(1);
+     }else if(!alert&&g_alertForced){
+         g_alertForced=false;
+         g_cfg.scale_nm=s_prevScale;
+         if(r_radar_scale_lbl){char b[12];snprintf(b,12,"%dnm",g_cfg.scale_nm);lv_label_set_text(r_radar_scale_lbl,b);}
+         switchPage(g_prevPage);}}
     if(g_navPending){g_navPending=false;switchPage(g_navPage);}
     static uint32_t drLast=0;
     if(g_page==1&&now-drLast>=200){drLast=now;updateRadarDR();
