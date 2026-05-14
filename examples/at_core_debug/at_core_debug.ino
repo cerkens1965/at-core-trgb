@@ -619,19 +619,21 @@ void buildStatusPage(){
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
 void pilotDBLoad(){
-    Preferences p;p.begin("auth",true);
-    p.getString("icao","").toCharArray(g_aircraft_icao,sizeof(g_aircraft_icao));
-    String db=p.getString("pilots","");p.end();
-    if(!db.length())return;
-    JsonDocument doc;if(deserializeJson(doc,db))return;
     g_pilot_cnt=0;
+    if(!g_sd_ok)return;
+    File f=SD_MMC.open("/pilots.json");
+    if(!f){Serial.println("[Auth] No /pilots.json on SD");return;}
+    String db=f.readString();f.close();
+    JsonDocument doc;
+    if(deserializeJson(doc,db)){Serial.println("[Auth] pilots.json parse error");return;}
     for(JsonObject e:doc.as<JsonArray>()){
         if(g_pilot_cnt>=MAX_PILOTS)break;
         PilotEntry&t=g_pilots[g_pilot_cnt++];
         strlcpy(t.code,         e["c"]|"",sizeof(t.code));
         strlcpy(t.name,         e["n"]|"",sizeof(t.name));
-        strlcpy(t.status,       e["s"]|"",sizeof(t.status));
-        strlcpy(t.primary_icao, e["i"]|"",sizeof(t.primary_icao));}}
+        strlcpy(t.status,       e["r"]|"pilot",sizeof(t.status));
+        strlcpy(t.primary_icao, e["i"]|"",sizeof(t.primary_icao));}
+    Serial.printf("[Auth] %d pilots loaded from SD\n",g_pilot_cnt);}
 
 PilotEntry* pilotFind(const char*code){
     for(int i=0;i<g_pilot_cnt;i++)if(strcmp(g_pilots[i].code,code)==0)return&g_pilots[i];
@@ -650,15 +652,15 @@ bool checkOwnerNVS(){
 
 void authUpdateDots(){
     for(int i=0;i<4;i++){
-        lv_obj_set_style_bg_color(g_auth_dots[i],TFG(),0);
-        lv_obj_set_style_border_color(g_auth_dots[i],TFG(),0);
+        lv_obj_set_style_bg_color(g_auth_dots[i],lv_color_hex(0xFFFFFF),0);
+        lv_obj_set_style_border_color(g_auth_dots[i],lv_color_hex(0xFFFFFF),0);
         lv_obj_set_style_bg_opa(g_auth_dots[i],i<g_auth_len?LV_OPA_COVER:LV_OPA_TRANSP,0);}}
 
 static void _auth_err_cb(lv_timer_t*t){
     for(int i=0;i<4;i++){
         lv_obj_set_style_bg_opa(g_auth_dots[i],LV_OPA_TRANSP,0);
-        lv_obj_set_style_bg_color(g_auth_dots[i],TFG(),0);
-        lv_obj_set_style_border_color(g_auth_dots[i],TFG(),0);}
+        lv_obj_set_style_bg_color(g_auth_dots[i],lv_color_hex(0xFFFFFF),0);
+        lv_obj_set_style_border_color(g_auth_dots[i],lv_color_hex(0xFFFFFF),0);}
     lv_label_set_text(g_auth_msg,"");lv_timer_del(t);}
 
 void authError(const char*msg){
@@ -678,15 +680,28 @@ void authSuccess(PilotEntry*pe){
     else{Preferences p;p.begin("auth",false);p.putString("owner","");p.end();}
     if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}}
 
+static void _authCloseOv(lv_timer_t*t){
+    lv_timer_del(t);
+    if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}}
+
 static void _authSendBLE(const char*pc,const char*ic){
     char payload[64];
     if(ic&&ic[0])snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"ic\":\"%s\"}",pc,ic);
     else         snprintf(payload,sizeof(payload),"{\"pc\":\"%s\"}",pc);
     if(g_chrW&&g_chrW->canWrite())g_chrW->writeValue((uint8_t*)payload,strlen(payload),false);
+    // Local DB lookup for name display
+    PilotEntry*pe=pilotFind(pc);
+    PilotEntry*ie=(ic&&ic[0])?pilotFind(ic):nullptr;
     g_session.valid=true;
-    strlcpy(g_session.name,pc,sizeof(g_session.name));
-    strlcpy(g_session.status,ic&&ic[0]?"student":"pilot",sizeof(g_session.status));
-    if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}}
+    strlcpy(g_session.name,pe?pe->name:pc,sizeof(g_session.name));
+    strlcpy(g_session.status,ie?"student":pe?pe->status:"pilot",sizeof(g_session.status));
+    // Show name(s) in popup for 1.5s then auto-close
+    if(g_auth_prompt)lv_label_set_text(g_auth_prompt,"Bienvenue");
+    if(g_auth_name){
+        if(ie){char nb[64];snprintf(nb,sizeof(nb),"%s\n+ %s",pe?pe->name:pc,ie->name);
+               lv_label_set_text(g_auth_name,nb);}
+        else   lv_label_set_text(g_auth_name,pe?pe->name:pc);}
+    lv_timer_create(_authCloseOv,1500,nullptr);}
 
 void authValidate(){
     if(g_auth_len<4)return;
@@ -697,7 +712,8 @@ void authValidate(){
             g_auth_p2=true;g_auth_len=0;memset(g_auth_buf,0,5);
             authUpdateDots();
             lv_label_set_text(g_auth_prompt,"Code instructeur");
-            lv_label_set_text(g_auth_name,"");
+            {PilotEntry*pe=pilotFind(g_auth_scode);
+             lv_label_set_text(g_auth_name,pe?pe->name:"");}
             lv_label_set_text(g_auth_msg,"");
             if(g_auth_instr_lbl)lv_obj_add_flag(lv_obj_get_parent(g_auth_instr_lbl),LV_OBJ_FLAG_HIDDEN);
         }else{
@@ -726,7 +742,7 @@ void mkAuthOverlay(){
     // Card — centered (170px half-width, 200px half-height → center at 240,236)
     lv_obj_t*card=lv_obj_create(g_auth_ov);
     lv_obj_set_size(card,340,444);lv_obj_set_pos(card,70,20);
-    lv_obj_set_style_bg_color(card,g_dark_theme?lv_color_hex(0x0f1923):lv_color_hex(0xf0f4f8),0);
+    lv_obj_set_style_bg_color(card,lv_color_hex(0x0f1923),0); // auth popup always dark
     lv_obj_set_style_bg_opa(card,LV_OPA_COVER,0);
     lv_obj_set_style_border_color(card,TRING(),0);lv_obj_set_style_border_width(card,1,0);
     lv_obj_set_style_radius(card,20,0);
@@ -755,9 +771,9 @@ void mkAuthOverlay(){
         g_auth_dots[i]=lv_obj_create(dc);
         lv_obj_set_size(g_auth_dots[i],22,22);lv_obj_set_pos(g_auth_dots[i],i*36,3);
         lv_obj_set_style_radius(g_auth_dots[i],LV_RADIUS_CIRCLE,0);
-        lv_obj_set_style_bg_color(g_auth_dots[i],TFG(),0);
+        lv_obj_set_style_bg_color(g_auth_dots[i],lv_color_hex(0xFFFFFF),0);
         lv_obj_set_style_bg_opa(g_auth_dots[i],LV_OPA_TRANSP,0);
-        lv_obj_set_style_border_color(g_auth_dots[i],TFG(),0);
+        lv_obj_set_style_border_color(g_auth_dots[i],lv_color_hex(0xFFFFFF),0);
         lv_obj_set_style_border_width(g_auth_dots[i],2,0);
         lv_obj_set_style_shadow_opa(g_auth_dots[i],LV_OPA_TRANSP,0);
         lv_obj_set_style_pad_all(g_auth_dots[i],0,0);
@@ -808,7 +824,7 @@ void mkAuthOverlay(){
         lv_obj_set_style_border_width(btn,0,0);
         lv_obj_add_event_cb(btn,_auth_btn_cb,LV_EVENT_CLICKED,(void*)kV[i]);
         lv_obj_t*lb=lv_label_create(btn);lv_label_set_text(lb,kL[i]);
-        lv_obj_set_style_text_color(lb,TFG(),0);
+        lv_obj_set_style_text_color(lb,lv_color_hex(0xFFFFFF),0);
         lv_obj_set_style_text_font(lb,&lv_font_montserrat_16,0);
         lv_obj_center(lb);}}
 
@@ -1837,7 +1853,8 @@ static void handleRoot(){
         "<h1>AT-VIEW AeroTrace</h1>"
         "<p style='color:#6b7280;font-size:.8em'>SSID : ");
     page+=g_unit_name;
-    page+=F("</p><h2>Upload fichier AIP → /aip/</h2>"
+    page+=F("</p><h2>Upload fichier</h2>"
+        "<p style='color:#9ca3af;font-size:.8em'>AIP (.bin) → /aip/ &nbsp;|&nbsp; pilots.json → /</p>"
         "<form method='POST' action='/upload' enctype='multipart/form-data'>"
         "<input type='file' name='file'><br>"
         "<input type='submit' value='Envoyer sur la carte SD'></form>"
@@ -1846,17 +1863,20 @@ static void handleRoot(){
     page+="</ul></body></html>";
     g_webserver->send(200,"text/html",page);}
 
-static File g_upload_file;
+static File   g_upload_file;
+static bool   g_upload_is_pilots=false;
 static void handleUploadData(){
     HTTPUpload& u=g_webserver->upload();
     if(u.status==UPLOAD_FILE_START){
-        String path="/aip/"+u.filename;
+        g_upload_is_pilots=(u.filename=="pilots.json");
+        String path=g_upload_is_pilots?"/pilots.json":"/aip/"+u.filename;
         g_upload_file=SD_MMC.open(path.c_str(),FILE_WRITE);
         Serial.printf("[WiFi] Upload start: %s\n",path.c_str());
     }else if(u.status==UPLOAD_FILE_WRITE){
         if(g_upload_file)g_upload_file.write(u.buf,u.currentSize);
     }else if(u.status==UPLOAD_FILE_END){
-        if(g_upload_file){g_upload_file.close();}
+        if(g_upload_file)g_upload_file.close();
+        if(g_upload_is_pilots)pilotDBLoad();  // reload immediately
         Serial.printf("[WiFi] Upload done: %u bytes\n",u.totalSize);}}
 
 static void handleUploadDone(){
