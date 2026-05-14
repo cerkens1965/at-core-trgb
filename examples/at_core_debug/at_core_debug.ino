@@ -710,7 +710,7 @@ static void _authSendBLE(const char*pc,const char*ic){
     bool isOwner=(strcmp(role,"owner")==0);
     if(isOwner){Preferences p;p.begin("auth",false);p.putString("owner",pc);p.end();}
     g_session.valid=true;g_session.is_owner=isOwner;
-    strlcpy(g_session.name,pe?pe->name:pc,sizeof(g_session.name));
+    strlcpy(g_session.name,pe?pe->name:"",sizeof(g_session.name));
     strlcpy(g_session.status,role,sizeof(g_session.status));
     strlcpy(g_session.trigram,pe?pe->trigram:"",sizeof(g_session.trigram));
     // Role label + color for feedback display
@@ -1709,9 +1709,9 @@ void updateAllPages(){
     }else{updSBox(3,"BLE",g_connected);}
     // Pilot name label
     if(r_pilot_lbl){
-        if(g_session.valid&&g_session.name[0]){
+        if(g_session.valid&&(g_session.trigram[0]||g_session.name[0])){
             char pb[52];
-            if(g_session.trigram[0])snprintf(pb,sizeof(pb),"● %s  (%s)",g_session.name,g_session.trigram);
+            if(g_session.trigram[0])snprintf(pb,sizeof(pb),"● %s",g_session.trigram);
             else                    snprintf(pb,sizeof(pb),"● %s",g_session.name);
             lv_label_set_text(r_pilot_lbl,pb);
             bool isOwner=strcmp(g_session.status,"owner")==0;
