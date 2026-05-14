@@ -103,8 +103,8 @@ Version firmware : AT-VIEW v0.7 — 2026-05-14
 {
   "count": 2,
   "t": [
-    {"cs":"OO-ABC","d":2500,"a":650,"b":135,"c":200,"s":95,"v":true,"tp":8},
-    {"cs":"PH-XYZ","d":4800,"a":320,"b":270,"c":-150,"s":0,"v":false,"tp":0}
+    {"cs":"OO-ABC","d":2500,"a":650,"b":135,"c":200,"w":150,"s":95,"v":true,"tp":8},
+    {"cs":"PH-XYZ","d":4800,"a":320,"b":270,"c":90,"w":-200,"s":0,"v":false,"tp":0}
   ]
 }
 ```
@@ -115,7 +115,8 @@ Version firmware : AT-VIEW v0.7 — 2026-05-14
 | `d` | Distance à l'avion propre | mètres |
 | `a` | Altitude MSL | mètres |
 | `b` | Bearing absolu Nord (calculé côté AT-CORE avec haversine) | degrés 0-359 |
-| `c` | Taux de montée/descente | feet/min (positif = montée) |
+| `c` | Cap propre du trafic — **utilisé pour dead reckoning ET rotation icône** | degrés 0-359 |
+| `w` | Taux de montée/descente (nouveau champ, ignoré par AT-VIEW jusqu'à implémentation) | feet/min |
 | `s` | Vitesse sol | knots |
 | `v` | Visible ADS-B (sinon FLARM/SafeSky) | bool |
 | `tp` | Type d'aéronef SafeSky (0-17) | int → sélection icône |
