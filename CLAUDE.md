@@ -5,9 +5,10 @@
 | Composant | Détail |
 |-----------|--------|
 | Board | LilyGo T-RGB 2.8" circular |
-| SoC | ESP32-S3 |
+| SoC | ESP32-S3 (WiFi 2.4GHz intégré) |
 | Écran | 480×480 px circulaire, RGB panel |
 | Touch | Capacitif intégré |
+| SD | Slot natif SD_MMC (SDIO 1-bit) — EN=7, SCK=39, CMD=40, DAT=38 |
 | BLE | Client — se connecte à AT-CORE (NimBLE) |
 
 ## Fichier principal
@@ -119,6 +120,11 @@ Stockage NVS (`Preferences` namespace `atview`) :
 - Affichage AIP/CTR sur radar : contours CTR + aérodromes (OpenAIP Belgique)
   - Pas héliports, pas hydrobases
   - Option activable dans Settings
+  - Données stockées sur SD (slot natif SD_MMC, 16-32GB)
+  - Mise à jour via WiFi → hotspot iPhone (SSID/pass en NVS)
+  - `panel.installSD()` déjà disponible dans la board library
+  - Vecteur GeoJSON pour CTR/aérodromes — tuiles raster possibles si SD
+  - WiFi AT-VIEW indépendant du AT-CORE (pas de consommation carte IoT)
 
 ## État du projet (2026-05)
 
