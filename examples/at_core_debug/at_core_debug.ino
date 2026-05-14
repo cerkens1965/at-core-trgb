@@ -1789,8 +1789,8 @@ void updateAllPages(){
     if(g_alert.valid){
         bool any=g_alert.co||g_alert.gforce||g_alert.rpm||g_alert.traffic;
         if(any){char ab[48]="";
-            if(g_alert.co)strcat(ab,"▲CO  ");if(g_alert.gforce)strcat(ab,"▲G  ");
-            if(g_alert.rpm)strcat(ab,"▲RPM  ");if(g_alert.traffic)strcat(ab,"▲TFC");
+            if(g_alert.co)strcat(ab,"! CO  ");if(g_alert.gforce)strcat(ab,"! G  ");
+            if(g_alert.rpm)strcat(ab,"! RPM  ");if(g_alert.traffic)strcat(ab,"! TFC");
             lv_label_set_text(r_aov_text,ab);lv_obj_clear_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);
         }else{lv_obj_add_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);}}
     // Debug
