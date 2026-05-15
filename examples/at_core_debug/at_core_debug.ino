@@ -95,6 +95,7 @@ static int         g_pilot_cnt = 0;
 static char        g_aircraft_icao[8] = "";
 struct AuthSession { char name[32]; char status[12]; char trigram[4]; bool is_owner; bool valid; };
 static AuthSession g_session = {};
+static char        s_session_pc[5] = {0};  // code pilote courant — pour re-lookup si pilots arrivent après auth
 
 // ── BLE state ─────────────────────────────────────────────────────────────────
 static BLEClient*              g_client = nullptr;
@@ -645,7 +646,18 @@ static void _parsePilotJSON(const char* json){
         strlcpy(t.status,       e["r"]|"pilot",sizeof(t.status));
         strlcpy(t.primary_icao, e["i"]|"",sizeof(t.primary_icao));
         strlcpy(t.trigram,      e["t"]|"",sizeof(t.trigram));}
-    Serial.printf("[Auth] %d pilots loaded\n",g_pilot_cnt);}
+    Serial.printf("[Auth] %d pilots loaded\n",g_pilot_cnt);
+    // Race condition: session ouverte avant réception pilots → re-lookup et re-afficher welcome
+    if(g_session.valid && !g_session.name[0] && s_session_pc[0]){
+        PilotEntry*pe=pilotFind(s_session_pc);
+        if(pe){
+            strlcpy(g_session.name,pe->name,sizeof(g_session.name));
+            strlcpy(g_session.status,pe->status,sizeof(g_session.status));
+            strlcpy(g_session.trigram,pe->trigram,sizeof(g_session.trigram));
+            showWelcome(g_session.name);
+        }
+    }
+}
 
 void pilotDBLoad(){
     if(!g_sd_ok)return;
@@ -725,6 +737,7 @@ static void _authCloseOv(lv_timer_t*t){
         showWelcome(nm);}}
 
 static void _authSendBLE(const char*pc,const char*ic){
+    strlcpy(s_session_pc,pc,sizeof(s_session_pc));
     PilotEntry*pe=pilotFind(pc);
     PilotEntry*ie=(ic&&ic[0])?pilotFind(ic):nullptr;
     const char* role=pe?pe->status:"unknown";
