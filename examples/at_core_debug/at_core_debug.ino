@@ -693,9 +693,34 @@ void authError(const char*msg){
     lv_timer_create(_auth_err_cb,1500,nullptr);}
 
 
+static lv_obj_t* g_welcome_ov = nullptr;
+static void _welcomeClose(lv_timer_t*t){lv_timer_del(t);if(g_welcome_ov){lv_obj_del(g_welcome_ov);g_welcome_ov=nullptr;}}
+static void showWelcome(const char* fullName){
+    if(g_welcome_ov){lv_obj_del(g_welcome_ov);g_welcome_ov=nullptr;}
+    char fn[32]; strlcpy(fn,fullName,sizeof(fn));
+    char*sp=strchr(fn,' '); if(sp)*sp='\0';
+    g_welcome_ov=lv_obj_create(lv_scr_act());
+    lv_obj_set_size(g_welcome_ov,480,480); lv_obj_set_pos(g_welcome_ov,0,0);
+    lv_obj_set_style_bg_color(g_welcome_ov,lv_color_hex(0x000000),0);
+    lv_obj_set_style_bg_opa(g_welcome_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(g_welcome_ov,0,0);
+    lv_obj_set_style_radius(g_welcome_ov,0,0);
+    lv_obj_t*t1=lv_label_create(g_welcome_ov);
+    lv_label_set_text(t1,"Have a nice flight");
+    lv_obj_set_style_text_color(t1,lv_color_hex(0xFFFFFF),0);
+    lv_obj_set_style_text_font(t1,&lv_font_montserrat_16,0);
+    lv_obj_align(t1,LV_ALIGN_CENTER,0,-18);
+    lv_obj_t*t2=lv_label_create(g_welcome_ov);
+    lv_label_set_text(t2,fn);
+    lv_obj_set_style_text_color(t2,lv_color_hex(0xF5A623),0);
+    lv_obj_set_style_text_font(t2,&lv_font_montserrat_20,0);
+    lv_obj_align(t2,LV_ALIGN_CENTER,0,16);
+    lv_timer_create(_welcomeClose,3000,nullptr);}
+
 static void _authCloseOv(lv_timer_t*t){
     lv_timer_del(t);
-    if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}}
+    if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}
+    if(g_session.valid&&g_session.name[0])showWelcome(g_session.name);}
 
 static void _authSendBLE(const char*pc,const char*ic){
     PilotEntry*pe=pilotFind(pc);
@@ -832,7 +857,24 @@ void mkAuthOverlay(){
         lv_obj_t*lb=lv_label_create(btn);lv_label_set_text(lb,kL[i]);
         lv_obj_set_style_text_color(lb,lv_color_hex(0xFFFFFF),0);
         lv_obj_set_style_text_font(lb,&lv_font_montserrat_16,0);
-        lv_obj_center(lb);}}
+        lv_obj_center(lb);}
+    // ANNULER — on backdrop, centered below card
+    {lv_obj_t*xb=lv_btn_create(g_auth_ov);
+     lv_obj_set_size(xb,160,36);lv_obj_set_pos(xb,160,448);
+     lv_obj_set_style_bg_color(xb,lv_color_hex(0x0f1923),0);
+     lv_obj_set_style_bg_color(xb,lv_color_hex(0x1e2b38),LV_STATE_PRESSED);
+     lv_obj_set_style_bg_opa(xb,LV_OPA_COVER,0);
+     lv_obj_set_style_border_color(xb,lv_color_hex(0x4a6078),0);
+     lv_obj_set_style_border_width(xb,1,0);
+     lv_obj_set_style_radius(xb,18,0);
+     lv_obj_set_style_shadow_opa(xb,LV_OPA_TRANSP,0);
+     lv_obj_t*xl=lv_label_create(xb);lv_label_set_text(xl,"ANNULER");
+     lv_obj_set_style_text_color(xl,lv_color_hex(0x8899aa),0);
+     lv_obj_set_style_text_font(xl,&lv_font_montserrat_12,0);lv_obj_center(xl);
+     lv_obj_add_event_cb(xb,[](lv_event_t*e){
+         if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}
+         g_auth_len=0;memset(g_auth_buf,0,5);g_auth_p2=false;
+     },LV_EVENT_CLICKED,nullptr);}}
 
 // ── Aircraft identity overlay ─────────────────────────────────────────────────
 
@@ -970,17 +1012,9 @@ void mkAircraftOverlay(){
     lv_obj_clear_flag(g_ac_ov,LV_OBJ_FLAG_SCROLLABLE);
 
     // Title
-    lv_obj_t*tl=lv_label_create(g_ac_ov);lv_label_set_text(tl,"APPAREIL");
+    lv_obj_t*tl=lv_label_create(g_ac_ov);lv_label_set_text(tl,"AIRCRAFT");
     lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_20,0);
     lv_obj_align(tl,LV_ALIGN_TOP_MID,0,48);
-
-    // Close ×
-    lv_obj_t*xb=lv_btn_create(g_ac_ov);lv_obj_set_size(xb,36,36);lv_obj_set_pos(xb,390,44);
-    lv_obj_set_style_bg_color(xb,lv_color_hex(0x3d0000),0);lv_obj_set_style_radius(xb,18,0);
-    lv_obj_set_style_border_width(xb,0,0);lv_obj_set_style_shadow_opa(xb,LV_OPA_TRANSP,0);
-    lv_obj_add_event_cb(xb,_ac_key_cb,LV_EVENT_CLICKED,(void*)202);
-    lv_obj_t*xl=lv_label_create(xb);lv_label_set_text(xl,LV_SYMBOL_CLOSE);
-    lv_obj_set_style_text_color(xl,C_RED,0);lv_obj_center(xl);
 
     // Summary: IMMAT / TYPE / HEX current values
     mkLblP(g_ac_ov,"IMMAT",TGREY(),&lv_font_montserrat_12,58,78);
@@ -1111,6 +1145,21 @@ void mkAircraftOverlay(){
         mkAcKey(p,ch,x0+c*(bw+gp),8+r*(bh+gp),bw,bh,(intptr_t)hr[r][c]);}
     mkAcKey(p,LV_SYMBOL_BACKSPACE,(480-256)/2,8+4*(bh+gp),110,34,201);
     mkAcKey(p,"OK",(480-256)/2+126,8+4*(bh+gp),130,34,200);}
+
+    // FERMER — centered bottom, inside circle (y=440, w=160)
+    {lv_obj_t*fb=lv_btn_create(g_ac_ov);
+     lv_obj_set_size(fb,160,36);lv_obj_set_pos(fb,160,440);
+     lv_obj_set_style_bg_color(fb,lv_color_hex(0x1e2b38),0);
+     lv_obj_set_style_bg_color(fb,lv_color_hex(0x2d4358),LV_STATE_PRESSED);
+     lv_obj_set_style_bg_opa(fb,LV_OPA_COVER,0);
+     lv_obj_set_style_border_color(fb,lv_color_hex(0x4a6078),0);
+     lv_obj_set_style_border_width(fb,1,0);
+     lv_obj_set_style_radius(fb,18,0);
+     lv_obj_set_style_shadow_opa(fb,LV_OPA_TRANSP,0);
+     lv_obj_t*fl=lv_label_create(fb);lv_label_set_text(fl,"FERMER");
+     lv_obj_set_style_text_color(fl,lv_color_hex(0x8899aa),0);
+     lv_obj_set_style_text_font(fl,&lv_font_montserrat_12,0);lv_obj_center(fl);
+     lv_obj_add_event_cb(fb,_ac_key_cb,LV_EVENT_CLICKED,(void*)202);}
 
     // init state
     strlcpy(g_ac_tmp,g_ac_reg,sizeof(g_ac_tmp));
