@@ -121,6 +121,7 @@ static volatile uint8_t g_navPage=0;
 static bool             g_rebuildPages=false;
 static bool             g_bootDone=false;
 static bool             g_autoNavDone=false;
+static bool             g_authShown=false;   // reset on disconnect → popup reapparaît
 
 // ── Widget refs — Status page (page 0) ───────────────────────────────────────
 static lv_obj_t *r_title;
@@ -452,7 +453,7 @@ static void notifyP(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){
 
 class ATCCB:public BLEClientCallbacks{
     void onConnect(BLEClient*)override{g_connected=true;g_dataUpdated=true;Serial.println("[BLE] Connected");}
-    void onDisconnect(BLEClient*)override{g_connected=false;g_autoNavDone=false;
+    void onDisconnect(BLEClient*)override{g_connected=false;g_autoNavDone=false;g_authShown=false;
         g_status.valid=g_flight.valid=g_traffic.valid=g_alert.valid=g_debug.valid=false;
         g_peer_name[0]=0;
         g_dataUpdated=true;g_doReconnect=true;Serial.println("[BLE] Disconnected");}};
@@ -651,14 +652,13 @@ static void _parsePilotJSON(const char* json){
         strlcpy(t.primary_icao, e["i"]|"",sizeof(t.primary_icao));
         strlcpy(t.trigram,      e["t"]|"",sizeof(t.trigram));}
     Serial.printf("[Auth] %d pilots loaded\n",g_pilot_cnt);
-    // Race condition: session ouverte avant réception pilots → re-lookup et re-afficher welcome
+    // Race condition: session ouverte avant réception pilots → re-lookup (labels page 1 se mettent à jour)
     if(g_session.valid && !g_session.name[0] && s_session_pc[0]){
         PilotEntry*pe=pilotFind(s_session_pc);
         if(pe){
             strlcpy(g_session.name,pe->name,sizeof(g_session.name));
             strlcpy(g_session.status,pe->status,sizeof(g_session.status));
             strlcpy(g_session.trigram,pe->trigram,sizeof(g_session.trigram));
-            showWelcome(g_session.name);
         }
     }
 }
@@ -1837,11 +1837,10 @@ void updateAllPages(){
      #undef SET_PILL_TXT
      #undef SET_PILL_IMG
      }
-    // Auth popup — once BLE+GPS ready, if session not yet established
-    {static bool s_authShown=false;
-     if(!s_authShown&&!g_auth_ov&&!g_session.valid
-        &&g_connected&&g_status.valid&&g_status.gps_fix){
-         s_authShown=true;mkAuthOverlay();}}
+    // Auth popup — BLE+GPS ready + pas de session → popup (se re-trigger après chaque déco)
+    if(!g_authShown&&!g_auth_ov&&!g_session.valid
+       &&g_connected&&g_status.valid&&g_status.gps_fix){
+        g_authShown=true;mkAuthOverlay();}
     // Auto-navigate to radar once BLE+GPS ready (one-shot per connection)
     if(!g_autoNavDone&&g_connected&&g_status.valid&&g_status.gps_fix&&g_page==0){
         g_autoNavDone=true;g_navPending=true;g_navPage=1;}
