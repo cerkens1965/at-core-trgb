@@ -744,18 +744,18 @@ static void _authSendBLE(const char*pc,const char*ic){
     strlcpy(s_session_pc,pc,sizeof(s_session_pc));
     PilotEntry*pe=pilotFind(pc);
     PilotEntry*ie=(ic&&ic[0])?pilotFind(ic):nullptr;
-    const char* role=pe?pe->status:"unknown";
+    // Si pilot pas encore chargé → on envoie quand même à AT-CORE, session complétée dans loop()
+    const char* role=pe?pe->status:"pilot";
     char payload[96];
     const char* trig=pe?pe->trigram:"";
     if(ic&&ic[0])snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"ic\":\"%s\",\"role\":\"%s\",\"t\":\"%s\"}",pc,ic,role,trig);
     else         snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"role\":\"%s\",\"t\":\"%s\"}",pc,role,trig);
     if(g_chrW&&g_chrW->canWrite())g_chrW->writeValue((uint8_t*)payload,strlen(payload),false);
-    // Owner → save to NVS, popup won't show again at next boot
-    bool isOwner=(strcmp(role,"owner")==0);
+    bool isOwner=(pe&&strcmp(pe->status,"owner")==0);
     if(isOwner){Preferences p;p.begin("auth",false);p.putString("owner",pc);p.end();}
     g_session.valid=true;g_session.is_owner=isOwner;
     strlcpy(g_session.name,pe?pe->name:"",sizeof(g_session.name));
-    strlcpy(g_session.status,role,sizeof(g_session.status));
+    strlcpy(g_session.status,pe?pe->status:"pilot",sizeof(g_session.status));
     strlcpy(g_session.trigram,pe?pe->trigram:"",sizeof(g_session.trigram));
     // Role label + color for feedback display
     const char* roleLabel=isOwner?"Proprietaire":
@@ -1837,9 +1837,8 @@ void updateAllPages(){
      #undef SET_PILL_TXT
      #undef SET_PILL_IMG
      }
-    // Auth popup — BLE+GPS ready + pas de session → popup (se re-trigger après chaque déco)
-    if(!g_authShown&&!g_auth_ov&&!g_session.valid
-       &&g_connected&&g_status.valid&&g_status.gps_fix){
+    // Auth popup — dès connexion BLE, si pas de session
+    if(!g_authShown&&!g_auth_ov&&!g_session.valid&&g_connected){
         g_authShown=true;mkAuthOverlay();}
     // Auto-navigate to radar once BLE+GPS ready (one-shot per connection)
     if(!g_autoNavDone&&g_connected&&g_status.valid&&g_status.gps_fix&&g_page==0){
@@ -2058,6 +2057,16 @@ void loop(){
          if(r_radar_scale_lbl){char b[12];snprintf(b,12,"%dnm",g_cfg.scale_nm);lv_label_set_text(r_radar_scale_lbl,b);}
          switchPage(g_prevPage);}}
     if(g_navPending){g_navPending=false;switchPage(g_navPage);}
+    // Compléter session si code entré avant réception liste pilots (race condition)
+    if(g_session.valid&&!g_session.name[0]&&s_session_pc[0]&&g_pilot_cnt>0){
+        PilotEntry*pe=pilotFind(s_session_pc);
+        if(pe){
+            strlcpy(g_session.name,pe->name,sizeof(g_session.name));
+            strlcpy(g_session.status,pe->status,sizeof(g_session.status));
+            strlcpy(g_session.trigram,pe->trigram,sizeof(g_session.trigram));
+            g_session.is_owner=(strcmp(pe->status,"owner")==0);
+            if(g_session.is_owner){Preferences p;p.begin("auth",false);p.putString("owner",s_session_pc);p.end();}
+            showWelcome(g_session.name);}}
     static uint32_t drLast=0;
     if(g_page==1&&now-drLast>=200){drLast=now;updateRadarDR();
         if(g_cfg.aip_en&&r_aip_layer&&g_status.valid)lv_obj_invalidate(r_aip_layer);}
