@@ -88,7 +88,7 @@ static DebugData   g_debug   = {};
 static volatile bool g_dataUpdated = false;
 
 // ── Pilot DB / Auth ───────────────────────────────────────────────────────────
-struct PilotEntry { char code[5]; char name[32]; char status[12]; char primary_icao[8]; char trigram[4]; };
+struct PilotEntry { char code[5]; char name[32]; char status[12]; char primary_icao[8]; char trigram[4]; bool is_instructor; };
 #define MAX_PILOTS 24
 static PilotEntry  g_pilots[MAX_PILOTS] = {};
 static int         g_pilot_cnt = 0;
@@ -649,8 +649,9 @@ static void _parsePilotJSON(const char* json){
         strlcpy(t.code,         e["c"]|"",sizeof(t.code));
         strlcpy(t.name,         e["n"]|"",sizeof(t.name));
         strlcpy(t.status,       e["r"]|"pilot",sizeof(t.status));
-        strlcpy(t.primary_icao, e["i"]|"",sizeof(t.primary_icao));
-        strlcpy(t.trigram,      e["t"]|"",sizeof(t.trigram));}
+        strlcpy(t.primary_icao, "",sizeof(t.primary_icao));
+        strlcpy(t.trigram,      e["t"]|"",sizeof(t.trigram));
+        t.is_instructor =       e["i"]|false;}
     Serial.printf("[Auth] %d pilots loaded\n",g_pilot_cnt);
     // Race condition: session ouverte avant réception pilots → re-lookup (labels page 1 se mettent à jour)
     if(g_session.valid && !g_session.name[0] && s_session_pc[0]){
@@ -790,6 +791,12 @@ void authValidate(){
         }else{
             _authSendBLE(g_auth_buf,nullptr);}
     }else{
+        // Valider que le code instructeur appartient bien à un instructeur
+        PilotEntry*ie=pilotFind(g_auth_buf);
+        if(ie&&!ie->is_instructor){
+            if(g_auth_msg){lv_label_set_text(g_auth_msg,"Pas instructeur");
+                           lv_obj_set_style_text_color(g_auth_msg,C_RED,0);}
+            g_auth_len=0;memset(g_auth_buf,0,5);authUpdateDots();return;}
         _authSendBLE(g_auth_scode,g_auth_buf);}}
 
 static void _auth_btn_cb(lv_event_t*e){
