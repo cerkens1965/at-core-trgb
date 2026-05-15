@@ -125,7 +125,8 @@ static bool             g_autoNavDone=false;
 // ── Widget refs — Status page (page 0) ───────────────────────────────────────
 static lv_obj_t *r_title;
 static lv_obj_t *r_boot_panel,*r_boot_lvgl,*r_boot_ble,*r_boot_core;
-static lv_obj_t *r_coords,*r_bat_p1,*r_pilot_lbl;
+static lv_obj_t *r_coords,*r_bat_p1;
+static lv_obj_t *r_sess_trig,*r_sess_name;
 static lv_obj_t *r_sbox[6],*r_sico[6],*r_stxt[6]; // [0]GPS [1]LTE [2]SD [3]BLE [4]FLARM [5]ADS-B
 
 // ── Widget refs — Radar (page 1) ──────────────────────────────────────────────
@@ -586,6 +587,10 @@ void rebuildAllPages(){
 void buildStatusPage(){
     lv_obj_t*p=g_pages[0];
 
+    // ── Pilote — trigramme + nom au-dessus des logos
+    r_sess_trig=mkLbl(p,"",C_AMBER,&lv_font_montserrat_16,LV_ALIGN_TOP_MID,0,22);
+    r_sess_name=mkLbl(p,"",TFG(),  &lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,46);
+
     // ── Logos (white pixels → recolor via theme)
     lv_obj_t*lAt=lv_img_create(p);
     lv_img_set_src(lAt,&img_logo_aerotrace);
@@ -630,7 +635,6 @@ void buildStatusPage(){
     mkSBox(p,4, 68,354,"FLARM",  false); mkSBox(p,5,252,354,"ADS-B",  false);
     r_coords=mkLbl(p,"--- / ---",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,380);
     r_bat_p1=mkLbl(p,"BAT  ---%",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,400);
-    r_pilot_lbl=mkLbl(p,"",C_GREEN,&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,420);
     mkLbl(p,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_BOTTOM_MID,0,-52);}
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
@@ -1771,16 +1775,17 @@ void updateAllPages(){
         else{snprintf(b,32,"BAT  %d%%",g_status.bat);lv_label_set_text(r_bat_p1,b);
         lv_obj_set_style_text_color(r_bat_p1,g_status.bat>=50?C_GREEN:g_status.bat>=20?C_AMBER:C_RED,0);}
     }else{updSBox(3,"BLE",g_connected);}
-    // Pilot name label
-    if(r_pilot_lbl){
-        if(g_session.valid&&(g_session.trigram[0]||g_session.name[0])){
-            char pb[52];
-            if(g_session.trigram[0])snprintf(pb,sizeof(pb),"● %s",g_session.trigram);
-            else                    snprintf(pb,sizeof(pb),"● %s",g_session.name);
-            lv_label_set_text(r_pilot_lbl,pb);
+    // Pilote — trigramme ligne 1, prénom+nom ligne 2
+    if(r_sess_trig&&r_sess_name){
+        if(g_session.valid){
+            char t[8]; snprintf(t,sizeof(t),"● %s",g_session.trigram[0]?g_session.trigram:"---");
+            lv_label_set_text(r_sess_trig,t);
             bool isOwner=strcmp(g_session.status,"owner")==0;
-            lv_obj_set_style_text_color(r_pilot_lbl,isOwner?C_GREEN:C_AMBER,0);
-        }else{lv_label_set_text(r_pilot_lbl,"");}}
+            lv_obj_set_style_text_color(r_sess_trig,isOwner?C_GREEN:C_AMBER,0);
+            lv_label_set_text(r_sess_name,g_session.name[0]?g_session.name:"");
+        }else{
+            lv_label_set_text(r_sess_trig,"");
+            lv_label_set_text(r_sess_name,"");}}
     // Header — connectivity tabs + battery — B&W scheme: active=bright bg+black icon, inactive=dark bg+gray icon
     {static bool prev_gps=false,prev_lte=false,prev_ble=false;
      bool gps_ok=g_status.valid&&g_status.gps_fix;
