@@ -720,7 +720,9 @@ static void showWelcome(const char* fullName){
 static void _authCloseOv(lv_timer_t*t){
     lv_timer_del(t);
     if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}
-    if(g_session.valid&&g_session.name[0])showWelcome(g_session.name);}
+    if(g_session.valid){
+        const char* nm=g_session.name[0]?g_session.name:"Pilote";
+        showWelcome(nm);}}
 
 static void _authSendBLE(const char*pc,const char*ic){
     PilotEntry*pe=pilotFind(pc);
