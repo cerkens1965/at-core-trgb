@@ -34,6 +34,7 @@ LilyGo_RGBPanel panel;
 #define BLE_CHR_DEBUG   "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_AUTH    "6E400007-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_PILOTS  "6E400008-B5A3-F393-E0A9-E50E24DCCA9E"
+#define BLE_CHR_CONFIG  "6E400009-B5A3-F393-E0A9-E50E24DCCA9E"
 // BLE identity — loaded from NVS namespace "unit" at boot
 static char g_unit_name[24]   = "ATVIEW-EBBY1-01";
 static char g_paired_mac[18]  = "";              // empty = connect to first ATCORE- found
@@ -59,7 +60,10 @@ static inline lv_color_t PILL_IC_ON() {return g_dark_theme?lv_color_hex(0xffffff
 // ── Data structs ──────────────────────────────────────────────────────────────
 struct StatusData {
     int mode,gps_sat,csq,frames,alt,spd,hdg,bat; float lat,lon;
-    bool gps_fix,sd_ok,flarm_ok,adsb_ok,charging,valid; };
+    bool gps_fix,sd_ok,flarm_ok,adsb_ok,charging,valid;
+    uint8_t flt_phase;   // 0=fly 1=ended 2=closed 3=uploading 4=done 5=fail (tâche D)
+    uint8_t upload_pct;  // 0..100 (tâche D)
+    };
 struct FlightData  { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
 struct TrafficEntry { char cs[9]; int dist_m,alt_m,bear_deg,hdg_deg,spd_kt,type; bool visible; };
@@ -76,7 +80,7 @@ static const char*   kSrcNames[] ={"SSKY","FLRM","ADSB","ALL"};
 static const char*   kIconSzNames[]={"S","M","L"};
 static const uint16_t kIconZoom[]={171,213,256};  // zoom for 32/40/48 px from 48px base
 static const int8_t  kIconHalf[]={16,20,24};
-struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd,wifi_en,aip_en,ad_heli; int16_t vfilt_ft; uint8_t icon_sz; };
+struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd,wifi_en,aip_en,ad_heli,spd_kt; int16_t vfilt_ft; uint8_t icon_sz; };
 static CfgData     g_cfg={4,16,3,true,true,true,true,false,true,false,2000,2};
 static Preferences g_prefs;
 
@@ -103,7 +107,8 @@ static BLERemoteService*       g_svc    = nullptr;
 static BLERemoteCharacteristic *g_chrS=nullptr,*g_chrF=nullptr,
                                 *g_chrT=nullptr,*g_chrA=nullptr,*g_chrD=nullptr,
                                 *g_chrW=nullptr,   // AUTH write (6E400007)
-                                *g_chrP=nullptr;   // PILOTS notify (6E400008)
+                                *g_chrP=nullptr,   // PILOTS notify (6E400008)
+                                *g_chrCfg=nullptr; // CONFIG write (6E400009) — identité aéronef
 // Pilot list BLE reassembly buffer
 static char    g_prx_buf[4096] = {};
 static int     g_prx_len       = 0;
@@ -258,7 +263,7 @@ static char      g_ac_search[5] = "";
 static lv_obj_t* g_ac_search_disp = nullptr;
 
 // ── Widget refs — Settings (page 2) ───────────────────────────────────────────
-static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_bright_v,*s_src_v,*s_theme_v,*s_grnd_v,*s_icon_sz_v;
+static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_spd_v,*s_bright_v,*s_src_v,*s_theme_v,*s_grnd_v,*s_icon_sz_v;
 static lv_obj_t *s_ac_v,*s_wifi_v,*s_sd_v;
 static lv_obj_t *s_pg[2]  = {};
 static lv_obj_t *s_pg_ind = nullptr;
@@ -405,6 +410,7 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.gps_fix=d["gps_fix"]|false;g_status.sd_ok=d["sd_ok"]|false;
     g_status.flarm_ok=d["flarm"]|false;g_status.adsb_ok=d["adsb"]|false;
     g_status.charging=d["chg"]|false;
+    g_status.flt_phase=d["flt_ph"]|0;g_status.upload_pct=d["up_pct"]|0;
     g_status.valid=true;g_dataUpdated=true;}
 void parseFlight(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_flight.gforce_z=d["gf"]|1.0f;g_flight.co_ppm=d["co"]|0;
@@ -442,20 +448,22 @@ static void notifyT(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){if(l>=BLE_
 static void notifyA(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){if(l>=BLE_BUF)return;static char b[BLE_BUF];memcpy(b,d,l);b[l]=0;parseAlerts(b);}
 static void notifyD(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){if(l>=BLE_BUF)return;static char b[BLE_BUF];memcpy(b,d,l);b[l]=0;parseDebug(b);}
 
-// PILOTS (6E400008) — framing: d[0]=0x01 start, 0x02 continue, 0x03 end+parse
+// PILOTS (6E400008) — framing: d[0]=0x01 start+data, 0x02 continue+data, 0x03 end+data+parse
+// single-chunk: AT-CORE envoie directement 0x03+data (pas de START vide)
+// multi-chunk:  0x01+data | 0x02+data... | 0x03+data
 static void notifyP(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){
-    if(l<2)return;
+    if(l<2)return;  // chaque paquet = 1 header + au moins 1 byte data
     uint8_t cmd=d[0];size_t dlen=l-1;const char*chunk=(const char*)(d+1);
     if(cmd==0x01){g_prx_len=0;memset(g_prx_buf,0,sizeof(g_prx_buf));}
     if(g_prx_len+dlen<sizeof(g_prx_buf)-1){
         memcpy(g_prx_buf+g_prx_len,chunk,dlen);g_prx_len+=dlen;g_prx_buf[g_prx_len]=0;}
-    if(cmd==0x03){_parsePilotJSON(g_prx_buf);Serial.println("[Auth] source: BLE");}}
+    if(cmd==0x03){_parsePilotJSON(g_prx_buf);g_prx_len=0;Serial.println("[Auth] pilots BLE ok");}}
 
 class ATCCB:public BLEClientCallbacks{
     void onConnect(BLEClient*)override{g_connected=true;g_dataUpdated=true;Serial.println("[BLE] Connected");}
     void onDisconnect(BLEClient*)override{g_connected=false;g_autoNavDone=false;g_authShown=false;
         g_status.valid=g_flight.valid=g_traffic.valid=g_alert.valid=g_debug.valid=false;
-        g_peer_name[0]=0;
+        g_peer_name[0]=0;g_prx_len=0;  // reset pilots buffer — évite données résiduelles
         g_dataUpdated=true;g_doReconnect=true;Serial.println("[BLE] Disconnected");}};
 class ATCAdv:public BLEAdvertisedDeviceCallbacks{
     void onResult(BLEAdvertisedDevice dev)override{
@@ -480,6 +488,7 @@ bool connectBLE(){
     g_chrD=g_svc->getCharacteristic(BLE_CHR_DEBUG);
     g_chrW=g_svc->getCharacteristic(BLE_CHR_AUTH);
     g_chrP=g_svc->getCharacteristic(BLE_CHR_PILOTS);
+    g_chrCfg=g_svc->getCharacteristic(BLE_CHR_CONFIG);
     if(g_chrS&&g_chrS->canNotify())g_chrS->registerForNotify(notifyS);
     if(g_chrF&&g_chrF->canNotify())g_chrF->registerForNotify(notifyF);
     if(g_chrT&&g_chrT->canNotify())g_chrT->registerForNotify(notifyT);
@@ -533,6 +542,7 @@ void cfgLoad(){
     g_cfg.ad_heli   =g_prefs.getBool("ad_heli",false);
     g_cfg.vfilt_ft  =g_prefs.getShort("vfilt",2000);
     g_cfg.icon_sz   =g_prefs.getUChar("icon_sz",2);
+    g_cfg.spd_kt    =g_prefs.getBool("spd_kt",true);
     g_prefs.end();
     g_dark_theme=g_cfg.dark;}
 void cfgSave(){
@@ -549,6 +559,7 @@ void cfgSave(){
     g_prefs.putBool("ad_heli",g_cfg.ad_heli);
     g_prefs.putShort("vfilt",g_cfg.vfilt_ft);
     g_prefs.putUChar("icon_sz",g_cfg.icon_sz);
+    g_prefs.putBool("spd_kt",g_cfg.spd_kt);
     g_prefs.end();}
 
 void unitLoad(){
@@ -653,15 +664,18 @@ static void _parsePilotJSON(const char* json){
         strlcpy(t.trigram,      e["t"]|"",sizeof(t.trigram));
         t.is_instructor =       e["i"]|false;}
     Serial.printf("[Auth] %d pilots loaded\n",g_pilot_cnt);
-    // Race condition: session ouverte avant réception pilots → re-lookup (labels page 1 se mettent à jour)
-    if(g_session.valid && !g_session.name[0] && s_session_pc[0]){
+    // Race condition: session ouverte avant réception pilots, ou SD sans trigram → re-lookup
+    if(g_session.valid && (!g_session.name[0]||!g_session.trigram[0]) && s_session_pc[0]){
         PilotEntry*pe=pilotFind(s_session_pc);
         if(pe){
             strlcpy(g_session.name,pe->name,sizeof(g_session.name));
             strlcpy(g_session.status,pe->status,sizeof(g_session.status));
             strlcpy(g_session.trigram,pe->trigram,sizeof(g_session.trigram));
+            g_session.is_owner=(strcmp(pe->status,"owner")==0);
+            Serial.printf("[Auth] session trigram/name refreshed from BLE: %s %s\n",pe->trigram,pe->name);
         }
     }
+    g_dataUpdated=true;  // force UI refresh (labels trigramme/nom)
 }
 
 void pilotDBLoad(){
@@ -902,6 +916,88 @@ void mkAuthOverlay(){
          g_auth_len=0;memset(g_auth_buf,0,5);g_auth_p2=false;
      },LV_EVENT_CLICKED,nullptr);}}
 
+// ── Upload progress overlay (tâche F) ────────────────────────────────────────
+// Affiche un modal full-screen quand AT-CORE entre en phase post-vol
+// (flt_phase >= FLT_ENDED). Auto-dismiss 5s après FLT_UPLOADED.
+static lv_obj_t* g_up_ov       = nullptr;
+static lv_obj_t* g_up_title    = nullptr;
+static lv_obj_t* g_up_status   = nullptr;
+static lv_obj_t* g_up_bar      = nullptr;
+static lv_obj_t* g_up_pct_lbl  = nullptr;
+static uint32_t  g_up_done_ms  = 0;
+
+void mkUploadOverlay(){
+    if(g_up_ov) return;
+    g_up_ov=lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_up_ov,400,260);lv_obj_center(g_up_ov);
+    lv_obj_set_style_bg_color(g_up_ov,lv_color_hex(0x0d1117),0);
+    lv_obj_set_style_bg_opa(g_up_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(g_up_ov,C_AMBER,0);
+    lv_obj_set_style_border_width(g_up_ov,2,0);
+    lv_obj_set_style_radius(g_up_ov,12,0);
+    lv_obj_clear_flag(g_up_ov,LV_OBJ_FLAG_SCROLLABLE);
+
+    g_up_title=mkLblP(g_up_ov,"TRANSFERT VOL",C_AMBER,&lv_font_montserrat_20,118,18);
+    g_up_status=mkLblP(g_up_ov,"Vol termine — close CSV...",lv_color_hex(0xffffff),&lv_font_montserrat_16,40,72);
+    lv_obj_set_width(g_up_status,320);
+    lv_obj_set_style_text_align(g_up_status,LV_TEXT_ALIGN_CENTER,0);
+
+    g_up_bar=lv_bar_create(g_up_ov);
+    lv_obj_set_size(g_up_bar,320,18);lv_obj_set_pos(g_up_bar,40,130);
+    lv_bar_set_range(g_up_bar,0,100);lv_bar_set_value(g_up_bar,0,LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(g_up_bar,lv_color_hex(0x1f2937),0);
+    lv_obj_set_style_bg_color(g_up_bar,C_AMBER,LV_PART_INDICATOR);
+
+    g_up_pct_lbl=mkLblP(g_up_ov,"0%%",lv_color_hex(0xffffff),&lv_font_montserrat_16,178,160);
+}
+
+void hideUploadOverlay(){
+    if(g_up_ov){lv_obj_del(g_up_ov);g_up_ov=nullptr;
+        g_up_title=g_up_status=g_up_bar=g_up_pct_lbl=nullptr;}
+    g_up_done_ms=0;
+}
+
+// Met à jour l'overlay selon flt_phase + upload_pct reçus par BLE STATUS.
+// Doit être appelée régulièrement (depuis updateAllPages).
+void updUploadOverlay(){
+    uint8_t ph = g_status.flt_phase;
+    uint8_t pct= g_status.upload_pct;
+
+    // Phase 0 (FLYING) ou status invalide → hide overlay si existant
+    if(!g_status.valid || ph == 0){
+        if(g_up_ov && g_up_done_ms && millis()-g_up_done_ms>5000) hideUploadOverlay();
+        return;
+    }
+
+    // Phase >= 1 → afficher si pas encore là
+    if(!g_up_ov) mkUploadOverlay();
+
+    // Texte selon phase
+    const char* msg = "...";
+    switch(ph){
+        case 1: msg="Vol termine — fermeture CSV"; break;
+        case 2: msg="CSV ferme — attente upload"; break;
+        case 3: msg="Upload Firebase en cours..."; break;
+        case 4: msg="Transfert reussi ✓";
+                if(g_up_done_ms==0) g_up_done_ms=millis(); break;
+        case 5: msg="Echec — nouvelle tentative...";
+                g_up_done_ms=0; break;
+    }
+    if(g_up_status) lv_label_set_text(g_up_status,msg);
+    if(g_up_bar)    lv_bar_set_value(g_up_bar,pct,LV_ANIM_OFF);
+    if(g_up_pct_lbl){
+        char p[8]; snprintf(p,sizeof(p),"%d%%",pct);
+        lv_label_set_text(g_up_pct_lbl,p);
+    }
+
+    // Couleur progress + bordure : amber par défaut, vert sur succès, rouge sur fail
+    if(g_up_bar){
+        lv_color_t c = ph==4?C_GREEN : ph==5?C_RED : C_AMBER;
+        lv_obj_set_style_bg_color(g_up_bar,c,LV_PART_INDICATOR);
+        lv_obj_set_style_border_color(g_up_ov,c,0);
+    }
+}
+
 // ── Aircraft identity overlay ─────────────────────────────────────────────────
 
 void acLoad(){
@@ -911,12 +1007,25 @@ void acLoad(){
     p.getString("hex24","").toCharArray(g_ac_hex,sizeof(g_ac_hex));
     p.end();}
 
+// Push identité aéronef vers AT-CORE via BLE CHR_CONFIG (6E400009).
+// Payload : {"r":"FJFVB","t":"VL3","h":"38EDC5"}
+void acPushBLE(){
+    if(!g_chrCfg||!g_chrCfg->canWrite())return;
+    if(!g_ac_reg[0]||!g_ac_hex[0])return;  // reg+hex24 obligatoires
+    char payload[96];
+    snprintf(payload,sizeof(payload),
+        "{\"r\":\"%s\",\"t\":\"%s\",\"h\":\"%s\"}",
+        g_ac_reg,g_ac_type,g_ac_hex);
+    g_chrCfg->writeValue((uint8_t*)payload,strlen(payload),false);
+    Serial.printf("[BLE] CONFIG push %s\n",payload);}
+
 void acSave(){
     Preferences p;p.begin("aircraft",false);
     p.putString("reg",g_ac_reg);
     p.putString("type",g_ac_type);
     p.putString("hex24",g_ac_hex);
-    p.end();}
+    p.end();
+    acPushBLE();}
 
 void acUpdateHeader(){
     if(!g_ac_hdr_reg)return;
@@ -1515,6 +1624,7 @@ void updSetPage(){
     snprintf(b,16,"%dft",g_cfg.vfilt_ft); lv_label_set_text(s_vfilt_v,b);
     lv_label_set_text(s_dist_v, g_cfg.dist_nm?"NM":"km");
     lv_label_set_text(s_alt_v,  g_cfg.alt_ft?"ft":"m");
+    if(s_spd_v)lv_label_set_text(s_spd_v, g_cfg.spd_kt?"kt":"km/h");
     snprintf(b,16,"%d",g_cfg.brightness); lv_label_set_text(s_bright_v,b);
     lv_label_set_text(s_src_v,  kSrcNames[g_cfg.trf_src&3]);
     lv_label_set_text(s_grnd_v, g_cfg.show_grnd?"ON":"OFF");
@@ -1550,7 +1660,9 @@ static void cbSetBtn(lv_event_t*e){
         case 20:case 21:if(g_aip_loaded){g_cfg.aip_en=!g_cfg.aip_en;
             if(r_aip_layer)lv_obj_invalidate(r_aip_layer);}break;
         case 22:case 23:g_cfg.ad_heli=!g_cfg.ad_heli;
-            if(r_aip_layer)lv_obj_invalidate(r_aip_layer);break;}
+            if(r_aip_layer)lv_obj_invalidate(r_aip_layer);break;
+        case 24:case 25:g_cfg.spd_kt=!g_cfg.spd_kt;break;  // tâche F : unité vitesse
+    }
     cfgSave();
     if(!g_rebuildPages)updSetPage();}
 
@@ -1637,9 +1749,10 @@ void buildSettingsPage(){
     snprintf(b,16,"%dft",g_cfg.vfilt_ft); s_vfilt_v =mkSetRow(p,"V-Filt",52,b,2,3);
     s_dist_v=mkSetRow(p,"Dist",84,g_cfg.dist_nm?"NM":"km",4,5);
     s_alt_v =mkSetRow(p,"Alt",116,g_cfg.alt_ft?"ft":"m",6,7);
-    mkLbl(p,"DISPLAY",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,150);
-    snprintf(b,16,"%d",g_cfg.brightness); s_bright_v=mkSetRow(p,"Bright",168,b,8,9);
-    s_theme_v=mkSetRow(p,"Theme",200,g_cfg.dark?"DARK":"LIGHT",12,13);}
+    s_spd_v =mkSetRow(p,"Speed",148,g_cfg.spd_kt?"kt":"km/h",24,25);
+    mkLbl(p,"DISPLAY",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,180);
+    snprintf(b,16,"%d",g_cfg.brightness); s_bright_v=mkSetRow(p,"Bright",198,b,8,9);
+    s_theme_v=mkSetRow(p,"Theme",230,g_cfg.dark?"DARK":"LIGHT",12,13);}
 
     // ── Sub-page 1: TRAFFIC + AIRCRAFT + SYSTEM ──────────────────────────────
     {lv_obj_t*p=s_pg[1];
@@ -1762,6 +1875,8 @@ void updateRadarDR(){
 // ── Update all live data ──────────────────────────────────────────────────────
 void updateAllPages(){
     char b[32];
+    // Tâche F : overlay upload progress (full-screen modal post-vol)
+    updUploadOverlay();
     // Status page
     {char _t[28];snprintf(_t,28,"● %s",g_connected?(g_peer_name[0]?g_peer_name:"AT-CORE"):"SCAN");
     lv_label_set_text(r_title,_t);}
@@ -1790,6 +1905,14 @@ void updateAllPages(){
             bool isOwner=strcmp(g_session.status,"owner")==0;
             lv_obj_set_style_text_color(r_sess_trig,isOwner?C_GREEN:C_AMBER,0);
             lv_label_set_text(r_sess_name,g_session.name[0]?g_session.name:"");
+        }else if(g_connected){
+            // Pas de session — afficher état pilots pour debug visible
+            char t[16];
+            if(g_pilot_cnt>0) snprintf(t,sizeof(t),"%dP - code?",g_pilot_cnt);
+            else              snprintf(t,sizeof(t),"...");
+            lv_label_set_text(r_sess_trig,t);
+            lv_obj_set_style_text_color(r_sess_trig,TGREY(),0);
+            lv_label_set_text(r_sess_name,"");
         }else{
             lv_label_set_text(r_sess_trig,"");
             lv_label_set_text(r_sess_name,"");}}
@@ -2064,16 +2187,18 @@ void loop(){
          if(r_radar_scale_lbl){char b[12];snprintf(b,12,"%dnm",g_cfg.scale_nm);lv_label_set_text(r_radar_scale_lbl,b);}
          switchPage(g_prevPage);}}
     if(g_navPending){g_navPending=false;switchPage(g_navPage);}
-    // Compléter session si code entré avant réception liste pilots (race condition)
-    if(g_session.valid&&!g_session.name[0]&&s_session_pc[0]&&g_pilot_cnt>0){
+    // Compléter session si code entré avant réception liste pilots, ou SD sans trigram
+    if(g_session.valid&&(!g_session.name[0]||!g_session.trigram[0])&&s_session_pc[0]&&g_pilot_cnt>0){
         PilotEntry*pe=pilotFind(s_session_pc);
         if(pe){
+            bool hadName=g_session.name[0]!=0;
             strlcpy(g_session.name,pe->name,sizeof(g_session.name));
             strlcpy(g_session.status,pe->status,sizeof(g_session.status));
             strlcpy(g_session.trigram,pe->trigram,sizeof(g_session.trigram));
             g_session.is_owner=(strcmp(pe->status,"owner")==0);
             if(g_session.is_owner){Preferences p;p.begin("auth",false);p.putString("owner",s_session_pc);p.end();}
-            showWelcome(g_session.name);}}
+            if(!hadName)showWelcome(g_session.name);
+            g_dataUpdated=true;}}
     static uint32_t drLast=0;
     if(g_page==1&&now-drLast>=200){drLast=now;updateRadarDR();
         if(g_cfg.aip_en&&r_aip_layer&&g_status.valid)lv_obj_invalidate(r_aip_layer);}
