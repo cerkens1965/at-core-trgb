@@ -41,13 +41,16 @@ AT-VIEW est **client BLE** — se connecte à AT-CORE serveur.
 Scan filtre actuellement sur nom `"AT-CORE NimBLE"`.
 **Migration prévue** : filtrer sur préfixe `ATCORE-` (nommage structuré).
 
-| Caractéristique souscrite | UUID | Contenu |
-|--------------------------|------|---------|
-| STATUS | `6E400002-...` | mode, GPS, LTE, BLE, batterie |
-| FLIGHT | `6E400004-...` | lat, lon, alt, spd, hdg |
-| TRAFFIC | `6E400005-...` | tableau trafic (5 max) |
-| ALERTS | `6E400006-...` | CO ppm, trafic <500 m |
-| DEBUG | `6E400003-...` | logs sysLog |
+| Caractéristique souscrite | UUID | Direction | Contenu |
+|--------------------------|------|-----------|---------|
+| STATUS | `6E400002-...` | notify | mode, GPS, LTE, BLE, batterie, **flt_ph + up_pct** (V1) |
+| FLIGHT | `6E400004-...` | notify | lat, lon, alt, spd, hdg |
+| TRAFFIC | `6E400005-...` | notify | tableau trafic (5 max) |
+| ALERTS | `6E400006-...` | notify | CO ppm, trafic <500 m |
+| DEBUG | `6E400003-...` | notify | logs sysLog |
+| AUTH | `6E400007-...` | **write** | codes pilote/instructeur (V2 popup) |
+| PILOTS | `6E400008-...` | notify | liste pilotes JSON chunké (Firestore) |
+| CONFIG | `6E400009-...` | **write** | identité aéronef `{r,t,h}` — auto-push depuis `acSave()` (V1) |
 
 Service UUID AT-CORE : `4FAFC201-1FB5-459E-8FCC-C5C9C331914B`
 
@@ -102,33 +105,61 @@ Stockage NVS (`Preferences` namespace `atview`) :
 
 ## Persistance NVS actuelle
 
-`Preferences` déjà utilisé pour :
-- `scale_nm` — échelle radar
-- `show_grnd` — filtre sol
+Namespace `atview` (`Preferences`) :
+- `scale`, `vfilt`, `dist_nm`, `alt_ft`, `bright`, `trf_src`, `show_grnd`, `icon_sz`, `aip_en`, `ad_heli`, `wifi_en`, `dark`
+- `spd_kt` — unité vitesse kt/km/h (V1, toggle Settings page 0)
+
+Namespace `aircraft` (V1 — saisi via écran Aircraft, auto-pushé vers AT-CORE via BLE CHR_CONFIG `6E400009`) :
+- `reg` — immatriculation (ex `FJFVB`)
+- `type` — code OACI (ex `VL3`)
+- `hex24` — hex transpondeur (ex `38EDC5`)
+
+Namespace `unit` :
+- `name` — nom BLE AT-VIEW (`ATVIEW-EBBY1-01`)
+- `paired_mac` — MAC AT-CORE choisi (reconnexion auto)
+- `wifi_pass` — mot de passe AP local
+
+## Upload progress overlay (V1)
+
+Modal LVGL full-screen (`mkUploadOverlay()`) qui s'affiche sur transition de phase :
+
+| `flt_phase` reçu via BLE STATUS | Affichage |
+|---|---|
+| 0 (FLYING) | Caché |
+| 1 (ENDED) | "Vol terminé — fermeture CSV" |
+| 2 (CLOSED) | "CSV fermé — attente upload" |
+| 3 (UPLOADING) | "Upload Firebase en cours..." + barre `up_pct` amber |
+| 4 (UPLOADED) | "Transfert réussi ✓" vert, auto-hide 5s |
+| 5 (UPLOAD_FAIL) | "Échec — nouvelle tentative..." rouge, persiste |
+
+Hook : `updUploadOverlay()` appelé depuis `updateAllPages()` (1s).
 
 ## Roadmap
 
-### Court terme
-- Nommage BLE structuré `ATVIEW-<OACI><N>-<SEQ>`
-- Écran pairing BLE + saisie config aéronef
+### Court terme (post-V1)
+- Popup auth pilote/instructeur (write CHR_AUTH `6E400007` — backend AT-CORE déjà prêt)
+- Affichage progression upload basé sur `up_pct` réel (actuellement step 5→50→100 indicatif)
 
 ### Moyen terme
-- Migration config aéronef → NVS (immatriculation, type, hex transpondeur)
 - Auto-découverte hex via OpenSky Network (WiFi AT-VIEW hotspot smartphone)
+- Display conversion km/h ↔ kt cohérent avec `cfg/spd_kt` (UI seulement)
 
 ### Long terme
-- Affichage AIP/CTR sur radar : contours CTR + aérodromes (OpenAIP Belgique)
-  - Pas héliports, pas hydrobases
-  - Option activable dans Settings
-  - Données stockées sur SD (slot natif SD_MMC, 16-32GB)
-  - Mise à jour via WiFi → hotspot iPhone (SSID/pass en NVS)
-  - `panel.installSD()` déjà disponible dans la board library
-  - Vecteur GeoJSON pour CTR/aérodromes — tuiles raster possibles si SD
-  - WiFi AT-VIEW indépendant du AT-CORE (pas de consommation carte IoT)
+- Affichage AIP/CTR sur radar : contours CTR + aérodromes (OpenAIP Belgique) — **partiellement en place** (overlay AIP, données via SD)
+- Mise à jour AIP via WiFi → hotspot iPhone (SSID/pass en NVS)
 
-## État du projet (2026-05)
+## État du projet — V1 (2026-05-17)
 
-- AT-VIEW v0.6 stable — radar, alertes, settings scale OK
-- GitHub Actions CI corrigé (`pio.yml` + `arduino_ci.yml`)
-- Repo `at-core-trgb` public → Actions gratuites illimitées
-- Prochaine étape : nommage BLE + écran pairing + config aéronef NVS
+**V1 livrée + pushée** — commit `cb18af5` :
+
+- ✅ **A** — BLE CHR_CONFIG WRITE : `acPushBLE()` auto-push aircraft depuis `acSave()`
+- ✅ **F** — Upload progress overlay + Speed unit toggle + StatusData étendu (flt_phase/upload_pct)
+- ✅ Build local 521s (iCloud lent) + Build GitHub Actions CI success
+- ✅ `build_dir = /tmp/pio_build_atview` pour contourner iCloud LDF slowdown
+
+**Stats build** : Flash 29.9% (1.96 MB / 6.55), RAM 27.4% (89.8 KB / 320)
+
+**Validation visuelle requise** (pas de hardware T-RGB sous main pour test) :
+- Overlay upload progress quand AT-CORE envoie `flt_ph >= 1`
+- Bouton Speed dans Settings page 0 (entre Alt et Bright)
+- Push CHR_CONFIG vers AT-CORE après édition Aircraft
