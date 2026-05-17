@@ -139,7 +139,7 @@ static lv_obj_t *r_sbox[6],*r_sico[6],*r_stxt[6]; // [0]GPS [1]LTE [2]SD [3]BLE 
 #define RAD_CX 240
 #define RAD_CY 240
 #define RAD_R  175
-static lv_obj_t *r_radar_hdg, *r_radar_scale_lbl;
+static lv_obj_t *r_radar_hdg, *r_radar_scale_lbl, *r_radar_gs;
 static lv_obj_t *r_card[4];
 static lv_obj_t *r_radar_cs[MAX_TRF],*r_radar_alt[MAX_TRF];
 static lv_obj_t *r_trf_img[MAX_TRF],*r_trf_vect[MAX_TRF];
@@ -1464,6 +1464,11 @@ void buildRadarPage(){
     lv_obj_set_style_text_color(r_radar_hdg,TFG(),0);
     lv_obj_set_style_text_font(r_radar_hdg,&lv_font_montserrat_16,0);lv_obj_center(r_radar_hdg);
 
+    r_radar_gs=lv_label_create(p);lv_label_set_text(r_radar_gs,"GS ---");
+    lv_obj_set_style_text_color(r_radar_gs,TFG(),0);
+    lv_obj_set_style_text_font(r_radar_gs,&lv_font_montserrat_14,0);
+    lv_obj_align(r_radar_gs,LV_ALIGN_TOP_MID,0,62);
+
     // Tab pills 52×32 — outer edge is AT the display circle boundary (8-12px behind bezel).
     // The circular LCD naturally clips the outer rounded corner → flat outer edge = "D" shape.
     // Only the inner rounded end (radius=16 half-circle) is fully visible.
@@ -1982,6 +1987,10 @@ void updateAllPages(){
     // un cap indépendant de la vitesse (cap magnétique vs cap sol).
     if(g_status.valid){
         snprintf(b,32,"%d°",g_status.hdg);lv_label_set_text(r_radar_hdg,b);
+        if(r_radar_gs){
+            if(g_cfg.spd_kt) snprintf(b,32,"GS %dkt",g_status.spd);
+            else             snprintf(b,32,"GS %dkm/h",(int)((float)g_status.spd*1.852f+0.5f));
+            lv_label_set_text(r_radar_gs,b);}
         const int cbear[]={0,90,180,270};
         for(int ci=0;ci<4;ci++){
             int rel=((cbear[ci]-g_status.hdg)%360+360)%360;
