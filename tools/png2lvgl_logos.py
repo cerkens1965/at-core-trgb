@@ -9,8 +9,9 @@ import io, os
 from PIL import Image
 
 LOGOS = [
-    ("img_logo_aerotrace", "AerotrAce_AeroTrace.png", 240),
-    ("img_logo_atview",    "AerotrAce_AT-VIEW.png",   110),  # ≈ moitie d'AEROTRACE (maquette)
+    ("img_logo_aerotrace", "AerotrAce_AeroTrace.png",   240),
+    ("img_logo_atview",    "AerotrAce_AT-VIEW.png",     110),  # ≈ moitie d'AEROTRACE (maquette)
+    ("img_logo_a",         "AerotrAce_A-AeroTrace.png",  56),  # A seul bleu, pages #02/#03
 ]
 
 IN_DIR  = "public/logo"

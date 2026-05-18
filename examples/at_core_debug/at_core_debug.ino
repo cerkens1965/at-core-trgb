@@ -97,6 +97,7 @@ struct PilotEntry { char code[5]; char name[32]; char status[12]; char primary_i
 #define MAX_PILOTS 24
 static PilotEntry  g_pilots[MAX_PILOTS] = {};
 static int         g_pilot_cnt = 0;
+static char        g_pilots_date[16] = {};   // date du dernier chargement reussi (YYYY-MM-DD)
 static char        g_aircraft_icao[8] = "";
 struct AuthSession { char name[32]; char status[12]; char trigram[4]; bool is_owner; bool valid; };
 static AuthSession g_session = {};
@@ -114,6 +115,7 @@ static BLERemoteCharacteristic *g_chrS=nullptr,*g_chrF=nullptr,
 static char    g_prx_buf[4096] = {};
 static int     g_prx_len       = 0;
 static volatile bool g_connected=false, g_doConnect=false, g_doReconnect=false;
+uint32_t g_connect_ms = 0;   // millis() au moment de la connexion BLE (0 si pas connecte)
 static BLEAdvertisedDevice*    g_target = nullptr;
 
 // ── Pages ─────────────────────────────────────────────────────────────────────
@@ -137,7 +139,9 @@ enum { CHK_CORE=0, CHK_BT=1, CHK_GPS=2, CHK_LTE=3, CHK_ADSB=4, CHK_OGN=5 };
 static lv_obj_t *r_chk_dot[N_CHK]={};   // cercles
 static lv_obj_t *r_chk_ico[N_CHK]={};   // ✓ blanc (visible si actif)
 static lv_obj_t *r_chk_lbl[N_CHK]={};   // texte
+static bool      g_chk_latched[N_CHK]={};  // une fois actif, V reste (reset au disconnect)
 static lv_obj_t *r_p0_bat=nullptr;      // "Battery AT-CORE : XX%"
+static lv_obj_t *r_p0_progDots[6]={};   // 6 dots progressifs sous le sablier
 
 // ── Widget refs — Radar (page 1) ──────────────────────────────────────────────
 #define RAD_CX 240
@@ -162,6 +166,7 @@ static lv_obj_t* g_auth_dots[4]  = {};
 static lv_obj_t* g_auth_prompt   = nullptr;
 static lv_obj_t* g_auth_name     = nullptr;
 static lv_obj_t* g_auth_msg      = nullptr;
+static lv_obj_t* g_auth_diag     = nullptr;  // ligne "DB: N pilots" en bas de page #02 (refresh live)
 static char      g_auth_buf[5]   = {};
 static int       g_auth_len      = 0;
 static bool      g_auth_p2       = false;   // phase 2: instructor entry
@@ -407,9 +412,12 @@ void mkCheckRow(lv_obj_t*p,int idx,int x,int y,const char*txt){
 }
 void updCheckRow(int idx,const char*txt,bool ok){
     if(!r_chk_dot[idx])return;
-    lv_label_set_text(r_chk_ico[idx],ok?LV_SYMBOL_OK:"");
+    // Latch : une fois actif, le V reste affiche jusqu'au reset BLE
+    if(ok) g_chk_latched[idx]=true;
+    bool show = g_chk_latched[idx];
+    lv_label_set_text(r_chk_ico[idx],show?LV_SYMBOL_OK:"");
     // Fond page 0 blanc → texte noir si actif, gris sinon
-    lv_obj_set_style_text_color(r_chk_lbl[idx],ok?lv_color_hex(0x0f172a):TGREY(),0);
+    lv_obj_set_style_text_color(r_chk_lbl[idx],show?lv_color_hex(0x0f172a):TGREY(),0);
     if(txt)lv_label_set_text(r_chk_lbl[idx],txt);
 }
 
@@ -463,18 +471,29 @@ static void notifyD(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){if(l>=BLE_
 // single-chunk: AT-CORE envoie directement 0x03+data (pas de START vide)
 // multi-chunk:  0x01+data | 0x02+data... | 0x03+data
 static void notifyP(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){
-    if(l<2)return;  // chaque paquet = 1 header + au moins 1 byte data
+    Serial.printf("[Auth] notifyP: l=%u byte0=0x%02X\n",(unsigned)l,l>0?d[0]:0xFF);
+    if(l<2){Serial.println("[Auth] notifyP: l<2, drop");return;}
     uint8_t cmd=d[0];size_t dlen=l-1;const char*chunk=(const char*)(d+1);
     if(cmd==0x01){g_prx_len=0;memset(g_prx_buf,0,sizeof(g_prx_buf));}
     if(g_prx_len+dlen<sizeof(g_prx_buf)-1){
         memcpy(g_prx_buf+g_prx_len,chunk,dlen);g_prx_len+=dlen;g_prx_buf[g_prx_len]=0;}
-    if(cmd==0x03){_parsePilotJSON(g_prx_buf);g_prx_len=0;Serial.println("[Auth] pilots BLE ok");}}
+    else Serial.println("[Auth] notifyP: buffer overflow, chunk dropped");
+    if(cmd==0x03){
+        Serial.printf("[Auth] notifyP: end-of-stream, total=%d bytes\n",g_prx_len);
+        int n=_parsePilotJSON(g_prx_buf);g_prx_len=0;
+        if(n>0)Serial.printf("[Auth] pilots BLE ok (%d)\n",n);
+        else   Serial.println("[Auth] pilots BLE rejected - DB preserved");}}
 
 class ATCCB:public BLEClientCallbacks{
-    void onConnect(BLEClient*)override{g_connected=true;g_dataUpdated=true;Serial.println("[BLE] Connected");}
+    void onConnect(BLEClient*)override{g_connected=true;g_dataUpdated=true;
+        g_connect_ms=millis();
+        Serial.println("[BLE] Connected");}
     void onDisconnect(BLEClient*)override{g_connected=false;g_autoNavDone=false;g_authShown=false;
+        g_connect_ms=0;
         g_status.valid=g_flight.valid=g_traffic.valid=g_alert.valid=g_debug.valid=false;
         g_peer_name[0]=0;g_prx_len=0;  // reset pilots buffer — évite données résiduelles
+        // Reset latches page 0 → progression repart de zero a la reconnexion
+        for(int i=0;i<N_CHK;i++)g_chk_latched[i]=false;
         g_dataUpdated=true;g_doReconnect=true;Serial.println("[BLE] Disconnected");}};
 class ATCAdv:public BLEAdvertisedDeviceCallbacks{
     void onResult(BLEAdvertisedDevice dev)override{
@@ -504,7 +523,10 @@ bool connectBLE(){
     if(g_chrF&&g_chrF->canNotify())g_chrF->registerForNotify(notifyF);
     if(g_chrT&&g_chrT->canNotify())g_chrT->registerForNotify(notifyT);
     if(g_chrA&&g_chrA->canNotify())g_chrA->registerForNotify(notifyA);
-    if(g_chrD&&g_chrD->canNotify())g_chrD->registerForNotify(notifyD);
+    // CHR_DEBUG notify retiré : Bluedroid client limite CONFIG_BT_GATTC_NOTIF_REG_MAX=5,
+    // CHR_PILOTS (6ème) échouait silencieusement → DB Firebase non chargée côté UI.
+    // Les logs sysLog circulaires de DEBUG ne sont pas critiques pour AT-VIEW.
+    // if(g_chrD&&g_chrD->canNotify())g_chrD->registerForNotify(notifyD);
     if(g_chrP&&g_chrP->canNotify())g_chrP->registerForNotify(notifyP);
     return true;}
 void startScan(){BLEScan*s=BLEDevice::getScan();s->setAdvertisedDeviceCallbacks(new ATCAdv());s->setActiveScan(true);s->start(5,false);}
@@ -517,6 +539,8 @@ void switchPage(uint8_t np){
 
 static lv_coord_t g_swipe_sx=-1, g_swipe_lx=0;
 static void swipeCb(lv_event_t*e){
+    // Bloque la navigation tant que l'auth code n'est pas valide
+    if(g_auth_ov)return;
     lv_event_code_t code=lv_event_get_code(e);
     lv_indev_t*indev=lv_indev_get_act();if(!indev)return;
     lv_point_t pt;lv_indev_get_point(indev,&pt);
@@ -625,14 +649,36 @@ void buildStatusPage(){
     lv_img_set_src(lAt,&img_logo_aerotrace);       // 240×50
     lv_obj_set_pos(lAt,120,108);
 
-    // ── Icône "chargement" (loop arrow) + ligne pointillée
-    mkLbl(p,LV_SYMBOL_LOOP,C_BRAND,&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,178);
-    static lv_point_t sep1[2]={{170,215},{310,215}};
-    lv_obj_t*sl1=lv_line_create(p);lv_line_set_points(sl1,sep1,2);
-    lv_obj_set_style_line_color(sl1,TGREY(),0);
-    lv_obj_set_style_line_width(sl1,1,0);
-    lv_obj_set_style_line_dash_width(sl1,3,0);
-    lv_obj_set_style_line_dash_gap(sl1,4,0);
+    // ── Sablier (silhouette 24×30 en 6 segments) — couleur brand
+    {
+        static lv_point_t hg[7]={{0,0},{24,0},{12,15},{0,30},{24,30},{12,15},{0,0}};
+        lv_obj_t*hgL=lv_line_create(p);
+        lv_line_set_points(hgL,hg,7);
+        lv_obj_set_pos(hgL,228,175);   // (480-24)/2 = 228
+        lv_obj_set_style_line_color(hgL,C_BRAND,0);
+        lv_obj_set_style_line_width(hgL,3,0);
+        lv_obj_set_style_line_rounded(hgL,true,0);
+    }
+
+    // ── Ligne d'avancement : 6 dots, gris clair → brand-blue selon les checks
+    {
+        int n=6, d=8, gap=10;
+        int total = n*d + (n-1)*gap;
+        int x0 = (480 - total)/2;
+        for(int i=0;i<n;i++){
+            lv_obj_t*pd=lv_obj_create(p);
+            lv_obj_set_size(pd,d,d);
+            lv_obj_set_pos(pd,x0+i*(d+gap),215);
+            lv_obj_set_style_radius(pd,LV_RADIUS_CIRCLE,0);
+            lv_obj_set_style_bg_color(pd,lv_color_hex(0xd0d0d0),0);
+            lv_obj_set_style_bg_opa(pd,LV_OPA_COVER,0);
+            lv_obj_set_style_border_width(pd,0,0);
+            lv_obj_set_style_shadow_opa(pd,LV_OPA_TRANSP,0);
+            lv_obj_set_style_pad_all(pd,0,0);
+            lv_obj_clear_flag(pd,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+            r_p0_progDots[i]=pd;
+        }
+    }
 
     // ── 6 check rows (cercle bleu + label) — état initial inactif
     const int X = 145;  // colonne cercle
@@ -646,16 +692,34 @@ void buildStatusPage(){
     mkCheckRow(p,CHK_OGN, X,Y0+5*DY,"OGN / FLARM (868Mhz)");
 
     // ── Batterie AT-CORE + version
-    r_p0_bat=mkLbl(p,"Battery AT-CORE : ---%",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,Y0+6*DY+8);
-    mkLbl(p,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_BOTTOM_MID,0,-30);
+    r_p0_bat=mkLbl(p,"Battery AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,418);
+    mkLbl(p,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
 }
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
-static void _parsePilotJSON(const char* json){
-    g_pilot_cnt=0;
+// Accepte array nu OU wrapper {"_date":"YYYY-MM-DD","pilots":[...]}.
+// Retourne nb pilotes charges ou -1 en cas d'erreur (DB precedente preservee).
+static int _parsePilotJSON(const char* json){
     JsonDocument doc;
-    if(deserializeJson(doc,json)){Serial.println("[Auth] pilot JSON parse error");return;}
-    for(JsonObject e:doc.as<JsonArray>()){
+    if(deserializeJson(doc,json)){
+        Serial.println("[Auth] pilot JSON parse error - keeping old DB");return -1;}
+    JsonArray arr;
+    const char* jdate = nullptr;
+    if(doc.is<JsonObject>()){
+        JsonObject obj = doc.as<JsonObject>();
+        if(!obj["pilots"].is<JsonArray>()){
+            Serial.println("[Auth] pilot JSON missing 'pilots' array - keeping old DB");return -1;}
+        arr = obj["pilots"].as<JsonArray>();
+        jdate = obj["_date"] | (const char*)nullptr;
+    }else if(doc.is<JsonArray>()){
+        arr = doc.as<JsonArray>();
+    }else{
+        Serial.println("[Auth] pilot JSON unexpected format - keeping old DB");return -1;}
+    if(arr.size()==0){
+        Serial.println("[Auth] pilot JSON empty - keeping old DB");return -1;}
+    // Parse OK + non vide → on remplace
+    g_pilot_cnt=0;
+    for(JsonObject e:arr){
         if(g_pilot_cnt>=MAX_PILOTS)break;
         PilotEntry&t=g_pilots[g_pilot_cnt++];
         strlcpy(t.code,         e["c"]|"",sizeof(t.code));
@@ -664,7 +728,8 @@ static void _parsePilotJSON(const char* json){
         strlcpy(t.primary_icao, "",sizeof(t.primary_icao));
         strlcpy(t.trigram,      e["t"]|"",sizeof(t.trigram));
         t.is_instructor =       e["i"]|false;}
-    Serial.printf("[Auth] %d pilots loaded\n",g_pilot_cnt);
+    if(jdate)strlcpy(g_pilots_date,jdate,sizeof(g_pilots_date));
+    Serial.printf("[Auth] %d pilots loaded (date=%s)\n",g_pilot_cnt,g_pilots_date[0]?g_pilots_date:"?");
     // Race condition: session ouverte avant réception pilots, ou SD sans trigram → re-lookup
     if(g_session.valid && (!g_session.name[0]||!g_session.trigram[0]) && s_session_pc[0]){
         PilotEntry*pe=pilotFind(s_session_pc);
@@ -677,6 +742,7 @@ static void _parsePilotJSON(const char* json){
         }
     }
     g_dataUpdated=true;  // force UI refresh (labels trigramme/nom)
+    return g_pilot_cnt;
 }
 
 void pilotDBLoad(){
@@ -702,220 +768,306 @@ bool checkOwnerNVS(){
     strlcpy(g_session.trigram,pe->trigram,sizeof(g_session.trigram));
     g_session.is_owner=true;g_session.valid=true;return true;}
 
+// ── Page #02 — Auth code pilote (style page, plein ecran, fond blanc) ────────
+
+static char s_instr_name[32] = {};  // Capture nom instructeur pour page #03 student
+
+static const char* _authPromptText(){
+    return g_auth_p2 ? "Encode your Instructor Code" : "Encode your Pilot Code";
+}
+
 void authUpdateDots(){
     for(int i=0;i<4;i++){
-        lv_obj_set_style_bg_color(g_auth_dots[i],lv_color_hex(0xFFFFFF),0);
-        lv_obj_set_style_border_color(g_auth_dots[i],lv_color_hex(0xFFFFFF),0);
+        lv_obj_set_style_bg_color(g_auth_dots[i],C_BRAND,0);
+        lv_obj_set_style_border_color(g_auth_dots[i],C_BRAND,0);
         lv_obj_set_style_bg_opa(g_auth_dots[i],i<g_auth_len?LV_OPA_COVER:LV_OPA_TRANSP,0);}}
 
 static void _auth_err_cb(lv_timer_t*t){
+    // Reset visuel apres erreur : ronds bleus vides + prompt par phase
     for(int i=0;i<4;i++){
         lv_obj_set_style_bg_opa(g_auth_dots[i],LV_OPA_TRANSP,0);
-        lv_obj_set_style_bg_color(g_auth_dots[i],lv_color_hex(0xFFFFFF),0);
-        lv_obj_set_style_border_color(g_auth_dots[i],lv_color_hex(0xFFFFFF),0);}
-    lv_label_set_text(g_auth_msg,"");lv_timer_del(t);}
+        lv_obj_set_style_bg_color(g_auth_dots[i],C_BRAND,0);
+        lv_obj_set_style_border_color(g_auth_dots[i],C_BRAND,0);}
+    if(g_auth_prompt){
+        lv_label_set_text(g_auth_prompt,_authPromptText());
+        lv_obj_set_style_text_color(g_auth_prompt,lv_color_hex(0x0f172a),0);}
+    lv_timer_del(t);}
 
 void authError(const char*msg){
-    lv_label_set_text(g_auth_msg,msg);
+    // Maquette : ronds rouges + prompt rouge "Wrong code - not recognised\nPlease try again"
+    if(g_auth_prompt){
+        lv_label_set_text(g_auth_prompt,msg?msg:"Wrong code - not recognised\nPlease try again");
+        lv_obj_set_style_text_color(g_auth_prompt,C_RED,0);}
     for(int i=0;i<4;i++){
         lv_obj_set_style_bg_color(g_auth_dots[i],C_RED,0);
         lv_obj_set_style_bg_opa(g_auth_dots[i],LV_OPA_COVER,0);
         lv_obj_set_style_border_color(g_auth_dots[i],C_RED,0);}
     g_auth_len=0;memset(g_auth_buf,0,5);
-    lv_timer_create(_auth_err_cb,1500,nullptr);}
+    lv_timer_create(_auth_err_cb,1800,nullptr);}
 
+// "Welcome back <TRG> !" en rouge + ronds verts pleins
+static void _authOkVisual(const char*trg){
+    if(g_auth_prompt){
+        char b[40];snprintf(b,sizeof(b),"Welcome back %s !",trg&&trg[0]?trg:"???");
+        lv_label_set_text(g_auth_prompt,b);
+        lv_obj_set_style_text_color(g_auth_prompt,C_RED,0);}
+    for(int i=0;i<4;i++){
+        lv_obj_set_style_bg_color(g_auth_dots[i],C_GREEN,0);
+        lv_obj_set_style_bg_opa(g_auth_dots[i],LV_OPA_COVER,0);
+        lv_obj_set_style_border_color(g_auth_dots[i],C_GREEN,0);}}
 
+// ── Page #03 — Have a nice flight (3 variantes) ──────────────────────────────
 static lv_obj_t* g_welcome_ov = nullptr;
 static void _welcomeClose(lv_timer_t*t){lv_timer_del(t);if(g_welcome_ov){lv_obj_del(g_welcome_ov);g_welcome_ov=nullptr;}}
-static void showWelcome(const char* fullName){
+
+static void showWelcome(const char* pilotName, const char* instrName){
     if(g_welcome_ov){lv_obj_del(g_welcome_ov);g_welcome_ov=nullptr;}
-    char fn[32]; strlcpy(fn,fullName,sizeof(fn));
-    char*sp=strchr(fn,' '); if(sp)*sp='\0';
+    bool dual = (instrName && instrName[0]);
+    bool isOwner   = g_session.valid && strcmp(g_session.status,"owner")==0;
+    bool isStudent = g_session.valid && strcmp(g_session.status,"student")==0;
+    const char* statusStr = isStudent ? "STUDENT - Renter"
+                          : isOwner   ? "PILOT - Owner"
+                                      : "PILOT - Renter";
+
     g_welcome_ov=lv_obj_create(lv_scr_act());
     lv_obj_set_size(g_welcome_ov,480,480); lv_obj_set_pos(g_welcome_ov,0,0);
-    lv_obj_set_style_bg_color(g_welcome_ov,lv_color_hex(0x000000),0);
+    lv_obj_set_style_bg_color(g_welcome_ov,lv_color_hex(0xffffff),0);
     lv_obj_set_style_bg_opa(g_welcome_ov,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(g_welcome_ov,0,0);
     lv_obj_set_style_radius(g_welcome_ov,0,0);
-    lv_obj_t*t1=lv_label_create(g_welcome_ov);
-    lv_label_set_text(t1,"Have a nice flight");
-    lv_obj_set_style_text_color(t1,lv_color_hex(0xFFFFFF),0);
-    lv_obj_set_style_text_font(t1,&lv_font_montserrat_16,0);
-    lv_obj_align(t1,LV_ALIGN_CENTER,0,-18);
-    lv_obj_t*t2=lv_label_create(g_welcome_ov);
-    lv_label_set_text(t2,fn);
-    lv_obj_set_style_text_color(t2,lv_color_hex(0xF5A623),0);
-    lv_obj_set_style_text_font(t2,&lv_font_montserrat_20,0);
-    lv_obj_align(t2,LV_ALIGN_CENTER,0,16);
+    lv_obj_clear_flag(g_welcome_ov,LV_OBJ_FLAG_SCROLLABLE);
+
+    // Logo A en haut — lv_obj_align garantit le centrage LVGL
+    lv_obj_t*lA=lv_img_create(g_welcome_ov);
+    lv_img_set_src(lA,&img_logo_a);
+    lv_obj_align(lA,LV_ALIGN_TOP_MID,0,18);
+
+    // "Have a nice flight !"
+    lv_obj_t*tf=lv_label_create(g_welcome_ov);
+    lv_label_set_text(tf,"Have a nice flight !");
+    lv_obj_set_style_text_color(tf,lv_color_hex(0x0f172a),0);
+    lv_obj_set_style_text_font(tf,&lv_font_montserrat_16,0);
+    lv_obj_align(tf,LV_ALIGN_TOP_MID,0,140);
+
+    // Bandeau bleu plein avec nom du pilote (blanc gros)
+    lv_obj_t*band=lv_obj_create(g_welcome_ov);
+    lv_obj_set_size(band,360,52);
+    lv_obj_set_pos(band,60,180);
+    lv_obj_set_style_bg_color(band,C_BRAND,0);lv_obj_set_style_bg_opa(band,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(band,0,0);
+    lv_obj_set_style_radius(band,2,0);
+    lv_obj_set_style_shadow_opa(band,LV_OPA_TRANSP,0);
+    lv_obj_set_style_pad_all(band,0,0);
+    lv_obj_clear_flag(band,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t*tn=lv_label_create(band);
+    lv_label_set_text(tn,pilotName&&pilotName[0]?pilotName:"Pilote");
+    lv_obj_set_style_text_color(tn,lv_color_hex(0xffffff),0);
+    lv_obj_set_style_text_font(tn,&lv_font_montserrat_20,0);
+    lv_obj_center(tn);
+
+    if(dual){
+        char b[80];snprintf(b,sizeof(b),"%s is your instructor today",instrName);
+        lv_obj_t*ti=lv_label_create(g_welcome_ov);
+        lv_label_set_text(ti,b);
+        lv_obj_set_style_text_color(ti,C_RED,0);
+        lv_obj_set_style_text_font(ti,&lv_font_montserrat_14,0);
+        lv_obj_set_width(ti,420);
+        lv_obj_set_style_text_align(ti,LV_TEXT_ALIGN_CENTER,0);
+        lv_obj_align(ti,LV_ALIGN_TOP_MID,0,245);
+    }
+
+    char sb[40];snprintf(sb,sizeof(sb),"Status: %s",statusStr);
+    lv_obj_t*ts=lv_label_create(g_welcome_ov);
+    lv_label_set_text(ts,sb);
+    lv_obj_set_style_text_color(ts,lv_color_hex(0x0f172a),0);
+    lv_obj_set_style_text_font(ts,&lv_font_montserrat_16,0);
+    lv_obj_align(ts,LV_ALIGN_TOP_MID,0,dual?290:330);
+
+    // Footer batterie + version
+    char bbuf[40];
+    if(g_status.valid && g_status.bat>=0)
+        snprintf(bbuf,sizeof(bbuf),"Battery AT-CORE : %d%%",g_status.bat);
+    else
+        snprintf(bbuf,sizeof(bbuf),"Battery AT-CORE : ---%%");
+    mkLbl(g_welcome_ov,bbuf,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,418);
+    mkLbl(g_welcome_ov,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
+
     lv_timer_create(_welcomeClose,3000,nullptr);}
 
 static void _authCloseOv(lv_timer_t*t){
     lv_timer_del(t);
-    if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}
+    if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;
+        g_auth_prompt=g_auth_name=g_auth_msg=g_auth_diag=nullptr;
+        for(int i=0;i<4;i++)g_auth_dots[i]=nullptr;}
     if(g_session.valid){
         const char* nm=g_session.name[0]?g_session.name:"Pilote";
-        showWelcome(nm);}}
+        showWelcome(nm, s_instr_name[0]?s_instr_name:nullptr);}}
 
 static void _authSendBLE(const char*pc,const char*ic){
     strlcpy(s_session_pc,pc,sizeof(s_session_pc));
     PilotEntry*pe=pilotFind(pc);
     PilotEntry*ie=(ic&&ic[0])?pilotFind(ic):nullptr;
-    // Si pilot pas encore chargé → on envoie quand même à AT-CORE, session complétée dans loop()
-    const char* role=pe?pe->status:"pilot";
+    if(ie) strlcpy(s_instr_name,ie->name,sizeof(s_instr_name));
+    else   s_instr_name[0]=0;
+    const char* role = pe?pe->status:"pilot";
+    const char* trig = pe?pe->trigram:"";
     char payload[96];
-    const char* trig=pe?pe->trigram:"";
     if(ic&&ic[0])snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"ic\":\"%s\",\"role\":\"%s\",\"t\":\"%s\"}",pc,ic,role,trig);
     else         snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"role\":\"%s\",\"t\":\"%s\"}",pc,role,trig);
     if(g_chrW&&g_chrW->canWrite())g_chrW->writeValue((uint8_t*)payload,strlen(payload),false);
-    bool isOwner=(pe&&strcmp(pe->status,"owner")==0);
+    bool isOwner = (pe && strcmp(pe->status,"owner")==0);
     if(isOwner){Preferences p;p.begin("auth",false);p.putString("owner",pc);p.end();}
-    g_session.valid=true;g_session.is_owner=isOwner;
-    strlcpy(g_session.name,pe?pe->name:"",sizeof(g_session.name));
-    strlcpy(g_session.status,pe?pe->status:"pilot",sizeof(g_session.status));
-    strlcpy(g_session.trigram,pe?pe->trigram:"",sizeof(g_session.trigram));
-    // Role label + color for feedback display
-    const char* roleLabel=isOwner?"Proprietaire":
-        strcmp(role,"student")==0?"Etudiant":
-        strcmp(role,"instructor")==0?"Instructeur":
-        strcmp(role,"pilot_location")==0?"Location":"";
-    lv_color_t roleCol=isOwner?C_GREEN:
-        (strcmp(role,"student")==0||strcmp(role,"instructor")==0)?C_AMBER:TGREY();
-    if(g_auth_prompt)lv_label_set_text(g_auth_prompt,"Bienvenue");
-    if(g_auth_name){
-        if(ie){char nb[64];snprintf(nb,sizeof(nb),"%s\n+ %s",pe?pe->name:pc,ie->name);
-               lv_label_set_text(g_auth_name,nb);}
-        else   lv_label_set_text(g_auth_name,pe?pe->name:pc);}
-    if(g_auth_msg){
-        lv_label_set_text(g_auth_msg,roleLabel);
-        lv_obj_set_style_text_color(g_auth_msg,roleCol,0);}
-    lv_timer_create(_authCloseOv,1500,nullptr);}
+    g_session.valid    = true;
+    g_session.is_owner = isOwner;
+    strlcpy(g_session.name,    pe?pe->name:"",    sizeof(g_session.name));
+    strlcpy(g_session.status,  pe?pe->status:"pilot", sizeof(g_session.status));
+    strlcpy(g_session.trigram, pe?pe->trigram:"", sizeof(g_session.trigram));
+    lv_timer_create(_authCloseOv,250,nullptr);}
+
+// Timers de chainage apres "Welcome back" (1.5s d'affichage des ronds verts)
+static void _authNextAfterPilotOk(lv_timer_t*t){
+    lv_timer_del(t);_authSendBLE(g_auth_buf,nullptr);}
+static void _authNextAfterStudentOk(lv_timer_t*t){
+    lv_timer_del(t);
+    g_auth_p2=true;g_auth_len=0;memset(g_auth_buf,0,5);
+    for(int i=0;i<4;i++){
+        lv_obj_set_style_bg_opa(g_auth_dots[i],LV_OPA_TRANSP,0);
+        lv_obj_set_style_bg_color(g_auth_dots[i],C_BRAND,0);
+        lv_obj_set_style_border_color(g_auth_dots[i],C_BRAND,0);}
+    if(g_auth_prompt){
+        lv_label_set_text(g_auth_prompt,_authPromptText());
+        lv_obj_set_style_text_color(g_auth_prompt,lv_color_hex(0x0f172a),0);}}
+static void _authNextAfterInstructorOk(lv_timer_t*t){
+    lv_timer_del(t);_authSendBLE(g_auth_scode,g_auth_buf);}
 
 void authValidate(){
     if(g_auth_len<4)return;
     if(!g_auth_p2){
         PilotEntry*pe=pilotFind(g_auth_buf);
-        bool isStudent=pe&&strcmp(pe->status,"student")==0;
+        Serial.printf("[Auth] phase1 code=%s pilots=%d → %s\n",
+            g_auth_buf,g_pilot_cnt,pe?pe->name:"NOT FOUND");
+        if(!pe){authError(nullptr);return;}
+        bool isStudent = strcmp(pe->status,"student")==0;
+        _authOkVisual(pe->trigram);
         if(isStudent){
             strlcpy(g_auth_scode,g_auth_buf,5);
-            g_auth_p2=true;g_auth_len=0;memset(g_auth_buf,0,5);
-            authUpdateDots();
-            lv_label_set_text(g_auth_prompt,"Code instructeur");
-            lv_label_set_text(g_auth_name,pe->name);
-            if(g_auth_msg){lv_label_set_text(g_auth_msg,"Etudiant");
-                           lv_obj_set_style_text_color(g_auth_msg,C_AMBER,0);}
+            lv_timer_create(_authNextAfterStudentOk,1500,nullptr);
         }else{
-            _authSendBLE(g_auth_buf,nullptr);}
+            lv_timer_create(_authNextAfterPilotOk,1500,nullptr);}
     }else{
-        // Valider que le code instructeur appartient bien à un instructeur
         PilotEntry*ie=pilotFind(g_auth_buf);
-        if(ie&&!ie->is_instructor){
-            if(g_auth_msg){lv_label_set_text(g_auth_msg,"Pas instructeur");
-                           lv_obj_set_style_text_color(g_auth_msg,C_RED,0);}
-            g_auth_len=0;memset(g_auth_buf,0,5);authUpdateDots();return;}
-        _authSendBLE(g_auth_scode,g_auth_buf);}}
+        Serial.printf("[Auth] phase2 code=%s → %s (instr=%d)\n",
+            g_auth_buf,ie?ie->name:"NOT FOUND",ie?ie->is_instructor:0);
+        if(!ie || !ie->is_instructor){authError(nullptr);return;}
+        _authOkVisual(ie->trigram);
+        lv_timer_create(_authNextAfterInstructorOk,1500,nullptr);}}
 
 static void _auth_btn_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
     intptr_t d=(intptr_t)lv_event_get_user_data(e);
-    if(d==10){if(g_auth_len>0){g_auth_len--;g_auth_buf[g_auth_len]=0;authUpdateDots();}
-    }else if(d==11){if(g_auth_len==4)authValidate();
+    if(d==11){if(g_auth_len==4)authValidate();
     }else{if(g_auth_len<4){g_auth_buf[g_auth_len++]='0'+d;g_auth_buf[g_auth_len]=0;
         authUpdateDots();if(g_auth_len==4)authValidate();}}}
 
+// Tap sur rond rempli = backspace
+static void _auth_dot_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    if(g_auth_len>0){g_auth_len--;g_auth_buf[g_auth_len]=0;authUpdateDots();}
+}
+
+// Page #02 — style page plein ecran (fond blanc, logo A, keypad brand, footer)
 void mkAuthOverlay(){
     g_auth_len=0;memset(g_auth_buf,0,5);g_auth_p2=false;memset(g_auth_scode,0,5);
-    // Backdrop — full screen, semi-transparent, absorbs all touches
+    s_instr_name[0]=0;
+    // Full screen background blanc
     g_auth_ov=lv_obj_create(lv_scr_act());
     lv_obj_set_size(g_auth_ov,480,480);lv_obj_set_pos(g_auth_ov,0,0);
-    lv_obj_set_style_bg_color(g_auth_ov,lv_color_hex(0x000000),0);
-    lv_obj_set_style_bg_opa(g_auth_ov,LV_OPA_70,0);
+    lv_obj_set_style_bg_color(g_auth_ov,lv_color_hex(0xffffff),0);
+    lv_obj_set_style_bg_opa(g_auth_ov,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(g_auth_ov,0,0);lv_obj_set_style_radius(g_auth_ov,0,0);
     lv_obj_set_style_shadow_opa(g_auth_ov,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(g_auth_ov,0,0);
     lv_obj_clear_flag(g_auth_ov,LV_OBJ_FLAG_SCROLLABLE);
-    // Card — centered (170px half-width, 200px half-height → center at 240,236)
-    lv_obj_t*card=lv_obj_create(g_auth_ov);
-    lv_obj_set_size(card,340,400);lv_obj_set_pos(card,70,40);
-    lv_obj_set_style_bg_color(card,lv_color_hex(0x0f1923),0); // auth popup always dark
-    lv_obj_set_style_bg_opa(card,LV_OPA_COVER,0);
-    lv_obj_set_style_border_color(card,TRING(),0);lv_obj_set_style_border_width(card,1,0);
-    lv_obj_set_style_radius(card,20,0);
-    lv_obj_set_style_shadow_opa(card,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(card,0,0);
-    lv_obj_clear_flag(card,LV_OBJ_FLAG_SCROLLABLE);
-    // ICAO label
-    lv_obj_t*il=lv_label_create(card);
-    lv_label_set_text(il,g_ac_reg[0]?g_ac_reg:"AT-VIEW");
-    lv_obj_set_style_text_color(il,TGREY(),0);
-    lv_obj_set_style_text_font(il,&lv_font_montserrat_14,0);
-    lv_obj_align(il,LV_ALIGN_TOP_MID,0,18);
+
+    // Logo A en haut centre — lv_obj_align garantit le centrage LVGL
+    lv_obj_t*lA=lv_img_create(g_auth_ov);
+    lv_img_set_src(lA,&img_logo_a);
+    lv_obj_align(lA,LV_ALIGN_TOP_MID,0,12);
+
     // Prompt
-    g_auth_prompt=lv_label_create(card);
-    lv_label_set_text(g_auth_prompt,"Code pilote");
-    lv_obj_set_style_text_color(g_auth_prompt,TFG(),0);
+    g_auth_prompt=lv_label_create(g_auth_ov);
+    lv_label_set_text(g_auth_prompt,_authPromptText());
+    lv_obj_set_style_text_color(g_auth_prompt,lv_color_hex(0x0f172a),0);
     lv_obj_set_style_text_font(g_auth_prompt,&lv_font_montserrat_16,0);
-    lv_obj_align(g_auth_prompt,LV_ALIGN_TOP_MID,0,48);
-    // 4 PIN dots
-    lv_obj_t*dc=lv_obj_create(card);
-    lv_obj_set_size(dc,130,28);
-    lv_obj_set_style_bg_opa(dc,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(dc,0,0);
-    lv_obj_set_style_shadow_opa(dc,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(dc,0,0);
-    lv_obj_clear_flag(dc,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_align(dc,LV_ALIGN_TOP_MID,0,86);
+    lv_obj_set_width(g_auth_prompt,420);
+    lv_obj_set_style_text_align(g_auth_prompt,LV_TEXT_ALIGN_CENTER,0);
+    lv_obj_align(g_auth_prompt,LV_ALIGN_TOP_MID,0,80);
+
+    // 4 ronds PIN — cliquables = backspace
+    int total = 4*22 + 3*18;
+    int x0 = (480 - total)/2;
     for(int i=0;i<4;i++){
-        g_auth_dots[i]=lv_obj_create(dc);
-        lv_obj_set_size(g_auth_dots[i],22,22);lv_obj_set_pos(g_auth_dots[i],i*36,3);
-        lv_obj_set_style_radius(g_auth_dots[i],LV_RADIUS_CIRCLE,0);
-        lv_obj_set_style_bg_color(g_auth_dots[i],lv_color_hex(0xFFFFFF),0);
-        lv_obj_set_style_bg_opa(g_auth_dots[i],LV_OPA_TRANSP,0);
-        lv_obj_set_style_border_color(g_auth_dots[i],lv_color_hex(0xFFFFFF),0);
-        lv_obj_set_style_border_width(g_auth_dots[i],2,0);
-        lv_obj_set_style_shadow_opa(g_auth_dots[i],LV_OPA_TRANSP,0);
-        lv_obj_set_style_pad_all(g_auth_dots[i],0,0);
-        lv_obj_clear_flag(g_auth_dots[i],LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);}
-    // Name + error
-    g_auth_name=lv_label_create(card);lv_label_set_text(g_auth_name,"");
-    lv_obj_set_style_text_color(g_auth_name,C_GREEN,0);
-    lv_obj_set_style_text_font(g_auth_name,&lv_font_montserrat_14,0);
-    lv_obj_align(g_auth_name,LV_ALIGN_TOP_MID,0,126);
-    g_auth_msg=lv_label_create(card);lv_label_set_text(g_auth_msg,"");
-    lv_obj_set_style_text_color(g_auth_msg,C_RED,0);
-    lv_obj_set_style_text_font(g_auth_msg,&lv_font_montserrat_12,0);
-    lv_obj_align(g_auth_msg,LV_ALIGN_TOP_MID,0,148);
-    // Keypad 3×4 — BW=68 BH=50 BG=8 → cols 220px, KX=(340-220)/2=60, top y=168
-    static const char*kL[12]={"1","2","3","4","5","6","7","8","9","<","0","OK"};
-    static const intptr_t kV[12]={1,2,3,4,5,6,7,8,9,10,0,11};
-    for(int i=0;i<12;i++){
-        int r=i/3,c=i%3;
-        lv_obj_t*btn=lv_btn_create(card);
-        lv_obj_set_size(btn,68,50);
-        lv_obj_set_pos(btn,60+c*76,168+r*58);
-        lv_obj_set_style_bg_color(btn,lv_color_hex(0x1e2b38),0);
-        lv_obj_set_style_bg_color(btn,lv_color_hex(0x2d4358),LV_STATE_PRESSED);
+        lv_obj_t*dot=lv_obj_create(g_auth_ov);
+        lv_obj_set_size(dot,22,22);
+        lv_obj_set_pos(dot,x0+i*(22+18),130);
+        lv_obj_set_style_radius(dot,LV_RADIUS_CIRCLE,0);
+        lv_obj_set_style_bg_color(dot,C_BRAND,0);
+        lv_obj_set_style_bg_opa(dot,LV_OPA_TRANSP,0);
+        lv_obj_set_style_border_color(dot,C_BRAND,0);
+        lv_obj_set_style_border_width(dot,3,0);
+        lv_obj_set_style_shadow_opa(dot,LV_OPA_TRANSP,0);
+        lv_obj_set_style_pad_all(dot,0,0);
+        lv_obj_clear_flag(dot,LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(dot,LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(dot,_auth_dot_cb,LV_EVENT_CLICKED,nullptr);
+        g_auth_dots[i]=dot;
+    }
+    g_auth_name=nullptr;
+    g_auth_msg =nullptr;
+
+    // Diagnostic DB pilotes (entre dots et keypad) — refresh live via updateAllPages
+    char dbg[48];
+    if(g_pilot_cnt>0)
+        snprintf(dbg,sizeof(dbg),"DB: %d pilots (%s)",g_pilot_cnt,g_pilots_date[0]?g_pilots_date:"?");
+    else
+        snprintf(dbg,sizeof(dbg),"DB Firebase non chargee");
+    g_auth_diag=mkLbl(g_auth_ov,dbg,g_pilot_cnt>0?TGREY():C_RED,&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,162);
+
+    // Keypad 3x4 : 7-8-9 / 4-5-6 / 1-2-3 / 0 ENTER(2cols)
+    static const struct { int8_t r,c,span; const char* lbl; int8_t val; } kK[] = {
+        {0,0,1,"7",7},{0,1,1,"8",8},{0,2,1,"9",9},
+        {1,0,1,"4",4},{1,1,1,"5",5},{1,2,1,"6",6},
+        {2,0,1,"1",1},{2,1,1,"2",2},{2,2,1,"3",3},
+        {3,0,1,"0",0},{3,1,2,"ENTER",11},
+    };
+    const int BW=70, BH=48, BG=6;
+    const int KX=129, KY=190;
+    for(unsigned i=0;i<sizeof(kK)/sizeof(kK[0]);i++){
+        int x = KX + kK[i].c*(BW+BG);
+        int y = KY + kK[i].r*(BH+BG);
+        int w = kK[i].span==1 ? BW : (BW*2 + BG);
+        lv_obj_t*btn=lv_btn_create(g_auth_ov);
+        lv_obj_set_size(btn,w,BH);lv_obj_set_pos(btn,x,y);
+        lv_obj_set_style_bg_color(btn,C_BRAND,0);
+        lv_obj_set_style_bg_color(btn,lv_color_hex(0x5a7a99),LV_STATE_PRESSED);
         lv_obj_set_style_bg_opa(btn,LV_OPA_COVER,0);
-        lv_obj_set_style_radius(btn,12,0);
+        lv_obj_set_style_radius(btn,10,0);
         lv_obj_set_style_shadow_opa(btn,LV_OPA_TRANSP,0);
         lv_obj_set_style_border_width(btn,0,0);
-        lv_obj_add_event_cb(btn,_auth_btn_cb,LV_EVENT_CLICKED,(void*)kV[i]);
-        lv_obj_t*lb=lv_label_create(btn);lv_label_set_text(lb,kL[i]);
-        lv_obj_set_style_text_color(lb,lv_color_hex(0xFFFFFF),0);
-        lv_obj_set_style_text_font(lb,&lv_font_montserrat_16,0);
+        lv_obj_add_event_cb(btn,_auth_btn_cb,LV_EVENT_CLICKED,(void*)(intptr_t)kK[i].val);
+        lv_obj_t*lb=lv_label_create(btn);lv_label_set_text(lb,kK[i].lbl);
+        lv_obj_set_style_text_color(lb,lv_color_hex(0xffffff),0);
+        lv_obj_set_style_text_font(lb,kK[i].span==1?&lv_font_montserrat_20:&lv_font_montserrat_16,0);
         lv_obj_center(lb);}
-    // ANNULER — on backdrop, centered below card
-    {lv_obj_t*xb=lv_btn_create(g_auth_ov);
-     lv_obj_set_size(xb,160,36);lv_obj_set_pos(xb,160,448);
-     lv_obj_set_style_bg_color(xb,lv_color_hex(0x0f1923),0);
-     lv_obj_set_style_bg_color(xb,lv_color_hex(0x1e2b38),LV_STATE_PRESSED);
-     lv_obj_set_style_bg_opa(xb,LV_OPA_COVER,0);
-     lv_obj_set_style_border_color(xb,lv_color_hex(0x4a6078),0);
-     lv_obj_set_style_border_width(xb,1,0);
-     lv_obj_set_style_radius(xb,18,0);
-     lv_obj_set_style_shadow_opa(xb,LV_OPA_TRANSP,0);
-     lv_obj_t*xl=lv_label_create(xb);lv_label_set_text(xl,"ANNULER");
-     lv_obj_set_style_text_color(xl,lv_color_hex(0x8899aa),0);
-     lv_obj_set_style_text_font(xl,&lv_font_montserrat_12,0);lv_obj_center(xl);
-     lv_obj_add_event_cb(xb,[](lv_event_t*e){
-         if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;}
-         g_auth_len=0;memset(g_auth_buf,0,5);g_auth_p2=false;
-     },LV_EVENT_CLICKED,nullptr);}}
+
+    // Footer : batterie + version (cohérent avec page #01)
+    char bbuf[40];
+    if(g_status.valid && g_status.bat>=0)
+        snprintf(bbuf,sizeof(bbuf),"Battery AT-CORE : %d%%",g_status.bat);
+    else
+        snprintf(bbuf,sizeof(bbuf),"Battery AT-CORE : ---%%");
+    mkLbl(g_auth_ov,bbuf,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,418);
+    mkLbl(g_auth_ov,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
+}
 
 // ── Upload progress overlay (tâche F) ────────────────────────────────────────
 // Affiche un modal full-screen quand AT-CORE entre en phase post-vol
@@ -1458,10 +1610,11 @@ void buildRadarPage(){
     lv_obj_set_style_text_color(r_radar_hdg,TFG(),0);
     lv_obj_set_style_text_font(r_radar_hdg,&lv_font_montserrat_16,0);lv_obj_center(r_radar_hdg);
 
+    // GS deplacee en bas, sous la taille du radar (voir _radar_scale_lbl)
     r_radar_gs=lv_label_create(p);lv_label_set_text(r_radar_gs,"GS ---");
     lv_obj_set_style_text_color(r_radar_gs,TFG(),0);
     lv_obj_set_style_text_font(r_radar_gs,&lv_font_montserrat_14,0);
-    lv_obj_align(r_radar_gs,LV_ALIGN_TOP_MID,0,62);
+    lv_obj_align(r_radar_gs,LV_ALIGN_BOTTOM_MID,0,-15);
 
     // Tab pills 52×32 — outer edge is AT the display circle boundary (8-12px behind bezel).
     // The circular LCD naturally clips the outer rounded corner → flat outer edge = "D" shape.
@@ -1529,9 +1682,9 @@ void buildRadarPage(){
         lv_obj_set_style_text_color(r_card[ci],ci==0?TFG():TRING(),0);
         lv_obj_set_pos(r_card[ci],RAD_CX-5,RAD_CY-(RAD_R-24)-8);}
 
-    // Scale label — clearly below the ring (ring bottom ~y=415, label top ~y=446)
+    // Scale label — entre le S de la rose et la GS (ordre : S → 4nm → GS XXkt)
     char scl[12];snprintf(scl,12,"%dnm",g_cfg.scale_nm);
-    r_radar_scale_lbl=mkLbl(p,scl,TGREY(),&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-20);
+    r_radar_scale_lbl=mkLbl(p,scl,TGREY(),&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-35);
 
     // AIP overlay — transparent layer between grid and traffic icons
     r_aip_layer=lv_obj_create(p);
@@ -1876,6 +2029,16 @@ void updateAllPages(){
     char b[32];
     // Tâche F : overlay upload progress (full-screen modal post-vol)
     updUploadOverlay();
+    // Refresh live de la ligne diagnostique DB sur page #02 (si auth en cours)
+    if(g_auth_ov && g_auth_diag){
+        char dbg[48];
+        if(g_pilot_cnt>0)
+            snprintf(dbg,sizeof(dbg),"DB: %d pilots (%s)",g_pilot_cnt,g_pilots_date[0]?g_pilots_date:"?");
+        else
+            snprintf(dbg,sizeof(dbg),"DB Firebase non chargee");
+        lv_label_set_text(g_auth_diag,dbg);
+        lv_obj_set_style_text_color(g_auth_diag,g_pilot_cnt>0?TGREY():C_RED,0);
+    }
     // Page 0 — checks live + batterie AT-CORE
     {
         // AT-CORE : label dynamique selon connexion ("AT-CORE_XXX" ou "AT-CORE")
@@ -1894,6 +2057,13 @@ void updateAllPages(){
         updCheckRow(CHK_LTE, "LTE",                   lte_ok);
         updCheckRow(CHK_ADSB,"ADS-B / ADS-L",         adsb_ok);
         updCheckRow(CHK_OGN, "OGN / FLARM (868Mhz)",  ogn_ok);
+        // 6 dots progressifs sous le sablier — couleur selon etat des checks
+        bool prog[6] = { g_connected, g_bootDone, gps_ok, lte_ok, adsb_ok, ogn_ok };
+        for(int i=0;i<6;i++){
+            if(r_p0_progDots[i])
+                lv_obj_set_style_bg_color(r_p0_progDots[i],
+                    prog[i] ? C_BRAND : lv_color_hex(0xd0d0d0), 0);
+        }
         // Batterie AT-CORE
         if(r_p0_bat){
             if(g_status.valid && g_status.bat>=0){
@@ -1979,9 +2149,13 @@ void updateAllPages(){
      #undef SET_PILL_TXT
      #undef SET_PILL_IMG
      }
-    // Auth popup — dès connexion BLE, si pas de session
-    if(!g_authShown&&!g_auth_ov&&!g_session.valid&&g_connected){
-        g_authShown=true;mkAuthOverlay();}
+    // Auth popup — attendre BLE conn + STATUS valid + min 2s (laisser voir progression #01)
+    // Fallback : 10s apres connexion meme si STATUS n'arrive pas
+    if(!g_authShown&&!g_auth_ov&&!g_session.valid&&g_connected&&g_connect_ms){
+        uint32_t elapsed = millis() - g_connect_ms;
+        bool ready = (g_status.valid && elapsed > 2000) || (elapsed > 10000);
+        if(ready){g_authShown=true;mkAuthOverlay();}
+    }
     // Auto-navigate to radar once BLE+GPS ready (one-shot per connection)
     if(!g_autoNavDone&&g_connected&&g_status.valid&&g_status.gps_fix&&g_page==0){
         g_autoNavDone=true;g_navPending=true;g_navPage=1;}
@@ -2213,7 +2387,7 @@ void loop(){
             strlcpy(g_session.trigram,pe->trigram,sizeof(g_session.trigram));
             g_session.is_owner=(strcmp(pe->status,"owner")==0);
             if(g_session.is_owner){Preferences p;p.begin("auth",false);p.putString("owner",s_session_pc);p.end();}
-            if(!hadName)showWelcome(g_session.name);
+            if(!hadName)showWelcome(g_session.name, s_instr_name[0]?s_instr_name:nullptr);
             g_dataUpdated=true;}}
     static uint32_t drLast=0;
     if(g_page==1&&now-drLast>=200){drLast=now;updateRadarDR();
