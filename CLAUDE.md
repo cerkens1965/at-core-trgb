@@ -27,12 +27,29 @@ Le `platformio.ini` à la racine pointe sur `src_dir = examples/at_core_debug`.
 
 | Page | Accès | Contenu |
 |------|-------|---------|
-| 0 — Boot/Status | Démarrage | Logos AeroTrace + AT-VIEW, état BLE/GPS/LTE/bat |
-| 1 — Radar | Swipe → | Trafic SafeSky, position relative, alertes |
+| #01 — Boot/Status | Démarrage | Logos AT-VIEW + AEROTRACE bicolores (A bleu #7393B4 + reste noir), sablier (silhouette 6 segments), 6 dots progressifs (gris → brand-blue), 6 check rows live latches (BLE / Bluetooth / GPS / LTE / ADS-B / OGN), Battery AT-CORE + version |
+| #02 — Auth code pilote | Auto après BLE+STATUS+2s (fallback 10s) | Page style fond blanc, logo A, prompt, 4 ronds brand-blue (touch=backspace), keypad 7-8-9 / 4-5-6 / 1-2-3 / 0 ENTER, 3 états (default / wrong rouge / OK vert), diag DB Firebase, swipe bloqué |
+| #03 — Have a nice flight | Auto après auth OK (3s) | Logo A, "Have a nice flight !", bandeau bleu plein avec Nom Prénom blanc, ligne rouge instructeur si student, "Status: PILOT - Owner / PILOT - Renter / STUDENT - Renter" |
+| 1 — Radar | Swipe → | Trafic SafeSky, position relative, alertes, GS en bas sous scale |
 | 2 — Settings | Swipe → | Échelle radar, filtre sol, debug |
 | Debug (caché) | Long press version | Logs sysLog BLE |
 
-Navigation : swipe gauche/droite entre pages.
+Navigation : swipe gauche/droite entre pages (bloqué tant que #02 est ouverte).
+
+### Identité visuelle
+
+- Couleur brand AeroTrace : **#7393B4** (provisoire — peut évoluer)
+- Logos bicolores : A bleu #7393B4 + reste noir (sources `public/logo/*.png` → converter `tools/png2lvgl_logos.py`)
+- Pages #01/#02/#03 forcent fond blanc (lisibilité logo noir)
+
+### Auth flow détaillé
+
+1. Page #01 (boot + progression checks) — au moins 2s après BLE+STATUS pour laisser voir la progression
+2. Page #02 (encodage code) :
+   - Code pilote en DB → ronds verts + "Welcome back \<TRG\> !" → page #03
+   - Code non trouvé → ronds rouges + "Wrong code - not recognised / Please try again" (1.8s) → reset
+   - Code student → ronds verts → bascule prompt "Encode your Instructor Code" → 2ᵉ saisie
+3. Page #03 (welcome 3s) → bascule auto vers Radar
 
 ## BLE — Client NimBLE
 
@@ -49,7 +66,7 @@ Scan filtre actuellement sur nom `"AT-CORE NimBLE"`.
 | ALERTS | `6E400006-...` | notify | CO ppm, trafic <500 m |
 | DEBUG | `6E400003-...` | notify | logs sysLog |
 | AUTH | `6E400007-...` | **write** | codes pilote/instructeur (V2 popup) |
-| PILOTS | `6E400008-...` | notify | liste pilotes JSON chunké (Firestore) |
+| PILOTS | `6E400008-...` | notify | liste pilotes JSON chunké (Firestore). Format : `[{c,n,r,t,i}, ...]` ou `{"_date":"YYYY-MM-DD","pilots":[{...}]}` (wrapper recommandé pour traçabilité). Protocole chunks : `0x01`=start, `0x02`=data, `0x03`=end (déclenche parse). Résilient : DB préservée si JSON invalide / array vide. |
 | CONFIG | `6E400009-...` | **write** | identité aéronef `{r,t,h}` — auto-push depuis `acSave()` (V1) |
 
 Service UUID AT-CORE : `4FAFC201-1FB5-459E-8FCC-C5C9C331914B`
@@ -163,3 +180,39 @@ Hook : `updUploadOverlay()` appelé depuis `updateAllPages()` (1s).
 - Overlay upload progress quand AT-CORE envoie `flt_ph >= 1`
 - Bouton Speed dans Settings page 0 (entre Alt et Bright)
 - Push CHR_CONFIG vers AT-CORE après édition Aircraft
+
+## État du projet — V2 (2026-05-18)
+
+**V2 livrée + pushée** — commit `ac0f683` :
+
+### Refonte UI complète (maquettes AeroTrace)
+- ✅ Page #01 : logos bicolores (A bleu #7393B4 + noir), sablier en lignes primitives,
+  6 dots progressifs (gris → brand selon checks), V latchés (restent affichés jusqu'au disconnect BLE),
+  footer compact (Battery + Version font 12 y=418/438)
+- ✅ Page #02 (auth) : style page plein écran, keypad `7-8-9 / 4-5-6 / 1-2-3 / 0 ENTER`,
+  pas de bouton backspace (tap sur rond rempli efface), 3 états visuels brand/rouge/vert,
+  délai 2s minimum après BLE+STATUS (laisser voir progression page #01)
+- ✅ Page #03 (Have a nice flight) : bandeau bleu plein avec Nom Prénom blanc, status souligné,
+  ligne rouge instructeur si student-renter (cas 2 codes)
+- ✅ Radar : GS déplacée du haut (sous heading) vers le bas, sous le scale 4nm
+
+### Robustesse BLE pilotes
+- ✅ `_parsePilotJSON` résilient : préserve DB précédente si JSON invalide / array vide
+- ✅ Accepte format wrapper `{"_date":"YYYY-MM-DD","pilots":[...]}` (recommandé)
+- ✅ Logs `notifyP` verbeux pour debug push depuis AT-CORE (size + byte0 + end-of-stream)
+- ✅ Diagnostic DB live sur page #02 : "DB Firebase non chargée" (rouge) → "DB: N pilots (date)" (gris) refresh auto
+
+### Assets / outils
+- ✅ Nouveau `img_logo_a` (56×56) extrait de `AerotrAce_A-AeroTrace.png` pour pages #02 et #03
+- ✅ AT-VIEW redimensionné à 110×22 (≈ moitié AEROTRACE comme maquette)
+- ✅ Converter `tools/png2lvgl_logos.py` préserve les couleurs RGB565 source (plus de force-en-blanc)
+
+### platformio.ini
+- `upload_speed` baissé à **230400** (fiabilité USB ESP32-S3 sur macOS)
+- `-DARDUINO_USB_CDC_ON_BOOT=1` activé (logs Serial via USB-CDC pour debug)
+
+**Stats build** : Flash 29.6% (1.94 MB / 6.55), RAM 27.4% (89.8 KB / 320)
+
+### Bloqueur en cours
+- ⚠ Côté AT-CORE : la DB pilotes Firebase n'est pas encore poussée via BLE CHR_PILOTS.
+  Côté AT-VIEW tout est prêt. Travail en cours sur le repo AT-CORE pour activer le push.
