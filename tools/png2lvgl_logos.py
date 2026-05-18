@@ -10,22 +10,21 @@ from PIL import Image
 
 LOGOS = [
     ("img_logo_aerotrace", "AerotrAce_AeroTrace.png", 240),
-    ("img_logo_atview",    "AerotrAce_AT-VIEW.png",   220),
+    ("img_logo_atview",    "AerotrAce_AT-VIEW.png",   110),  # ≈ moitie d'AEROTRACE (maquette)
 ]
 
 IN_DIR  = "public/logo"
 OUT_DIR = "examples/at_core_debug"
 
 
-def png_to_lvgl_white(path: str, target_w: int) -> tuple[list[int], int, int]:
+def png_to_lvgl(path: str, target_w: int) -> tuple[list[int], int, int]:
+    """Encode RGBA → LVGL TRUE_COLOR_ALPHA (RGB565 + alpha byte), couleurs préservées."""
     img = Image.open(path).convert("RGBA")
     ratio = img.height / img.width
     target_h = max(1, round(target_w * ratio))
     img = img.resize((target_w, target_h), Image.LANCZOS)
     data = []
     for r, g, b, a in img.getdata():
-        if a > 0:
-            r, g, b = 255, 255, 255
         r5 = r >> 3; g6 = g >> 2; b5 = b >> 3
         rgb565 = (r5 << 11) | (g6 << 5) | b5
         data.append(rgb565 & 0xFF)
@@ -65,7 +64,7 @@ def main():
 
     for c_name, filename, target_w in LOGOS:
         path = os.path.join(in_dir, filename)
-        data, w, h = png_to_lvgl_white(path, target_w)
+        data, w, h = png_to_lvgl(path, target_w)
         print(f"  {filename} → {c_name} ({w}×{h})")
         c_sections.append(format_c_array(c_name, data, w, h))
         h_externs.append(f"extern const lv_img_dsc_t {c_name};")

@@ -46,6 +46,7 @@ static char g_peer_name[24]   = "";              // name of the connected AT-COR
 #define C_BLUE   lv_color_hex(0x60a5fa)
 #define C_RED    lv_color_hex(0xef4444)
 #define C_ORANGE lv_color_hex(0xf97316)
+#define C_BRAND  lv_color_hex(0x7393B4)  // bleu logo AeroTrace (provisoire)
 
 static bool g_dark_theme = true;
 static inline lv_color_t TBG()  {return g_dark_theme?lv_color_hex(0x000000):lv_color_hex(0xFFFFFF);}
@@ -129,11 +130,14 @@ static bool             g_autoNavDone=false;
 static bool             g_authShown=false;   // reset on disconnect → popup reapparaît
 
 // ── Widget refs — Status page (page 0) ───────────────────────────────────────
-static lv_obj_t *r_title;
-static lv_obj_t *r_boot_panel,*r_boot_lvgl,*r_boot_ble,*r_boot_core;
-static lv_obj_t *r_coords,*r_bat_p1;
 static lv_obj_t *r_sess_trig,*r_sess_name;
-static lv_obj_t *r_sbox[6],*r_sico[6],*r_stxt[6]; // [0]GPS [1]LTE [2]SD [3]BLE [4]FLARM [5]ADS-B
+// Nouveau layout page 0 — 6 check rows (cercle + label) + label AT-CORE + batterie + version
+#define N_CHK 6
+enum { CHK_CORE=0, CHK_BT=1, CHK_GPS=2, CHK_LTE=3, CHK_ADSB=4, CHK_OGN=5 };
+static lv_obj_t *r_chk_dot[N_CHK]={};   // cercles
+static lv_obj_t *r_chk_ico[N_CHK]={};   // ✓ blanc (visible si actif)
+static lv_obj_t *r_chk_lbl[N_CHK]={};   // texte
+static lv_obj_t *r_p0_bat=nullptr;      // "Battery AT-CORE : XX%"
 
 // ── Widget refs — Radar (page 1) ──────────────────────────────────────────────
 #define RAD_CX 240
@@ -384,23 +388,30 @@ void flashTab(lv_obj_t*lbl){
     lv_anim_set_time(&a,160);lv_anim_set_playback_time(&a,160);
     lv_anim_set_repeat_count(&a,3);lv_anim_start(&a);}
 
-void mkSBox(lv_obj_t*p,int idx,int x,int y,const char*txt,bool ok){
-    lv_obj_t*box=lv_obj_create(p);lv_obj_set_size(box,22,22);lv_obj_set_pos(box,x,y);
-    lv_obj_set_style_radius(box,4,0);
-    lv_obj_set_style_bg_color(box,ok?C_GREEN:lv_color_hex(0x1e2b38),0);
-    lv_obj_set_style_border_color(box,ok?C_GREEN:TGREY(),0);lv_obj_set_style_border_width(box,1,0);
-    lv_obj_set_style_shadow_opa(box,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(box,0,0);
-    lv_obj_clear_flag(box,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_t*ico=lv_label_create(box);lv_label_set_text(ico,ok?LV_SYMBOL_OK:"");
-    lv_obj_set_style_text_color(ico,TBG(),0);lv_obj_set_style_text_font(ico,&lv_font_montserrat_14,0);
-    lv_obj_center(ico);r_sbox[idx]=box;r_sico[idx]=ico;
-    r_stxt[idx]=mkLblP(p,txt,TGREY(),&lv_font_montserrat_14,x+28,y+4);}
-void updSBox(int idx,const char*txt,bool ok){
-    lv_obj_set_style_bg_color(r_sbox[idx],ok?C_GREEN:lv_color_hex(0x1e2b38),0);
-    lv_obj_set_style_border_color(r_sbox[idx],ok?C_GREEN:TGREY(),0);
-    lv_label_set_text(r_sico[idx],ok?LV_SYMBOL_OK:"");
-    lv_obj_set_style_text_color(r_stxt[idx],ok?TFG():TGREY(),0);
-    lv_label_set_text(r_stxt[idx],txt);}
+// Check row "● label" — cercle brand-blue (toujours visible) + ✓ blanc si actif.
+// Layout : cercle Ø22 px à x, texte à x+30, y+4.
+void mkCheckRow(lv_obj_t*p,int idx,int x,int y,const char*txt){
+    lv_obj_t*dot=lv_obj_create(p);
+    lv_obj_set_size(dot,22,22);lv_obj_set_pos(dot,x,y);
+    lv_obj_set_style_radius(dot,11,0);
+    lv_obj_set_style_bg_color(dot,C_BRAND,0);lv_obj_set_style_bg_opa(dot,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(dot,0,0);
+    lv_obj_set_style_shadow_opa(dot,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(dot,0,0);
+    lv_obj_clear_flag(dot,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t*ico=lv_label_create(dot);lv_label_set_text(ico,"");
+    lv_obj_set_style_text_color(ico,lv_color_hex(0xffffff),0);
+    lv_obj_set_style_text_font(ico,&lv_font_montserrat_14,0);
+    lv_obj_center(ico);
+    r_chk_dot[idx]=dot;r_chk_ico[idx]=ico;
+    r_chk_lbl[idx]=mkLblP(p,txt,TGREY(),&lv_font_montserrat_14,x+30,y+4);
+}
+void updCheckRow(int idx,const char*txt,bool ok){
+    if(!r_chk_dot[idx])return;
+    lv_label_set_text(r_chk_ico[idx],ok?LV_SYMBOL_OK:"");
+    // Fond page 0 blanc → texte noir si actif, gris sinon
+    lv_obj_set_style_text_color(r_chk_lbl[idx],ok?lv_color_hex(0x0f172a):TGREY(),0);
+    if(txt)lv_label_set_text(r_chk_lbl[idx],txt);
+}
 
 // ── Parsers ───────────────────────────────────────────────────────────────────
 void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
@@ -595,59 +606,49 @@ void rebuildAllPages(){
     buildStatusPage();buildRadarPage();buildSettingsPage();buildDebugPage();
     createSwipeHandlers();updSetPage();}
 
-// ── Page 0 — Status (boot section + live section, same page always) ───────────
+// ── Page 0 — Écran d'accueil et de chargement ─────────────────────────────────
+// Layout maquette : AT-VIEW (petit) + AEROTRACE (grand) + loop + ligne pointillée
+// + 6 check rows live (AT-CORE / Bluetooth / GPS / LTE / ADS-B / OGN-FLARM)
+// + batterie AT-CORE + version en bas.
+// Fond force blanc pour preserver la lisibilite du logo bicolore (A bleu + noir).
 void buildStatusPage(){
     lv_obj_t*p=g_pages[0];
+    lv_obj_set_style_bg_color(p,lv_color_hex(0xffffff),0);
+    lv_obj_set_style_bg_opa(p,LV_OPA_COVER,0);
 
-    // ── Pilote — trigramme + nom au-dessus des logos
-    r_sess_trig=mkLbl(p,"",C_AMBER,&lv_font_montserrat_16,LV_ALIGN_TOP_MID,0,22);
-    r_sess_name=mkLbl(p,"",TFG(),  &lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,46);
-
-    // ── Logos (white pixels → recolor via theme)
-    lv_obj_t*lAt=lv_img_create(p);
-    lv_img_set_src(lAt,&img_logo_aerotrace);
-    lv_obj_set_pos(lAt,120,78);
-    lv_obj_set_style_img_recolor(lAt,TFG(),0);
-    lv_obj_set_style_img_recolor_opa(lAt,LV_OPA_COVER,0);
-
+    // ── Logos bicolores (A bleu + reste noir) — pas de recolor, couleurs source preservees
     lv_obj_t*lVw=lv_img_create(p);
-    lv_img_set_src(lVw,&img_logo_atview);
-    lv_obj_set_pos(lVw,130,143);
-    lv_obj_set_style_img_recolor(lVw,C_AMBER,0);
-    lv_obj_set_style_img_recolor_opa(lVw,LV_OPA_COVER,0);
+    lv_img_set_src(lVw,&img_logo_atview);          // 110×22 (= ~moitie AEROTRACE)
+    lv_obj_set_pos(lVw,185,80);                    // (480-110)/2 = 185
 
-    // ── Connection status (small, below logos)
-    r_title=mkLbl(p,"● SCAN",C_AMBER,&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,196);
+    lv_obj_t*lAt=lv_img_create(p);
+    lv_img_set_src(lAt,&img_logo_aerotrace);       // 240×50
+    lv_obj_set_pos(lAt,120,108);
 
-    // ── Separator
-    static lv_point_t sep1[2]={{110,210},{370,210}};
+    // ── Icône "chargement" (loop arrow) + ligne pointillée
+    mkLbl(p,LV_SYMBOL_LOOP,C_BRAND,&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,178);
+    static lv_point_t sep1[2]={{170,215},{310,215}};
     lv_obj_t*sl1=lv_line_create(p);lv_line_set_points(sl1,sep1,2);
-    lv_obj_set_style_line_color(sl1,TGRID(),0);lv_obj_set_style_line_width(sl1,1,0);
+    lv_obj_set_style_line_color(sl1,TGREY(),0);
+    lv_obj_set_style_line_width(sl1,1,0);
+    lv_obj_set_style_line_dash_width(sl1,3,0);
+    lv_obj_set_style_line_dash_gap(sl1,4,0);
 
-    // ── Boot checks
-    const char* bp_str = g_bootDone ? "● PANEL    OK" : "  PANEL    ...";
-    const char* bl_str = g_bootDone ? "● LVGL     OK" : "  LVGL     ...";
-    const char* bb_str = g_bootDone ? "● BLE      OK" : "  BLE      ...";
-    const char* bc_str = g_bootDone ? "● AT-CORE  SCAN" : "  AT-CORE  ...";
-    lv_color_t ok_col  = g_bootDone ? C_GREEN : TGREY();
-    lv_color_t core_col= g_bootDone ? C_AMBER : TGREY();
-    r_boot_panel=mkLblP(p,bp_str,ok_col,  &lv_font_montserrat_14,120,224);
-    r_boot_lvgl =mkLblP(p,bl_str,ok_col,  &lv_font_montserrat_14,120,240);
-    r_boot_ble  =mkLblP(p,bb_str,ok_col,  &lv_font_montserrat_14,120,256);
-    r_boot_core =mkLblP(p,bc_str,core_col,&lv_font_montserrat_14,120,272);
+    // ── 6 check rows (cercle bleu + label) — état initial inactif
+    const int X = 145;  // colonne cercle
+    const int Y0= 238;  // 1ère ligne
+    const int DY= 24;   // espacement vertical
+    mkCheckRow(p,CHK_CORE,X,Y0+0*DY,"AT-CORE");
+    mkCheckRow(p,CHK_BT,  X,Y0+1*DY,"Bluetooth");
+    mkCheckRow(p,CHK_GPS, X,Y0+2*DY,"GPS");
+    mkCheckRow(p,CHK_LTE, X,Y0+3*DY,"LTE");
+    mkCheckRow(p,CHK_ADSB,X,Y0+4*DY,"ADS-B / ADS-L");
+    mkCheckRow(p,CHK_OGN, X,Y0+5*DY,"OGN / FLARM (868Mhz)");
 
-    // ── Separator 2
-    static lv_point_t sep2[2]={{110,286},{370,286}};
-    lv_obj_t*sl2=lv_line_create(p);lv_line_set_points(sl2,sep2,2);
-    lv_obj_set_style_line_color(sl2,TGRID(),0);lv_obj_set_style_line_width(sl2,1,0);
-
-    // ── Live status — 2 colonnes
-    mkSBox(p,0, 68,300,"GPS ---",false); mkSBox(p,1,252,300,"LTE ---",false);
-    mkSBox(p,2, 68,327,"SD ---", false); mkSBox(p,3,252,327,"BLE",    false);
-    mkSBox(p,4, 68,354,"FLARM",  false); mkSBox(p,5,252,354,"ADS-B",  false);
-    r_coords=mkLbl(p,"--- / ---",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,380);
-    r_bat_p1=mkLbl(p,"BAT  ---%",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,400);
-    mkLbl(p,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_BOTTOM_MID,0,-52);}
+    // ── Batterie AT-CORE + version
+    r_p0_bat=mkLbl(p,"Battery AT-CORE : ---%",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,Y0+6*DY+8);
+    mkLbl(p,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_BOTTOM_MID,0,-30);
+}
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
 static void _parsePilotJSON(const char* json){
@@ -925,6 +926,9 @@ static lv_obj_t* g_up_status   = nullptr;
 static lv_obj_t* g_up_bar      = nullptr;
 static lv_obj_t* g_up_pct_lbl  = nullptr;
 static uint32_t  g_up_done_ms  = 0;
+// Init à true → un ph=4 résiduel reçu au boot (état post-upload AT-CORE figé) est ignoré.
+// Reset à false dès que ph repasse à 0 (nouveau vol), pour que le prochain cycle 1→2→3→4 affiche bien l'overlay.
+static bool      g_up_acked    = true;
 
 void mkUploadOverlay(){
     if(g_up_ov) return;
@@ -963,9 +967,23 @@ void updUploadOverlay(){
     uint8_t ph = g_status.flt_phase;
     uint8_t pct= g_status.upload_pct;
 
-    // Phase 0 (FLYING) ou status invalide → hide overlay si existant
+    // Phase 0 (FLYING) ou status invalide → hide overlay + reset ack
     if(!g_status.valid || ph == 0){
-        if(g_up_ov && g_up_done_ms && millis()-g_up_done_ms>5000) hideUploadOverlay();
+        if(g_up_ov) hideUploadOverlay();
+        g_up_acked = false;
+        return;
+    }
+
+    // Reset ack dès que la phase quitte 4 (nouveau cycle d'upload possible)
+    if(ph != 4) g_up_acked = false;
+
+    // Phase 4 déjà acquittée → ne pas réafficher
+    if(ph == 4 && g_up_acked) return;
+
+    // Auto-dismiss en phase 4 (UPLOADED) après 5s, sans attendre retour ph=0
+    if(ph == 4 && g_up_done_ms && millis()-g_up_done_ms>5000){
+        hideUploadOverlay();
+        g_up_acked = true;
         return;
     }
 
@@ -1304,37 +1322,13 @@ static void _open_aircraft_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
     if(!g_ac_ov)mkAircraftOverlay();}
 
-// Boot animation — runs on page 0 before it goes live
+// Boot sequence — init BLE et lance scan ; les checks live sont anim s par updateAllPages.
 void runBootOnPage(){
-    // Logos visibles — pause splash
-    lv_timer_handler();delay(900);
-
-    // PANEL
-    lv_label_set_text(r_boot_panel,"  PANEL    ...");
-    lv_obj_set_style_text_color(r_boot_panel,TGREY(),0);lv_timer_handler();delay(300);
-    lv_label_set_text(r_boot_panel,"● PANEL    OK");
-    lv_obj_set_style_text_color(r_boot_panel,C_GREEN,0);lv_timer_handler();
-
-    // LVGL
-    lv_label_set_text(r_boot_lvgl,"  LVGL     ...");
-    lv_obj_set_style_text_color(r_boot_lvgl,TGREY(),0);lv_timer_handler();delay(250);
-    lv_label_set_text(r_boot_lvgl,"● LVGL     OK");
-    lv_obj_set_style_text_color(r_boot_lvgl,C_GREEN,0);lv_timer_handler();
-
-    // BLE
-    lv_label_set_text(r_boot_ble,"  BLE      ...");
-    lv_obj_set_style_text_color(r_boot_ble,TGREY(),0);lv_timer_handler();delay(250);
+    lv_timer_handler();delay(900);          // laisse les logos visibles
     BLEDevice::init(g_unit_name);
-    lv_label_set_text(r_boot_ble,"● BLE      OK");
-    lv_obj_set_style_text_color(r_boot_ble,C_GREEN,0);lv_timer_handler();
-
-    // AT-CORE scan
-    lv_label_set_text(r_boot_core,"  AT-CORE  ...");
-    lv_obj_set_style_text_color(r_boot_core,TGREY(),0);lv_timer_handler();delay(350);
+    lv_timer_handler();delay(200);
     startScan();
-    lv_label_set_text(r_boot_core,"● AT-CORE  SCAN");
-    lv_obj_set_style_text_color(r_boot_core,C_AMBER,0);lv_timer_handler();
-    delay(500);
+    lv_timer_handler();delay(300);
     g_bootDone=true;
 }
 
@@ -1882,26 +1876,39 @@ void updateAllPages(){
     char b[32];
     // Tâche F : overlay upload progress (full-screen modal post-vol)
     updUploadOverlay();
-    // Status page
-    {char _t[28];snprintf(_t,28,"● %s",g_connected?(g_peer_name[0]?g_peer_name:"AT-CORE"):"SCAN");
-    lv_label_set_text(r_title,_t);}
-    lv_obj_set_style_text_color(r_title,g_connected?C_GREEN:C_AMBER,0);
-    {char _c[32];
-    if(g_connected&&g_peer_name[0])snprintf(_c,32,"● %s  OK",g_peer_name);
-    else snprintf(_c,32,"● AT-CORE  SCAN");
-    lv_label_set_text(r_boot_core,_c);
-    lv_obj_set_style_text_color(r_boot_core,g_connected?C_GREEN:C_AMBER,0);}
-    if(g_status.valid){
-        snprintf(b,32,"GPS %dsat",g_status.gps_sat);updSBox(0,b,g_status.gps_fix);
-        snprintf(b,32,"LTE %d",g_status.csq);updSBox(1,b,g_status.csq>5);
-        snprintf(b,32,"SD %dfr",g_status.frames);updSBox(2,b,g_status.sd_ok);
-        updSBox(3,"BLE",g_connected);updSBox(4,"FLARM",g_status.flarm_ok);updSBox(5,"ADS-B",g_status.adsb_ok);
-        if(g_status.gps_fix){snprintf(b,32,"%.4f / %.4f",g_status.lat,g_status.lon);lv_label_set_text(r_coords,b);}
-        if(g_status.bat<0){lv_label_set_text(r_bat_p1,"BAT  ---%");lv_obj_set_style_text_color(r_bat_p1,TGREY(),0);}
-        else if(g_status.charging){snprintf(b,32,"BAT  %d%%  " LV_SYMBOL_CHARGE,g_status.bat);lv_label_set_text(r_bat_p1,b);lv_obj_set_style_text_color(r_bat_p1,C_GREEN,0);}
-        else{snprintf(b,32,"BAT  %d%%",g_status.bat);lv_label_set_text(r_bat_p1,b);
-        lv_obj_set_style_text_color(r_bat_p1,g_status.bat>=50?C_GREEN:g_status.bat>=20?C_AMBER:C_RED,0);}
-    }else{updSBox(3,"BLE",g_connected);}
+    // Page 0 — checks live + batterie AT-CORE
+    {
+        // AT-CORE : label dynamique selon connexion ("AT-CORE_XXX" ou "AT-CORE")
+        char clbl[32];
+        if(g_connected && g_peer_name[0]) snprintf(clbl,32,"Connected to %s",g_peer_name);
+        else                              snprintf(clbl,32,"AT-CORE");
+        updCheckRow(CHK_CORE,clbl,        g_connected);
+        // Bluetooth radio : ON dès que BLE est initialisé
+        updCheckRow(CHK_BT,  "Bluetooth", g_bootDone);
+        // GPS / LTE / ADS-B / OGN — sourcés depuis g_status (vu via AT-CORE)
+        bool gps_ok = g_status.valid && g_status.gps_fix;
+        bool lte_ok = g_status.valid && g_status.csq>5;
+        bool adsb_ok= g_connected && g_status.valid && g_status.adsb_ok;
+        bool ogn_ok = g_connected && g_status.valid && g_status.flarm_ok;
+        updCheckRow(CHK_GPS, "GPS",                   gps_ok);
+        updCheckRow(CHK_LTE, "LTE",                   lte_ok);
+        updCheckRow(CHK_ADSB,"ADS-B / ADS-L",         adsb_ok);
+        updCheckRow(CHK_OGN, "OGN / FLARM (868Mhz)",  ogn_ok);
+        // Batterie AT-CORE
+        if(r_p0_bat){
+            if(g_status.valid && g_status.bat>=0){
+                snprintf(b,32,"Battery AT-CORE : %d%%%s",g_status.bat,g_status.charging?" " LV_SYMBOL_CHARGE:"");
+                lv_label_set_text(r_p0_bat,b);
+                lv_obj_set_style_text_color(r_p0_bat,
+                    g_status.charging?C_GREEN:
+                    g_status.bat>=50?lv_color_hex(0x0f172a):
+                    g_status.bat>=20?C_AMBER:C_RED,0);
+            }else{
+                lv_label_set_text(r_p0_bat,"Battery AT-CORE : ---%");
+                lv_obj_set_style_text_color(r_p0_bat,TGREY(),0);
+            }
+        }
+    }
     // Pilote — trigramme ligne 1, prénom+nom ligne 2
     if(r_sess_trig&&r_sess_name){
         if(g_session.valid){
