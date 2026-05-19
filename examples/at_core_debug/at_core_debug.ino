@@ -141,7 +141,6 @@ static lv_obj_t *r_chk_ico[N_CHK]={};   // ✓ blanc (visible si actif)
 static lv_obj_t *r_chk_lbl[N_CHK]={};   // texte
 static bool      g_chk_latched[N_CHK]={};  // une fois actif, V reste (reset au disconnect)
 static lv_obj_t *r_p0_bat=nullptr;      // "Battery AT-CORE : XX%"
-static lv_obj_t *r_p0_progDots[6]={};   // 6 dots progressifs sous le sablier
 
 // ── Widget refs — Radar (page 1) ──────────────────────────────────────────────
 #define RAD_CX 240
@@ -291,8 +290,8 @@ static lv_obj_t* g_ac_search_disp = nullptr;
 static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_spd_v,*s_bright_v,*s_src_v,*s_theme_v,*s_grnd_v,*s_icon_sz_v;
 static lv_obj_t *s_ac_v,*s_wifi_v,*s_sd_v;
 static lv_obj_t *s_pg[2]  = {};
-static lv_obj_t *s_pg_ind = nullptr;
 static uint8_t   s_pg_idx = 0;
+static lv_obj_t *r_p2_bat = nullptr;   // "Battery AT-CORE : XX%" footer settings page
 
 // ── SD card (AT-VIEW local) ───────────────────────────────────────────────────
 static bool     g_sd_ok = false;
@@ -553,21 +552,29 @@ void switchPage(uint8_t np){
     lv_obj_add_flag(g_pages[g_page],LV_OBJ_FLAG_HIDDEN);
     g_page=np;lv_obj_clear_flag(g_pages[g_page],LV_OBJ_FLAG_HIDDEN);}
 
-static lv_coord_t g_swipe_sx=-1, g_swipe_lx=0;
+static lv_coord_t g_swipe_sx=-1, g_swipe_lx=0, g_swipe_sy=0, g_swipe_ly=0;
 static void swipeCb(lv_event_t*e){
     // Bloque la navigation tant que l'auth code n'est pas valide
     if(g_auth_ov)return;
     lv_event_code_t code=lv_event_get_code(e);
     lv_indev_t*indev=lv_indev_get_act();if(!indev)return;
     lv_point_t pt;lv_indev_get_point(indev,&pt);
-    if(code==LV_EVENT_PRESSED){g_swipe_sx=pt.x;g_swipe_lx=pt.x;}
-    else if(code==LV_EVENT_PRESSING){g_swipe_lx=pt.x;}
+    if(code==LV_EVENT_PRESSED){g_swipe_sx=pt.x;g_swipe_lx=pt.x;g_swipe_sy=pt.y;g_swipe_ly=pt.y;}
+    else if(code==LV_EVENT_PRESSING){g_swipe_lx=pt.x;g_swipe_ly=pt.y;}
     else if(code==LV_EVENT_RELEASED||code==LV_EVENT_PRESS_LOST){
         if(g_swipe_sx>=0){
             int dx=(int)g_swipe_lx-(int)g_swipe_sx;
+            int dy=(int)g_swipe_ly-(int)g_swipe_sy;
             if(g_inDebug){
                 if(abs(dx)>40){lv_obj_add_flag(g_dbgPage,LV_OBJ_FLAG_HIDDEN);
                     lv_obj_clear_flag(g_pages[g_page],LV_OBJ_FLAG_HIDDEN);g_inDebug=false;}
+            }else if(abs(dy)>abs(dx) && abs(dy)>60 && g_page==2){
+                // Swipe vertical sur Settings → bascule sous-page (haut↔bas)
+                uint8_t np = (dy<0) ? 1 : 0;
+                if(np!=s_pg_idx && s_pg[s_pg_idx] && s_pg[np]){
+                    lv_obj_add_flag(s_pg[s_pg_idx],LV_OBJ_FLAG_HIDDEN);
+                    s_pg_idx=np;
+                    lv_obj_clear_flag(s_pg[s_pg_idx],LV_OBJ_FLAG_HIDDEN);}
             }else{
                 if(dx>60){g_navPage=(g_page==0)?NUM_PAGES-1:g_page-1;g_navPending=true;}
                 else if(dx<-60){g_navPage=(g_page+1)%NUM_PAGES;g_navPending=true;}}}
@@ -630,6 +637,7 @@ void buildSettingsPage();
 void buildDebugPage();
 void createSwipeHandlers();
 void updSetPage();
+static void cbSetBtn(lv_event_t*e);
 void mkAircraftOverlay();
 void acLoad();
 void acSave();
@@ -656,50 +664,21 @@ void buildStatusPage(){
     lv_obj_set_style_bg_color(p,lv_color_hex(0xffffff),0);
     lv_obj_set_style_bg_opa(p,LV_OPA_COVER,0);
 
-    // ── Logos bicolores (A bleu + reste noir) — pas de recolor, couleurs source preservees
+    // ── Logos bicolores (A bleu + reste noir) — zoom LVGL pour respecter proportions maquette
     lv_obj_t*lVw=lv_img_create(p);
-    lv_img_set_src(lVw,&img_logo_atview);          // 110×22 (= ~moitie AEROTRACE)
-    lv_obj_set_pos(lVw,185,80);                    // (480-110)/2 = 185
+    lv_img_set_src(lVw,&img_logo_atview);          // 110×22 source
+    lv_img_set_zoom(lVw,320);                      // ×1.25 → ~137×27
+    lv_obj_align(lVw,LV_ALIGN_TOP_MID,0,70);
 
     lv_obj_t*lAt=lv_img_create(p);
-    lv_img_set_src(lAt,&img_logo_aerotrace);       // 240×50
-    lv_obj_set_pos(lAt,120,108);
+    lv_img_set_src(lAt,&img_logo_aerotrace);       // 240×50 source
+    lv_img_set_zoom(lAt,384);                      // ×1.5 → ~360×75
+    lv_obj_align(lAt,LV_ALIGN_TOP_MID,0,108);
 
-    // ── Sablier (silhouette 24×30 en 6 segments) — couleur brand
-    {
-        static lv_point_t hg[7]={{0,0},{24,0},{12,15},{0,30},{24,30},{12,15},{0,0}};
-        lv_obj_t*hgL=lv_line_create(p);
-        lv_line_set_points(hgL,hg,7);
-        lv_obj_set_pos(hgL,228,175);   // (480-24)/2 = 228
-        lv_obj_set_style_line_color(hgL,C_BRAND,0);
-        lv_obj_set_style_line_width(hgL,3,0);
-        lv_obj_set_style_line_rounded(hgL,true,0);
-    }
-
-    // ── Ligne d'avancement : 6 dots, gris clair → brand-blue selon les checks
-    {
-        int n=6, d=8, gap=10;
-        int total = n*d + (n-1)*gap;
-        int x0 = (480 - total)/2;
-        for(int i=0;i<n;i++){
-            lv_obj_t*pd=lv_obj_create(p);
-            lv_obj_set_size(pd,d,d);
-            lv_obj_set_pos(pd,x0+i*(d+gap),215);
-            lv_obj_set_style_radius(pd,LV_RADIUS_CIRCLE,0);
-            lv_obj_set_style_bg_color(pd,lv_color_hex(0xd0d0d0),0);
-            lv_obj_set_style_bg_opa(pd,LV_OPA_COVER,0);
-            lv_obj_set_style_border_width(pd,0,0);
-            lv_obj_set_style_shadow_opa(pd,LV_OPA_TRANSP,0);
-            lv_obj_set_style_pad_all(pd,0,0);
-            lv_obj_clear_flag(pd,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
-            r_p0_progDots[i]=pd;
-        }
-    }
-
-    // ── 6 check rows (cercle bleu + label) — état initial inactif
-    const int X = 145;  // colonne cercle
-    const int Y0= 238;  // 1ère ligne
-    const int DY= 24;   // espacement vertical
+    // ── 6 check rows (cercle bleu + label) — décalées à gauche, plus d'air entre lignes
+    const int X = 105;  // colonne cercle (decalee a gauche)
+    const int Y0= 218;  // 1ere ligne (sous AEROTRACE, gap ~30px)
+    const int DY= 30;   // espacement vertical (6 rows : dernier dot top y=368, bottom y=390, battery debute y=418)
     mkCheckRow(p,CHK_CORE,X,Y0+0*DY,"AT-CORE");
     mkCheckRow(p,CHK_BT,  X,Y0+1*DY,"Bluetooth");
     mkCheckRow(p,CHK_GPS, X,Y0+2*DY,"GPS");
@@ -2024,6 +2003,26 @@ void buildRadarPage(){
     char scl[12];snprintf(scl,12,"%dnm",g_cfg.scale_nm);
     r_radar_scale_lbl=mkLbl(p,scl,TGREY(),&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-35);
 
+    // Zoom +/- buttons — flanquent le label scale, mêmes ids que Settings (0=-, 1=+)
+    // → reuse cbSetBtn → cfgSave() + updSetPage() (rafraichit aussi r_radar_scale_lbl)
+    auto mkZoomBtn = [&](const char* sym, int dx, intptr_t id){
+        lv_obj_t* b=lv_obj_create(p);
+        lv_obj_set_size(b,34,34);
+        lv_obj_align(b,LV_ALIGN_BOTTOM_MID,dx,-28);
+        lv_obj_set_style_radius(b,LV_RADIUS_CIRCLE,0);
+        lv_obj_set_style_bg_color(b,THDG(),0);lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
+        lv_obj_set_style_border_color(b,TFG(),0);lv_obj_set_style_border_width(b,1,0);
+        lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(b,0,0);
+        lv_obj_clear_flag(b,LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t* lab=lv_label_create(b);lv_label_set_text(lab,sym);
+        lv_obj_set_style_text_color(lab,TFG(),0);
+        lv_obj_set_style_text_font(lab,&lv_font_montserrat_20,0);
+        lv_obj_center(lab);
+        lv_obj_add_event_cb(b,cbSetBtn,LV_EVENT_CLICKED,(void*)id);
+    };
+    mkZoomBtn("-",-55,0);
+    mkZoomBtn("+", 55,1);
+
     // AIP overlay — transparent layer between grid and traffic icons
     r_aip_layer=lv_obj_create(p);
     lv_obj_set_size(r_aip_layer,480,480);lv_obj_set_pos(r_aip_layer,0,0);
@@ -2156,75 +2155,73 @@ static void cbSetBtn(lv_event_t*e){
     cfgSave();
     if(!g_rebuildPages)updSetPage();}
 
+// Helper: section header brand-blue + underline horizontal
+static void mkSetSection(lv_obj_t*p,const char*title,int y){
+    mkLbl(p,title,C_BRAND,&lv_font_montserrat_16,LV_ALIGN_TOP_MID,0,y);
+    lv_obj_t*hl=lv_obj_create(p);
+    lv_obj_set_size(hl,330,1);
+    lv_obj_align(hl,LV_ALIGN_TOP_MID,0,y+22);
+    lv_obj_set_style_bg_color(hl,C_BRAND,0);lv_obj_set_style_bg_opa(hl,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(hl,0,0);lv_obj_set_style_pad_all(hl,0,0);
+    lv_obj_clear_flag(hl,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+}
+
+// Row: LABEL gauche + valeur + boutons < / > droite. Style maquette : fond blanc.
 static lv_obj_t* mkSetRow(lv_obj_t*p,const char*k,int y,const char*v,int idn,int idup){
-    mkLblP(p,k,TGREY(),&lv_font_montserrat_16,88,y);
-    lv_obj_t*vl=mkLblP(p,v,C_AMBER,&lv_font_montserrat_16,215,y);
-    lv_color_t btnbg=g_dark_theme?lv_color_hex(0x1f2937):lv_color_hex(0xdde1e7);
-    lv_obj_t*bd=lv_btn_create(p);lv_obj_set_size(bd,38,30);lv_obj_set_pos(bd,285,y-4);
+    mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_14,55,y);
+    lv_obj_t*vl=mkLblP(p,v,C_BRAND,&lv_font_montserrat_14,235,y);
+    lv_color_t btnbg=lv_color_hex(0xeef2f6);
+    lv_obj_t*bd=lv_btn_create(p);lv_obj_set_size(bd,30,22);lv_obj_set_pos(bd,295,y-3);
     lv_obj_set_style_bg_color(bd,btnbg,0);lv_obj_set_style_border_width(bd,0,0);
-    lv_obj_set_style_radius(bd,6,0);lv_obj_set_style_shadow_opa(bd,LV_OPA_TRANSP,0);
+    lv_obj_set_style_radius(bd,4,0);lv_obj_set_style_shadow_opa(bd,LV_OPA_TRANSP,0);
+    lv_obj_set_style_pad_all(bd,0,0);
     lv_obj_add_event_cb(bd,cbSetBtn,LV_EVENT_CLICKED,(void*)(intptr_t)idn);
     lv_obj_t*ld=lv_label_create(bd);lv_label_set_text(ld,"<");
-    lv_obj_set_style_text_color(ld,TFG(),0);lv_obj_center(ld);
-    lv_obj_t*bu=lv_btn_create(p);lv_obj_set_size(bu,38,30);lv_obj_set_pos(bu,329,y-4);
+    lv_obj_set_style_text_color(ld,lv_color_hex(0x0f172a),0);
+    lv_obj_set_style_text_font(ld,&lv_font_montserrat_14,0);lv_obj_center(ld);
+    lv_obj_t*bu=lv_btn_create(p);lv_obj_set_size(bu,30,22);lv_obj_set_pos(bu,330,y-3);
     lv_obj_set_style_bg_color(bu,btnbg,0);lv_obj_set_style_border_width(bu,0,0);
-    lv_obj_set_style_radius(bu,6,0);lv_obj_set_style_shadow_opa(bu,LV_OPA_TRANSP,0);
+    lv_obj_set_style_radius(bu,4,0);lv_obj_set_style_shadow_opa(bu,LV_OPA_TRANSP,0);
+    lv_obj_set_style_pad_all(bu,0,0);
     lv_obj_add_event_cb(bu,cbSetBtn,LV_EVENT_CLICKED,(void*)(intptr_t)idup);
     lv_obj_t*lu=lv_label_create(bu);lv_label_set_text(lu,">");
-    lv_obj_set_style_text_color(lu,TFG(),0);lv_obj_center(lu);
+    lv_obj_set_style_text_color(lu,lv_color_hex(0x0f172a),0);
+    lv_obj_set_style_text_font(lu,&lv_font_montserrat_14,0);lv_obj_center(lu);
     return vl;}
 
+// Row "EDIT" : LABEL gauche + valeur + bouton EDIT droite (callback custom)
 static lv_obj_t* mkSetRowBtn(lv_obj_t*p,const char*k,int y,const char*v,lv_event_cb_t cb){
-    mkLblP(p,k,TGREY(),&lv_font_montserrat_16,88,y);
-    lv_obj_t*vl=mkLblP(p,v,TFG(),&lv_font_montserrat_14,215,y+1);
-    lv_color_t bg=g_dark_theme?lv_color_hex(0x1f4068):lv_color_hex(0xdde1e7);
-    lv_obj_t*b=lv_btn_create(p);lv_obj_set_size(b,80,30);lv_obj_set_pos(b,285,y-4);
+    mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_14,55,y);
+    lv_obj_t*vl=mkLblP(p,v,C_BRAND,&lv_font_montserrat_14,180,y);
+    lv_color_t bg=lv_color_hex(0xeef2f6);
+    lv_obj_t*b=lv_btn_create(p);lv_obj_set_size(b,65,22);lv_obj_set_pos(b,295,y-3);
     lv_obj_set_style_bg_color(b,bg,0);lv_obj_set_style_border_width(b,0,0);
-    lv_obj_set_style_radius(b,6,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_set_style_radius(b,4,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_set_style_pad_all(b,0,0);
     lv_obj_add_event_cb(b,cb,LV_EVENT_CLICKED,NULL);
     lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,"EDIT");
-    lv_obj_set_style_text_color(l,TFG(),0);lv_obj_center(l);
+    lv_obj_set_style_text_color(l,lv_color_hex(0x0f172a),0);
+    lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);
     return vl;}
-
-static void _s_pg_nav_cb(lv_event_t*e){
-    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
-    uint8_t np=(s_pg_idx+1)%2;
-    lv_obj_add_flag(s_pg[s_pg_idx],LV_OBJ_FLAG_HIDDEN);
-    s_pg_idx=np;
-    lv_obj_clear_flag(s_pg[s_pg_idx],LV_OBJ_FLAG_HIDDEN);
-    char ind[4];snprintf(ind,4,"%d/2",s_pg_idx+1);
-    lv_label_set_text(s_pg_ind,ind);}
 
 void buildSettingsPage(){
     lv_obj_t*p=g_pages[2]; char b[16];
     s_pg_idx=0;
 
-    // ── Title (always visible)
-    mkLbl(p,"SETTINGS",C_AMBER,&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,55);
+    // Force fond blanc (maquette AeroTrace)
+    lv_obj_set_style_bg_color(p,lv_color_hex(0xffffff),0);
+    lv_obj_set_style_bg_opa(p,LV_OPA_COVER,0);
 
-    // ── Sub-page navigation (< 1/2 >)
-    lv_color_t nbg=g_dark_theme?lv_color_hex(0x1f2937):lv_color_hex(0xdde1e7);
-    lv_obj_t*nbl_btn=lv_btn_create(p);lv_obj_set_size(nbl_btn,34,24);lv_obj_set_pos(nbl_btn,155,73);
-    lv_obj_set_style_bg_color(nbl_btn,nbg,0);lv_obj_set_style_border_width(nbl_btn,0,0);
-    lv_obj_set_style_radius(nbl_btn,6,0);lv_obj_set_style_shadow_opa(nbl_btn,LV_OPA_TRANSP,0);
-    lv_obj_add_event_cb(nbl_btn,_s_pg_nav_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(nbl_btn);lv_label_set_text(l,LV_SYMBOL_LEFT);
-    lv_obj_set_style_text_color(l,TFG(),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);lv_obj_center(l);}
-    s_pg_ind=lv_label_create(p);lv_label_set_text(s_pg_ind,"1/2");
-    lv_obj_set_style_text_color(s_pg_ind,TGREY(),0);
-    lv_obj_set_style_text_font(s_pg_ind,&lv_font_montserrat_12,0);
-    lv_obj_align(s_pg_ind,LV_ALIGN_TOP_MID,0,78);
-    lv_obj_t*nbr_btn=lv_btn_create(p);lv_obj_set_size(nbr_btn,34,24);lv_obj_set_pos(nbr_btn,291,73);
-    lv_obj_set_style_bg_color(nbr_btn,nbg,0);lv_obj_set_style_border_width(nbr_btn,0,0);
-    lv_obj_set_style_radius(nbr_btn,6,0);lv_obj_set_style_shadow_opa(nbr_btn,LV_OPA_TRANSP,0);
-    lv_obj_add_event_cb(nbr_btn,_s_pg_nav_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(nbr_btn);lv_label_set_text(l,LV_SYMBOL_RIGHT);
-    lv_obj_set_style_text_color(l,TFG(),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);lv_obj_center(l);}
+    // ── Logo A bleu + titre SETTINGS (compactés pour libérer de l'air aux rows)
+    lv_obj_t*lA=lv_img_create(p);
+    lv_img_set_src(lA,&img_logo_a);
+    lv_obj_align(lA,LV_ALIGN_TOP_MID,0,18);
+    mkLbl(p,"SETTINGS",lv_color_hex(0x0f172a),&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,82);
 
-    // ── Sub-page containers (transparent, non-scrollable, touch pass-through)
+    // ── Sub-page containers (transparent, swipe vertical pour basculer)
     for(int i=0;i<2;i++){
         s_pg[i]=lv_obj_create(p);
-        lv_obj_set_size(s_pg[i],480,390);lv_obj_set_pos(s_pg[i],0,93);
+        lv_obj_set_size(s_pg[i],480,312);lv_obj_set_pos(s_pg[i],0,108);
         lv_obj_set_style_bg_opa(s_pg[i],LV_OPA_TRANSP,0);
         lv_obj_set_style_border_width(s_pg[i],0,0);lv_obj_set_style_pad_all(s_pg[i],0,0);
         lv_obj_clear_flag(s_pg[i],LV_OBJ_FLAG_SCROLLABLE);
@@ -2233,39 +2230,46 @@ void buildSettingsPage(){
         if(i!=0)lv_obj_add_flag(s_pg[i],LV_OBJ_FLAG_HIDDEN);}
 
     // ── Sub-page 0: RADAR + DISPLAY ──────────────────────────────────────────
-    {lv_obj_t*p=s_pg[0];
-    mkLbl(p,"RADAR",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,2);
-    snprintf(b,16,"%dnm",g_cfg.scale_nm); s_scale_v =mkSetRow(p,"Scale", 20,b,0,1);
-    snprintf(b,16,"%dft",g_cfg.vfilt_ft); s_vfilt_v =mkSetRow(p,"V-Filt",52,b,2,3);
-    s_dist_v=mkSetRow(p,"Dist",84,g_cfg.dist_nm?"NM":"km",4,5);
-    s_alt_v =mkSetRow(p,"Alt",116,g_cfg.alt_ft?"ft":"m",6,7);
-    s_spd_v =mkSetRow(p,"Speed",148,g_cfg.spd_kt?"kt":"km/h",24,25);
-    mkLbl(p,"DISPLAY",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,180);
-    snprintf(b,16,"%d",g_cfg.brightness); s_bright_v=mkSetRow(p,"Bright",198,b,8,9);
-    s_theme_v=mkSetRow(p,"Theme",230,g_cfg.dark?"DARK":"LIGHT",12,13);}
+    {lv_obj_t*sp=s_pg[0];
+    mkSetSection(sp,"RADAR",0);
+    snprintf(b,16,"%dnm",g_cfg.scale_nm); s_scale_v =mkSetRow(sp,"SCALE",   36,b,0,1);
+    snprintf(b,16,"%dft",g_cfg.vfilt_ft); s_vfilt_v =mkSetRow(sp,"V-FILTER",62,b,2,3);
+    s_dist_v=mkSetRow(sp,"DIST", 88,g_cfg.dist_nm?"NM":"km",4,5);
+    s_alt_v =mkSetRow(sp,"ALT", 114,g_cfg.alt_ft?"ft":"m",6,7);
+    s_spd_v =mkSetRow(sp,"SPEED",140,g_cfg.spd_kt?"kt":"km/h",24,25);
+    mkSetSection(sp,"DISPLAY",172);
+    snprintf(b,16,"%d",g_cfg.brightness); s_bright_v=mkSetRow(sp,"BRIGHTNESS",208,b,8,9);
+    s_theme_v=mkSetRow(sp,"THEME",234,g_cfg.dark?"DARK":"LIGHT",12,13);}
 
-    // ── Sub-page 1: TRAFFIC + AIRCRAFT + SYSTEM ──────────────────────────────
-    {lv_obj_t*p=s_pg[1];
-    mkLbl(p,"TRAFFIC",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,2);
-    s_src_v    =mkSetRow(p,"Source",20,kSrcNames[g_cfg.trf_src&3],10,11);
-    s_grnd_v   =mkSetRow(p,"Ground",52,g_cfg.show_grnd?"ON":"OFF",14,15);
-    s_icon_sz_v=mkSetRow(p,"Icons", 84,kIconSzNames[g_cfg.icon_sz&2],16,17);
+    // ── Sub-page 1: TRAFFIC + SYSTEM ─────────────────────────────────────────
+    {lv_obj_t*sp=s_pg[1];
+    mkSetSection(sp,"TRAFFIC",0);
+    s_src_v    =mkSetRow(sp,"SOURCE",   36,kSrcNames[g_cfg.trf_src&3],10,11);
+    s_grnd_v   =mkSetRow(sp,"GROUNDED", 62,g_cfg.show_grnd?"ON":"OFF",14,15);
+    s_icon_sz_v=mkSetRow(sp,"ICONS SIZE",88,kIconSzNames[g_cfg.icon_sz&2],16,17);
     {const char*aip_v=!g_aip_loaded?"NO DATA":g_cfg.aip_en?"ON":"OFF";
-    s_aip_v=mkSetRow(p,"AIP",116,aip_v,20,21);}
-    s_heli_v=mkSetRow(p,"Heliports",148,g_cfg.ad_heli?"ON":"OFF",22,23);
-    mkLbl(p,"AIRCRAFT",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,182);
-    {char t[20];snprintf(t,20,"%s  %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");
-    s_ac_v=mkSetRowBtn(p,"Aircraft",200,t,_open_aircraft_cb);}
-    mkLbl(p,"SYSTEM",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,234);
-    s_wifi_v=mkSetRow(p,"WiFi",252,g_cfg.wifi_en?"ON":"OFF",18,19);
+    s_aip_v=mkSetRow(sp,"AIP",114,aip_v,20,21);}
+    s_heli_v=mkSetRow(sp,"HELIPORT",140,g_cfg.ad_heli?"ON":"OFF",22,23);
+    mkSetSection(sp,"SYSTEM",172);
+    {char t[20];snprintf(t,20,"%s %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");
+    s_ac_v=mkSetRowBtn(sp,"AIRCRAFT",208,t,_open_aircraft_cb);}
+    s_wifi_v=mkSetRow(sp,"WIFI",234,g_cfg.wifi_en?"ON":"OFF",18,19);
     {char sd_str[12];
      if(g_sd_ok)snprintf(sd_str,12,"%u GB",g_sd_gb);else strlcpy(sd_str,"NO CARD",12);
-     mkLblP(p,"SD card",TGREY(),&lv_font_montserrat_16,88,284);
-     s_sd_v=mkLblP(p,sd_str,g_sd_ok?C_GREEN:TGREY(),&lv_font_montserrat_16,215,284);}
-    lv_obj_t*ver=mkLblP(p,"v0.7  ●  AT-VIEW",TGREY(),&lv_font_montserrat_12,168,328);
+     mkLblP(sp,"SDCARD (AT-CORE)",lv_color_hex(0x4b5563),&lv_font_montserrat_14,55,260);
+     s_sd_v=mkLblP(sp,sd_str,g_sd_ok?C_GREEN:lv_color_hex(0x4b5563),&lv_font_montserrat_14,295,260);}
+    // Indicateur "..." pour signaler le scroll vertical
+    mkLbl(sp,". . .",TGREY(),&lv_font_montserrat_16,LV_ALIGN_TOP_MID,0,290);}
+
+    // ── Footer (toujours visible) : logo AT-VIEW + battery + version
+    lv_obj_t*lVw=lv_img_create(p);
+    lv_img_set_src(lVw,&img_logo_atview);
+    lv_obj_align(lVw,LV_ALIGN_TOP_MID,0,422);
+    r_p2_bat=mkLbl(p,"Battery AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,448);
+    lv_obj_t*ver=mkLbl(p,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,464);
     lv_obj_add_flag(ver,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(ver,LV_OPA_TRANSP,0);
-    lv_obj_add_event_cb(ver,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);}}
+    lv_obj_add_event_cb(ver,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);}
 
 // ── Debug page (hidden) ───────────────────────────────────────────────────────
 void buildDebugPage(){
@@ -2400,27 +2404,21 @@ void updateAllPages(){
         updCheckRow(CHK_LTE, "LTE",                   lte_ok);
         updCheckRow(CHK_ADSB,"ADS-B / ADS-L",         adsb_ok);
         updCheckRow(CHK_OGN, "OGN / FLARM (868Mhz)",  ogn_ok);
-        // 6 dots progressifs sous le sablier — couleur selon etat des checks
-        bool prog[6] = { g_connected, g_bootDone, gps_ok, lte_ok, adsb_ok, ogn_ok };
-        for(int i=0;i<6;i++){
-            if(r_p0_progDots[i])
-                lv_obj_set_style_bg_color(r_p0_progDots[i],
-                    prog[i] ? C_BRAND : lv_color_hex(0xd0d0d0), 0);
-        }
-        // Batterie AT-CORE
-        if(r_p0_bat){
-            if(g_status.valid && g_status.bat>=0){
-                snprintf(b,32,"Battery AT-CORE : %d%%%s",g_status.bat,g_status.charging?" " LV_SYMBOL_CHARGE:"");
-                lv_label_set_text(r_p0_bat,b);
-                lv_obj_set_style_text_color(r_p0_bat,
-                    g_status.charging?C_GREEN:
+        // Batterie AT-CORE (footer page #01 + page Settings)
+        const char* bat_txt;
+        lv_color_t  bat_col;
+        if(g_status.valid && g_status.bat>=0){
+            snprintf(b,32,"Battery AT-CORE : %d%%%s",g_status.bat,g_status.charging?" " LV_SYMBOL_CHARGE:"");
+            bat_txt=b;
+            bat_col=g_status.charging?C_GREEN:
                     g_status.bat>=50?lv_color_hex(0x0f172a):
-                    g_status.bat>=20?C_AMBER:C_RED,0);
-            }else{
-                lv_label_set_text(r_p0_bat,"Battery AT-CORE : ---%");
-                lv_obj_set_style_text_color(r_p0_bat,TGREY(),0);
-            }
+                    g_status.bat>=20?C_AMBER:C_RED;
+        }else{
+            bat_txt="Battery AT-CORE : ---%";
+            bat_col=TGREY();
         }
+        if(r_p0_bat){lv_label_set_text(r_p0_bat,bat_txt);lv_obj_set_style_text_color(r_p0_bat,bat_col,0);}
+        if(r_p2_bat){lv_label_set_text(r_p2_bat,bat_txt);lv_obj_set_style_text_color(r_p2_bat,bat_col,0);}
     }
     // Pilote — trigramme ligne 1, prénom+nom ligne 2
     if(r_sess_trig&&r_sess_name){
