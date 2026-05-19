@@ -171,6 +171,22 @@ static char      g_auth_buf[5]   = {};
 static int       g_auth_len      = 0;
 static bool      g_auth_p2       = false;   // phase 2: instructor entry
 static char      g_auth_scode[5] = {};      // pilot code saved during phase 2
+static lv_obj_t* g_keypad_btns[11] = {};    // 10 digits + ENTER — toggle visibility en step PICK
+
+// ── Picker pilote (step 0 — sélection nom avant PIN) ─────────────────────────
+// step 0 = PICK pilot, 1 = PIN pilot, 2 = PICK instructor, 3 = PIN instructor
+static uint8_t   g_auth_step          = 0;
+static PilotEntry* g_picked_pilot     = nullptr;
+static PilotEntry* g_picked_instructor= nullptr;
+static lv_obj_t* g_picker_filter_lbl  = nullptr;
+static lv_obj_t* g_picker_list        = nullptr;
+static lv_obj_t* g_picker_rows[MAX_PILOTS]   = {};
+static lv_obj_t* g_picker_row_trig[MAX_PILOTS] = {};
+static lv_obj_t* g_picker_row_name[MAX_PILOTS] = {};
+static lv_obj_t* g_picker_keys[27]    = {};   // A-Z + backspace
+static char      g_picker_filter[8]   = {};
+static int       g_picker_filter_len  = 0;
+static int       g_picker_last_cnt    = 0;   // détecter arrivée nouveaux pilotes
 
 // ── Aircraft identity ─────────────────────────────────────────────────────────
 #define N_AC_TYPES 193
@@ -772,7 +788,172 @@ bool checkOwnerNVS(){
 
 static char s_instr_name[32] = {};  // Capture nom instructeur pour page #03 student
 
+// ── Picker helpers ───────────────────────────────────────────────────────────
+// Forward decls — fonctions auth définies plus bas mais référencées par les callbacks.
+void authUpdateDots();
+
+static inline char _upcase(char c){ return (c>='a'&&c<='z')?(c-'a'+'A'):c; }
+
+// Prefix-match insensible casse sur trigramme OU début de name.
+// Filtre vide → aucun pilote (variante B : on force la saisie d'au moins une lettre).
+// En step 2 (picker instructeur), on ne montre que les pilotes is_instructor.
+static bool pickerMatchPilot(const PilotEntry* pe,const char* flt,int flt_len){
+    if(flt_len<=0) return false;
+    if(g_auth_step==2 && !pe->is_instructor) return false;
+    // trigramme
+    bool tm = true;
+    for(int i=0;i<flt_len;i++){
+        char a=_upcase(pe->trigram[i]), b=_upcase(flt[i]);
+        if(a==0 || a!=b){ tm=false; break; }
+    }
+    if(tm) return true;
+    // name (premier caractère du champ)
+    bool nm = true;
+    for(int i=0;i<flt_len;i++){
+        char a=_upcase(pe->name[i]), b=_upcase(flt[i]);
+        if(a==0 || a!=b){ nm=false; break; }
+    }
+    return nm;
+}
+
+static void pickerUpdateFilterLabel(){
+    if(!g_picker_filter_lbl) return;
+    char b[20];
+    if(g_picker_filter_len>0) snprintf(b,sizeof(b),"Filter: %s_",g_picker_filter);
+    else                      snprintf(b,sizeof(b),"Type letters to filter");
+    lv_label_set_text(g_picker_filter_lbl,b);
+}
+
+// Remplit/cache les rows selon g_pilot_cnt et le filtre courant.
+// Réordonne verticalement les rows visibles pour éviter trous dans la liste.
+static void pickerRefreshList(){
+    if(!g_picker_list) return;
+    const int ROW_H = 32;
+    int y_off = 0;
+    for(int i=0;i<MAX_PILOTS;i++){
+        if(!g_picker_rows[i]) continue;
+        if(i>=g_pilot_cnt){
+            lv_obj_add_flag(g_picker_rows[i],LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        // mettre à jour labels (au cas où la DB a évolué depuis l'ouverture)
+        if(g_picker_row_trig[i]) lv_label_set_text(g_picker_row_trig[i],g_pilots[i].trigram);
+        if(g_picker_row_name[i]) lv_label_set_text(g_picker_row_name[i],g_pilots[i].name);
+        bool m = pickerMatchPilot(&g_pilots[i],g_picker_filter,g_picker_filter_len);
+        if(m){
+            lv_obj_clear_flag(g_picker_rows[i],LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_pos(g_picker_rows[i],0,y_off);
+            y_off += ROW_H;
+        }else{
+            lv_obj_add_flag(g_picker_rows[i],LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+    g_picker_last_cnt = g_pilot_cnt;
+}
+
+static inline void _setHidden(lv_obj_t* o,bool h){
+    if(!o) return;
+    if(h) lv_obj_add_flag(o,LV_OBJ_FLAG_HIDDEN);
+    else  lv_obj_clear_flag(o,LV_OBJ_FLAG_HIDDEN);
+}
+
+// Bascule visibilité picker ↔ PIN. Met aussi à jour le texte du prompt.
+// step 0 = pick pilot, 1 = PIN pilot, 2 = pick instructor, 3 = PIN instructor.
+static void authStepSet(uint8_t step){
+    g_auth_step = step;
+    bool showPicker = (step==0 || step==2);
+    bool showPIN    = (step==1 || step==3);
+    // Sync legacy flag g_auth_p2 (utilisé par d'autres fonctions auth)
+    g_auth_p2 = (step>=2);
+    // Widgets picker
+    _setHidden(g_picker_filter_lbl, !showPicker);
+    _setHidden(g_picker_list,       !showPicker);
+    for(int i=0;i<27;i++) _setHidden(g_picker_keys[i],!showPicker);
+    // Widgets PIN (dots + keypad + DB diag)
+    for(int i=0;i<4;i++)  _setHidden(g_auth_dots[i],   !showPIN);
+    for(int i=0;i<11;i++) _setHidden(g_keypad_btns[i], !showPIN);
+    _setHidden(g_auth_diag, !showPIN);
+    // À l'entrée d'un picker, vider le filtre + refresh liste
+    if(showPicker){
+        memset(g_picker_filter,0,sizeof(g_picker_filter));
+        g_picker_filter_len = 0;
+        pickerUpdateFilterLabel();
+        pickerRefreshList();
+    }
+    // Prompt text
+    if(g_auth_prompt){
+        char b[48];
+        if(step==0)
+            lv_label_set_text(g_auth_prompt,"Select your name");
+        else if(step==1){
+            snprintf(b,sizeof(b),"Code for %s",
+                g_picked_pilot && g_picked_pilot->trigram[0]
+                    ? g_picked_pilot->trigram : "?");
+            lv_label_set_text(g_auth_prompt,b);
+        }else if(step==2)
+            lv_label_set_text(g_auth_prompt,"Select your instructor");
+        else{
+            snprintf(b,sizeof(b),"Code for instructor %s",
+                g_picked_instructor && g_picked_instructor->trigram[0]
+                    ? g_picked_instructor->trigram : "?");
+            lv_label_set_text(g_auth_prompt,b);
+        }
+        lv_obj_set_style_text_color(g_auth_prompt,lv_color_hex(0x0f172a),0);
+    }
+}
+
+static void _picker_key_cb(lv_event_t* e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED) return;
+    intptr_t k=(intptr_t)lv_event_get_user_data(e);
+    if(k==27){
+        if(g_picker_filter_len>0){
+            g_picker_filter_len--;
+            g_picker_filter[g_picker_filter_len]=0;
+        }
+    }else if(k>=0 && k<=25){
+        if(g_picker_filter_len < (int)sizeof(g_picker_filter)-1){
+            g_picker_filter[g_picker_filter_len++] = 'A'+(char)k;
+            g_picker_filter[g_picker_filter_len] = 0;
+        }
+    }
+    pickerUpdateFilterLabel();
+    pickerRefreshList();
+}
+
+static void _picker_pilot_cb(lv_event_t* e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED) return;
+    intptr_t idx=(intptr_t)lv_event_get_user_data(e);
+    if(idx<0 || idx>=g_pilot_cnt) return;
+    g_auth_len=0; memset(g_auth_buf,0,5);
+    if(g_auth_step==0){
+        // Picker pilote → step 1 (PIN pilote)
+        g_picked_pilot = &g_pilots[idx];
+        authUpdateDots();
+        authStepSet(1);
+        Serial.printf("[Auth] picker pilot → %s (%s)\n",
+            g_picked_pilot->name, g_picked_pilot->trigram);
+    }else if(g_auth_step==2){
+        // Picker instructeur → step 3 (PIN instructeur)
+        g_picked_instructor = &g_pilots[idx];
+        authUpdateDots();
+        authStepSet(3);
+        Serial.printf("[Auth] picker instr → %s (%s)\n",
+            g_picked_instructor->name, g_picked_instructor->trigram);
+    }
+}
+
 static const char* _authPromptText(){
+    static char buf[48];
+    if(g_auth_step==0) return "Select your name";
+    if(g_auth_step==2) return "Select your instructor";
+    if(g_auth_step==1 && g_picked_pilot && g_picked_pilot->trigram[0]){
+        snprintf(buf,sizeof(buf),"Code for %s",g_picked_pilot->trigram);
+        return buf;
+    }
+    if(g_auth_step==3 && g_picked_instructor && g_picked_instructor->trigram[0]){
+        snprintf(buf,sizeof(buf),"Code for instructor %s",g_picked_instructor->trigram);
+        return buf;
+    }
     return g_auth_p2 ? "Encode your Instructor Code" : "Encode your Pilot Code";
 }
 
@@ -898,15 +1079,26 @@ static void _authCloseOv(lv_timer_t*t){
     lv_timer_del(t);
     if(g_auth_ov){lv_obj_del(g_auth_ov);g_auth_ov=nullptr;
         g_auth_prompt=g_auth_name=g_auth_msg=g_auth_diag=nullptr;
-        for(int i=0;i<4;i++)g_auth_dots[i]=nullptr;}
+        for(int i=0;i<4;i++)g_auth_dots[i]=nullptr;
+        // Reset picker refs (les widgets sont détruits avec g_auth_ov)
+        g_picker_filter_lbl=g_picker_list=nullptr;
+        for(int i=0;i<MAX_PILOTS;i++){
+            g_picker_rows[i]=g_picker_row_trig[i]=g_picker_row_name[i]=nullptr;}
+        for(int i=0;i<27;i++) g_picker_keys[i]=nullptr;
+        for(int i=0;i<11;i++) g_keypad_btns[i]=nullptr;
+        g_picked_pilot=nullptr;
+        g_picked_instructor=nullptr;}
     if(g_session.valid){
         const char* nm=g_session.name[0]?g_session.name:"Pilote";
         showWelcome(nm, s_instr_name[0]?s_instr_name:nullptr);}}
 
 static void _authSendBLE(const char*pc,const char*ic){
     strlcpy(s_session_pc,pc,sizeof(s_session_pc));
-    PilotEntry*pe=pilotFind(pc);
-    PilotEntry*ie=(ic&&ic[0])?pilotFind(ic):nullptr;
+    // Préfère g_picked_pilot (sélection picker non ambiguë) au fallback pilotFind
+    // — sinon collision PIN ferait choisir le mauvais pilote pour la session locale.
+    PilotEntry*pe= g_picked_pilot ? g_picked_pilot : pilotFind(pc);
+    PilotEntry*ie= g_picked_instructor ? g_picked_instructor
+                  : ((ic&&ic[0])?pilotFind(ic):nullptr);
     if(ie) strlcpy(s_instr_name,ie->name,sizeof(s_instr_name));
     else   s_instr_name[0]=0;
     const char* role = pe?pe->status:"pilot";
@@ -929,36 +1121,50 @@ static void _authNextAfterPilotOk(lv_timer_t*t){
     lv_timer_del(t);_authSendBLE(g_auth_buf,nullptr);}
 static void _authNextAfterStudentOk(lv_timer_t*t){
     lv_timer_del(t);
-    g_auth_p2=true;g_auth_len=0;memset(g_auth_buf,0,5);
+    g_auth_len=0;memset(g_auth_buf,0,5);
     for(int i=0;i<4;i++){
         lv_obj_set_style_bg_opa(g_auth_dots[i],LV_OPA_TRANSP,0);
         lv_obj_set_style_bg_color(g_auth_dots[i],C_BRAND,0);
         lv_obj_set_style_border_color(g_auth_dots[i],C_BRAND,0);}
-    if(g_auth_prompt){
-        lv_label_set_text(g_auth_prompt,_authPromptText());
-        lv_obj_set_style_text_color(g_auth_prompt,lv_color_hex(0x0f172a),0);}}
+    // Pas de PIN keypad direct — on passe par le picker instructeur (step 2)
+    g_picked_instructor = nullptr;
+    authStepSet(2);
+}
 static void _authNextAfterInstructorOk(lv_timer_t*t){
     lv_timer_del(t);_authSendBLE(g_auth_scode,g_auth_buf);}
 
 void authValidate(){
     if(g_auth_len<4)return;
     if(!g_auth_p2){
-        PilotEntry*pe=pilotFind(g_auth_buf);
-        Serial.printf("[Auth] phase1 code=%s pilots=%d → %s\n",
-            g_auth_buf,g_pilot_cnt,pe?pe->name:"NOT FOUND");
-        if(!pe){authError(nullptr);return;}
+        // Phase 1 : le pilote a déjà été sélectionné via le picker.
+        // On compare directement le PIN tapé contre le code du pilote choisi
+        // — plus aucune ambiguïté de collision possible (cf. plan RGPD V1.x).
+        PilotEntry* pe = g_picked_pilot;
+        Serial.printf("[Auth] phase1 typed=%s picked=%s code=%s → %s\n",
+            g_auth_buf,
+            pe?pe->trigram:"(none)",
+            pe?pe->code:"-",
+            (pe && strcmp(g_auth_buf,pe->code)==0)?"OK":"REJECT");
+        if(!pe || strcmp(g_auth_buf,pe->code)!=0){
+            authError(nullptr);return;}
         bool isStudent = strcmp(pe->status,"student")==0;
         _authOkVisual(pe->trigram);
         if(isStudent){
-            strlcpy(g_auth_scode,g_auth_buf,5);
+            strlcpy(g_auth_scode,pe->code,5);
             lv_timer_create(_authNextAfterStudentOk,1500,nullptr);
         }else{
             lv_timer_create(_authNextAfterPilotOk,1500,nullptr);}
     }else{
-        PilotEntry*ie=pilotFind(g_auth_buf);
-        Serial.printf("[Auth] phase2 code=%s → %s (instr=%d)\n",
-            g_auth_buf,ie?ie->name:"NOT FOUND",ie?ie->is_instructor:0);
-        if(!ie || !ie->is_instructor){authError(nullptr);return;}
+        // Phase 2 (instructeur) — l'instructeur a été sélectionné via le picker.
+        // Match direct sur g_picked_instructor → plus de collision PIN possible.
+        PilotEntry* ie = g_picked_instructor;
+        Serial.printf("[Auth] phase2 typed=%s picked=%s code=%s → %s\n",
+            g_auth_buf,
+            ie?ie->trigram:"(none)",
+            ie?ie->code:"-",
+            (ie && ie->is_instructor && strcmp(g_auth_buf,ie->code)==0)?"OK":"REJECT");
+        if(!ie || !ie->is_instructor || strcmp(g_auth_buf,ie->code)!=0){
+            authError(nullptr);return;}
         _authOkVisual(ie->trigram);
         lv_timer_create(_authNextAfterInstructorOk,1500,nullptr);}}
 
@@ -969,16 +1175,33 @@ static void _auth_btn_cb(lv_event_t*e){
     }else{if(g_auth_len<4){g_auth_buf[g_auth_len++]='0'+d;g_auth_buf[g_auth_len]=0;
         authUpdateDots();if(g_auth_len==4)authValidate();}}}
 
-// Tap sur rond rempli = backspace
+// Tap sur rond rempli = backspace. Si buf vide → retour au picker correspondant.
 static void _auth_dot_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
-    if(g_auth_len>0){g_auth_len--;g_auth_buf[g_auth_len]=0;authUpdateDots();}
+    if(g_auth_len>0){
+        g_auth_len--;g_auth_buf[g_auth_len]=0;authUpdateDots();
+    }else if(g_auth_step==1){
+        // Retour au picker pilote — utile si mauvais pilote sélectionné
+        g_picked_pilot=nullptr;
+        authStepSet(0);
+    }else if(g_auth_step==3){
+        // Retour au picker instructeur
+        g_picked_instructor=nullptr;
+        authStepSet(2);
+    }
 }
 
 // Page #02 — style page plein ecran (fond blanc, logo A, keypad brand, footer)
 void mkAuthOverlay(){
     g_auth_len=0;memset(g_auth_buf,0,5);g_auth_p2=false;memset(g_auth_scode,0,5);
     s_instr_name[0]=0;
+    // Reset picker state — étape 0 par défaut, filtre vide, aucun pilote sélectionné
+    g_auth_step=0;
+    g_picked_pilot=nullptr;
+    g_picked_instructor=nullptr;
+    memset(g_picker_filter,0,sizeof(g_picker_filter));
+    g_picker_filter_len=0;
+    g_picker_last_cnt=0;
     // Full screen background blanc
     g_auth_ov=lv_obj_create(lv_scr_act());
     lv_obj_set_size(g_auth_ov,480,480);lv_obj_set_pos(g_auth_ov,0,0);
@@ -1057,7 +1280,117 @@ void mkAuthOverlay(){
         lv_obj_t*lb=lv_label_create(btn);lv_label_set_text(lb,kK[i].lbl);
         lv_obj_set_style_text_color(lb,lv_color_hex(0xffffff),0);
         lv_obj_set_style_text_font(lb,kK[i].span==1?&lv_font_montserrat_20:&lv_font_montserrat_16,0);
-        lv_obj_center(lb);}
+        lv_obj_center(lb);
+        if(i<11) g_keypad_btns[i]=btn;}
+
+    // ── PICKER (step 0) ──────────────────────────────────────────────────────
+    // Label filtre — y=95, juste sous le prompt
+    g_picker_filter_lbl = lv_label_create(g_auth_ov);
+    lv_label_set_text(g_picker_filter_lbl,"Type letters to filter");
+    lv_obj_set_style_text_color(g_picker_filter_lbl,TGREY(),0);
+    lv_obj_set_style_text_font(g_picker_filter_lbl,&lv_font_montserrat_14,0);
+    lv_obj_set_width(g_picker_filter_lbl,420);
+    lv_obj_set_style_text_align(g_picker_filter_lbl,LV_TEXT_ALIGN_CENTER,0);
+    lv_obj_align(g_picker_filter_lbl,LV_ALIGN_TOP_MID,0,115);
+
+    // Liste pilotes — container scrollable y=140..260 (h=120, ~3-4 rows visibles)
+    const int PK_LIST_X=50, PK_LIST_Y=140, PK_LIST_W=380, PK_LIST_H=120, PK_ROW_H=32;
+    g_picker_list = lv_obj_create(g_auth_ov);
+    lv_obj_set_size(g_picker_list,PK_LIST_W,PK_LIST_H);
+    lv_obj_set_pos(g_picker_list,PK_LIST_X,PK_LIST_Y);
+    lv_obj_set_style_bg_color(g_picker_list,lv_color_hex(0xf3f4f6),0);
+    lv_obj_set_style_bg_opa(g_picker_list,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(g_picker_list,C_BRAND,0);
+    lv_obj_set_style_border_width(g_picker_list,1,0);
+    lv_obj_set_style_radius(g_picker_list,6,0);
+    lv_obj_set_style_pad_all(g_picker_list,4,0);
+    lv_obj_set_scroll_dir(g_picker_list,LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(g_picker_list,LV_SCROLLBAR_MODE_AUTO);
+
+    // Pré-création de MAX_PILOTS rows. pickerRefreshList() les peuplera/cachera.
+    for(int i=0;i<MAX_PILOTS;i++){
+        lv_obj_t* row = lv_btn_create(g_picker_list);
+        lv_obj_set_size(row,PK_LIST_W-16,PK_ROW_H-2);
+        lv_obj_set_pos(row,0,i*PK_ROW_H);
+        lv_obj_set_style_bg_color(row,lv_color_hex(0xffffff),0);
+        lv_obj_set_style_bg_color(row,lv_color_hex(0xe5e7eb),LV_STATE_PRESSED);
+        lv_obj_set_style_bg_opa(row,LV_OPA_COVER,0);
+        lv_obj_set_style_border_width(row,0,0);
+        lv_obj_set_style_radius(row,4,0);
+        lv_obj_set_style_shadow_opa(row,LV_OPA_TRANSP,0);
+        lv_obj_set_style_pad_all(row,2,0);
+        lv_obj_add_event_cb(row,_picker_pilot_cb,LV_EVENT_CLICKED,(void*)(intptr_t)i);
+        lv_obj_add_flag(row,LV_OBJ_FLAG_HIDDEN);  // visible si pickerRefreshList valide
+        // Trigramme à gauche (bold via Montserrat 16 brand color)
+        lv_obj_t* tl = lv_label_create(row);
+        lv_label_set_text(tl,"");
+        lv_obj_set_style_text_color(tl,C_BRAND,0);
+        lv_obj_set_style_text_font(tl,&lv_font_montserrat_16,0);
+        lv_obj_set_pos(tl,4,4);
+        // Nom à droite
+        lv_obj_t* nl = lv_label_create(row);
+        lv_label_set_text(nl,"");
+        lv_obj_set_style_text_color(nl,lv_color_hex(0x0f172a),0);
+        lv_obj_set_style_text_font(nl,&lv_font_montserrat_14,0);
+        lv_obj_set_pos(nl,60,6);
+        g_picker_rows[i]     = row;
+        g_picker_row_trig[i] = tl;
+        g_picker_row_name[i] = nl;
+    }
+
+    // Clavier alpha — 3 rangées 9/9/(8+⌫), conçu pour rester inscrit dans
+    // l'écran rond 480×480 (largeur dispo ≈ 378 px à y=388, on cible 352 max).
+    const int KEY_W=36, KEY_H=38, KEY_G=2;
+    const int BS_W=48;
+    const int ROW_Y0=270;
+    static const char kAlpha1[] = "ABCDEFGHI";
+    static const char kAlpha2[] = "JKLMNOPQR";
+    static const char kAlpha3[] = "STUVWXYZ";
+    auto mkAlphaKey = [&](const char* lbl,int x,int y,int w,intptr_t val){
+        lv_obj_t* btn = lv_btn_create(g_auth_ov);
+        lv_obj_set_size(btn,w,KEY_H);
+        lv_obj_set_pos(btn,x,y);
+        lv_obj_set_style_bg_color(btn,C_BRAND,0);
+        lv_obj_set_style_bg_color(btn,lv_color_hex(0x5a7a99),LV_STATE_PRESSED);
+        lv_obj_set_style_bg_opa(btn,LV_OPA_COVER,0);
+        lv_obj_set_style_radius(btn,6,0);
+        lv_obj_set_style_shadow_opa(btn,LV_OPA_TRANSP,0);
+        lv_obj_set_style_border_width(btn,0,0);
+        lv_obj_set_style_pad_all(btn,0,0);
+        lv_obj_add_event_cb(btn,_picker_key_cb,LV_EVENT_CLICKED,(void*)val);
+        lv_obj_t* l = lv_label_create(btn);
+        lv_label_set_text(l,lbl);
+        lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+        lv_obj_set_style_text_font(l,&lv_font_montserrat_16,0);
+        lv_obj_center(l);
+        return btn;
+    };
+    // Placer une rangée centrée horizontalement (largeur calculée auto)
+    auto placeRow = [&](const char* letters, int n, int y){
+        int total = n*KEY_W + (n-1)*KEY_G;
+        int x = (480 - total) / 2;
+        for(int i=0;i<n;i++){
+            char s[2]={letters[i],0};
+            g_picker_keys[(int)(letters[i]-'A')] = mkAlphaKey(s,
+                x+i*(KEY_W+KEY_G), y, KEY_W, letters[i]-'A');
+        }
+    };
+    placeRow(kAlpha1, 9, ROW_Y0);
+    placeRow(kAlpha2, 9, ROW_Y0 + (KEY_H+KEY_G));
+    // Rangée 3 : 8 lettres + backspace (large) — centré
+    {
+        int n=8;
+        int total = n*KEY_W + BS_W + n*KEY_G;
+        int x = (480 - total) / 2;
+        int y = ROW_Y0 + 2*(KEY_H+KEY_G);
+        for(int i=0;i<n;i++){
+            char s[2]={kAlpha3[i],0};
+            g_picker_keys[(int)(kAlpha3[i]-'A')] = mkAlphaKey(s,
+                x+i*(KEY_W+KEY_G), y, KEY_W, kAlpha3[i]-'A');
+        }
+        g_picker_keys[26] = mkAlphaKey(LV_SYMBOL_BACKSPACE,
+            x+n*(KEY_W+KEY_G), y, BS_W, 27);
+    }
 
     // Footer : batterie + version (cohérent avec page #01)
     char bbuf[40];
@@ -1067,6 +1400,11 @@ void mkAuthOverlay(){
         snprintf(bbuf,sizeof(bbuf),"Battery AT-CORE : ---%%");
     mkLbl(g_auth_ov,bbuf,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,418);
     mkLbl(g_auth_ov,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
+
+    // Étape initiale = PICK : montre filtre + liste + clavier alpha, cache PIN
+    pickerRefreshList();
+    pickerUpdateFilterLabel();
+    authStepSet(0);
 }
 
 // ── Upload progress overlay (tâche F) ────────────────────────────────────────
@@ -2038,6 +2376,11 @@ void updateAllPages(){
             snprintf(dbg,sizeof(dbg),"DB Firebase non chargee");
         lv_label_set_text(g_auth_diag,dbg);
         lv_obj_set_style_text_color(g_auth_diag,g_pilot_cnt>0?TGREY():C_RED,0);
+    }
+    // Si le picker est ouvert et la DB pilots vient d'évoluer, repeupler la liste.
+    if(g_auth_ov && g_auth_step==0 && g_picker_list
+       && g_pilot_cnt != g_picker_last_cnt){
+        pickerRefreshList();
     }
     // Page 0 — checks live + batterie AT-CORE
     {
