@@ -684,6 +684,14 @@ void buildStatusPage(){
     lv_img_set_src(lVw,&img_logo_atview);          // 110×22 source
     lv_img_set_zoom(lVw,320);                      // ×1.25 → ~137×27
     lv_obj_align(lVw,LV_ALIGN_TOP_MID,0,70);
+    // Long-press 1.5s sur ce logo = oublie pair BLE + reboot. Même geste
+    // qu'en page Settings (logo footer). Critique ici : c'est le SEUL moyen
+    // de sortir d'un blocage "Scanning BLE…" quand la MAC stockée pointe
+    // vers une carte AT-CORE absente (swap hardware) — Settings inaccessible
+    // sans connexion BLE. Action explicite utilisateur, pas d'auto-pair
+    // dangereux qui risquerait de se connecter au mauvais AT-CORE voisin.
+    lv_obj_add_flag(lVw,LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(lVw,_cbForgetPair,LV_EVENT_LONG_PRESSED,NULL);
 
     lv_obj_t*lAt=lv_img_create(p);
     lv_img_set_src(lAt,&img_logo_aerotrace);       // 240×50 source
