@@ -515,7 +515,21 @@ class ATCAdv:public BLEAdvertisedDeviceCallbacks{
         String nm=dev.getName().c_str();
         if(!nm.startsWith("ATCORE-"))return;
         if(g_paired_mac[0]!=0){
-            if(dev.getAddress().toString()!=std::string(g_paired_mac))return;}
+            if(dev.getAddress().toString()!=std::string(g_paired_mac)){
+                // Fallback auto-recovery : si la MAC stockée n'est pas trouvée
+                // dans les 30s qui suivent le 1er scan (= changement de carte
+                // AT-CORE, ancienne hors-ligne ou hardware swap), on tombe sur
+                // un scan général et on accepte le 1er ATCORE- trouvé. La
+                // nouvelle MAC est ensuite persistée par connectBLE() via
+                // unitSaveMac(). Évite le catch-22 "pour reset pair, faut
+                // Settings ; pour Settings, faut connexion BLE".
+                static uint32_t s_pair_search_t0=0;
+                if(s_pair_search_t0==0)s_pair_search_t0=millis();
+                if(millis()-s_pair_search_t0<30000)return;
+                Serial.println("[BLE] MAC stockée introuvable >30s — fallback scan général");
+                g_paired_mac[0]=0;
+            }
+        }
         BLEDevice::getScan()->stop();
         g_target=new BLEAdvertisedDevice(dev);g_doConnect=true;}};
 bool connectBLE(){
