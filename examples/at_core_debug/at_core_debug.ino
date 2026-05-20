@@ -630,6 +630,21 @@ void unitSaveMac(const char*mac){
     strlcpy(g_paired_mac,mac,sizeof(g_paired_mac));
     Preferences p;p.begin("unit",false);p.putString("paired_mac",mac);p.end();}
 
+// Efface la MAC AT-CORE pairée du NVS et de la RAM. À utiliser quand on
+// change de carte AT-CORE (la MAC du nouveau hardware diffère). Sans ça
+// le filtre ligne 517 rejette tous les devices sauf l'ancienne MAC.
+// Déclenché par long-press sur le logo AT-VIEW dans la page Settings.
+void unitForgetMac(){
+    g_paired_mac[0]=0;
+    Preferences p;p.begin("unit",false);p.remove("paired_mac");p.end();
+    Serial.println("[BLE] Pair AT-CORE oublié — reboot");}
+
+// Callback long-press logo AT-VIEW = oublie la pair BLE + reboot.
+static void _cbForgetPair(lv_event_t*e){
+    unitForgetMac();
+    delay(500);
+    ESP.restart();}
+
 // ── Forward declarations ──────────────────────────────────────────────────────
 void buildStatusPage();
 void buildRadarPage();
@@ -2265,6 +2280,11 @@ void buildSettingsPage(){
     lv_obj_t*lVw=lv_img_create(p);
     lv_img_set_src(lVw,&img_logo_atview);
     lv_obj_align(lVw,LV_ALIGN_TOP_MID,0,422);
+    // Long-press logo AT-VIEW = oublie la pair BLE AT-CORE + reboot.
+    // Utile quand on change de carte AT-CORE (MAC différente du nouveau
+    // hardware, le filtre par MAC bloque sinon).
+    lv_obj_add_flag(lVw,LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(lVw,_cbForgetPair,LV_EVENT_LONG_PRESSED,NULL);
     r_p2_bat=mkLbl(p,"Battery AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,448);
     lv_obj_t*ver=mkLbl(p,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,464);
     lv_obj_add_flag(ver,LV_OBJ_FLAG_CLICKABLE);
