@@ -4,12 +4,33 @@
 
 | Composant | Détail |
 |-----------|--------|
-| Board | LilyGo T-RGB 2.8" circular |
+| Board | LilyGo T-RGB circular — **2.1" full-circle** ou **2.8"** (variantes interchangeables) |
 | SoC | ESP32-S3 (WiFi 2.4GHz intégré) |
-| Écran | 480×480 px circulaire, RGB panel |
-| Touch | Capacitif intégré |
+| Écran | 480×480 px circulaire, RGB panel (ST7701) |
+| Touch | Capacitif intégré — auto-détecté : CST820 (2.1"FC) / GT911 (2.8") / FT3267 (2.1"HC) |
 | SD | Slot natif SD_MMC (SDIO 1-bit) — EN=7, SCK=39, CMD=40, DAT=38 |
 | BLE | Client — se connecte à AT-CORE (NimBLE) |
+
+### Variantes T-RGB supportées
+
+Pinout identique entre toutes les variantes (`src/utilities.h`). `panel.begin()` sans
+arguments fait l'auto-détection via le contrôleur tactile (testé 2026-05-20 : flash
+2.8" → 2.1" full-circle sans changement de code, run nominal).
+
+| Variante | Touch chip | Init panneau | Auto-détection |
+|---|---|---|---|
+| 2.1" half-circle | FT3267 | `st7701_2_1_inches` | ✅ |
+| 2.1" full-circle | CST820 | `st7701_2_1_inches` | ✅ |
+| 2.8" full-circle | GT911  | `st7701_2_8_inches` | ✅ |
+| 2.1" half-circle V2 | (idem FT3267) | `st7701_2_1_inches_rev2` | ❌ requiert `panel.begin(LILYGO_T_RGB_2_1_INCHES_HALF_CIRCLE_V2)` |
+| 2.1" full-circle V2 | (idem CST820) | `st7701_2_1_inches_rev2` | ❌ requiert `panel.begin(LILYGO_T_RGB_2_1_INCHES_FULL_CIRCLE_V2)` |
+
+Si écran blanc / couleurs cassées au boot après changement matériel → c'est probablement une révision V2,
+passer le type explicite dans l'appel `panel.begin()` au setup. Si rouge↔bleu inversés → ajouter
+`LILYGO_T_RGB_ORDER_BGR` en second argument.
+
+Note ergonomique : à résolution identique (480×480), le 2.1" a un DPI plus élevé. L'UI reste lisible
+mais les cibles tactiles (boutons `<` / `>` 30×22 px, dots PIN Ø22) deviennent plus petites en mm.
 
 ## Fichier principal
 
