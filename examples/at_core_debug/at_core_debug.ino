@@ -553,9 +553,13 @@ void switchPage(uint8_t np){
     g_page=np;lv_obj_clear_flag(g_pages[g_page],LV_OBJ_FLAG_HIDDEN);}
 
 static lv_coord_t g_swipe_sx=-1, g_swipe_lx=0, g_swipe_sy=0, g_swipe_ly=0;
+// Vrai pendant le drag du slider brightness — bloque le swipe horizontal
+// qui sinon déclencherait une navigation de page parasite.
+static bool g_bright_drag=false;
 static void swipeCb(lv_event_t*e){
     // Bloque la navigation tant que l'auth code n'est pas valide
     if(g_auth_ov)return;
+    if(g_bright_drag)return;
     lv_event_code_t code=lv_event_get_code(e);
     lv_indev_t*indev=lv_indev_get_act();if(!indev)return;
     lv_point_t pt;lv_indev_get_point(indev,&pt);
@@ -589,7 +593,8 @@ static void cbDebugLongPress(lv_event_t*e){
 void cfgLoad(){
     g_prefs.begin("atview",true);
     g_cfg.scale_nm  =g_prefs.getUChar("scale",4);
-    g_cfg.brightness=g_prefs.getUChar("bright",16);
+    // brightness = niveau hardware 0-16 (clé bright_lv, défaut 16=max)
+    {uint8_t bl=g_prefs.getUChar("bright_lv",16); if(bl>16)bl=16; g_cfg.brightness=bl;}
     g_cfg.trf_src   =g_prefs.getUChar("trf_src",3);
     g_cfg.dist_nm   =g_prefs.getBool("dist_nm",true);
     g_cfg.alt_ft    =g_prefs.getBool("alt_ft",true);
@@ -606,7 +611,7 @@ void cfgLoad(){
 void cfgSave(){
     g_prefs.begin("atview",false);
     g_prefs.putUChar("scale",g_cfg.scale_nm);
-    g_prefs.putUChar("bright",g_cfg.brightness);
+    g_prefs.putUChar("bright_lv",g_cfg.brightness);
     g_prefs.putUChar("trf_src",g_cfg.trf_src);
     g_prefs.putBool("dist_nm",g_cfg.dist_nm);
     g_prefs.putBool("alt_ft",g_cfg.alt_ft);
@@ -2137,7 +2142,7 @@ void updSetPage(){
     lv_label_set_text(s_dist_v, g_cfg.dist_nm?"NM":"km");
     lv_label_set_text(s_alt_v,  g_cfg.alt_ft?"ft":"m");
     if(s_spd_v)lv_label_set_text(s_spd_v, g_cfg.spd_kt?"kt":"km/h");
-    snprintf(b,16,"%d",g_cfg.brightness); lv_label_set_text(s_bright_v,b);
+    snprintf(b,16,"%d/16",g_cfg.brightness); lv_label_set_text(s_bright_v,b);
     lv_label_set_text(s_src_v,  kSrcNames[g_cfg.trf_src&3]);
     lv_label_set_text(s_grnd_v, g_cfg.show_grnd?"ON":"OFF");
     lv_label_set_text(s_theme_v,g_cfg.dark?"DARK":"LIGHT");
@@ -2159,8 +2164,7 @@ static void cbSetBtn(lv_event_t*e){
         case 3:g_cfg.vfilt_ft=min((int)g_cfg.vfilt_ft+500,5000);break;
         case 4:case 5:g_cfg.dist_nm=!g_cfg.dist_nm;break;
         case 6:case 7:g_cfg.alt_ft=!g_cfg.alt_ft;break;
-        case 8:g_cfg.brightness=max((int)g_cfg.brightness-16,4);break;
-        case 9:g_cfg.brightness=min((int)g_cfg.brightness+16,255);break;
+        // IDs 8/9 (anciens boutons brightness < / >) remplacés par le slider
         case 10:g_cfg.trf_src=(g_cfg.trf_src+3)%4;break;
         case 11:g_cfg.trf_src=(g_cfg.trf_src+1)%4;break;
         case 14:case 15:g_cfg.show_grnd=!g_cfg.show_grnd;break;
@@ -2227,6 +2231,41 @@ static lv_obj_t* mkSetRowBtn(lv_obj_t*p,const char*k,int y,const char*v,lv_event
     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);
     return vl;}
 
+// Callback du slider brightness — live update du label + panneau, save NVS au release.
+// Driver LilyGo : 16 niveaux de backlight (cf. LilyGo_RGBPanel::setBrightness),
+// donc le slider est calé sur l'échelle hardware 0-16 directement (pas de mapping).
+static void cbBrightSlider(lv_event_t*e){
+    lv_event_code_t code=lv_event_get_code(e);
+    if(code==LV_EVENT_PRESSED){g_bright_drag=true;return;}
+    if(code==LV_EVENT_RELEASED||code==LV_EVENT_PRESS_LOST){g_bright_drag=false;cfgSave();return;}
+    if(code!=LV_EVENT_VALUE_CHANGED)return;
+    lv_obj_t*sl=lv_event_get_target(e);
+    int v=lv_slider_get_value(sl); if(v<0)v=0; if(v>16)v=16;
+    g_cfg.brightness=(uint8_t)v;
+    panel.setBrightness(g_cfg.brightness);
+    if(s_bright_v){char b[8];snprintf(b,8,"%d/16",v);lv_label_set_text(s_bright_v,b);}
+}
+
+// Row slider brightness — remplace les boutons < / > par un curseur 0-16 niveaux
+static lv_obj_t* mkSetSliderRow(lv_obj_t*p,const char*k,int y,uint8_t val){
+    mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_14,55,y);
+    char b[8]; snprintf(b,8,"%d/16",val);
+    lv_obj_t*vl=mkLblP(p,b,C_BRAND,&lv_font_montserrat_14,180,y);
+    lv_obj_t*sl=lv_slider_create(p);
+    lv_obj_set_size(sl,135,10);
+    lv_obj_set_pos(sl,225,y+5);
+    lv_slider_set_range(sl,0,16);
+    lv_slider_set_value(sl,val,LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(sl,lv_color_hex(0xe5e7eb),LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(sl,LV_OPA_COVER,LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sl,C_BRAND,LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(sl,LV_OPA_COVER,LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(sl,C_BRAND,LV_PART_KNOB);
+    lv_obj_set_style_pad_all(sl,4,LV_PART_KNOB);
+    lv_obj_add_event_cb(sl,cbBrightSlider,LV_EVENT_ALL,NULL);
+    return vl;
+}
+
 void buildSettingsPage(){
     lv_obj_t*p=g_pages[2]; char b[16];
     s_pg_idx=0;
@@ -2261,7 +2300,7 @@ void buildSettingsPage(){
     s_alt_v =mkSetRow(sp,"ALT", 114,g_cfg.alt_ft?"ft":"m",6,7);
     s_spd_v =mkSetRow(sp,"SPEED",140,g_cfg.spd_kt?"kt":"km/h",24,25);
     mkSetSection(sp,"DISPLAY",172);
-    snprintf(b,16,"%d",g_cfg.brightness); s_bright_v=mkSetRow(sp,"BRIGHTNESS",208,b,8,9);
+    s_bright_v=mkSetSliderRow(sp,"BRIGHTNESS",208,g_cfg.brightness);
     s_theme_v=mkSetRow(sp,"THEME",234,g_cfg.dark?"DARK":"LIGHT",12,13);}
 
     // ── Sub-page 1: TRAFFIC + SYSTEM ─────────────────────────────────────────
