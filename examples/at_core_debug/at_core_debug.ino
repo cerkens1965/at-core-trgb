@@ -35,6 +35,11 @@ LilyGo_RGBPanel panel;
 #define BLE_CHR_AUTH    "6E400007-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_PILOTS  "6E400008-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_CONFIG  "6E400009-B5A3-F393-E0A9-E50E24DCCA9E"
+// ── Bypass auth pilote (temporaire) ───────────────────────────────────────────
+// 1 = on saute la page #02 "Select your name" / #03 welcome : dès que la machine
+// est appairée (BLE) + GPS fix, on file direct au radar. L'appairage machine
+// (MAC AT-CORE en NVS) reste inchangé. Repasser à 0 pour réactiver l'auth pilote.
+#define BYPASS_PILOT_AUTH 1
 // BLE identity — loaded from NVS namespace "unit" at boot
 static char g_unit_name[24]   = "ATVIEW-EBBY1-01";
 static char g_paired_mac[18]  = "";              // empty = connect to first ATCORE- found
@@ -1893,6 +1898,12 @@ static inline bool latlon_to_screen(int32_t lat_e6,int32_t lon_e6,
     sx=(int)(RAD_CX+sinf(brd)*dpx);sy=(int)(RAD_CY-cosf(brd)*dpx);
     return true;}
 
+// Cap effectif du radar : north-up auto à l'arrêt. Sous RADAR_STILL_KMH le cap
+// GPS (course over ground) n'est pas calculable → on verrouille la rose ET les
+// icônes/AIP sur le nord (0°). En mouvement, vrai cap GPS → heading-up.
+#define RADAR_STILL_KMH 5
+static inline int radarEffHdg(){ return (g_status.spd < RADAR_STILL_KMH) ? 0 : (int)g_status.hdg; }
+
 static void aipDrawCb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_DRAW_MAIN_END)return;
     if(!g_cfg.aip_en||!g_aip_loaded||!g_status.valid||!g_status.gps_fix)return;
@@ -1905,7 +1916,7 @@ static void aipDrawCb(lv_event_t*e){
     float own_lat=g_status.lat,own_lon=g_status.lon;
     float cos_lat=cosf(own_lat*(float)M_PI/180.0f);
     float scale_m=(float)g_cfg.scale_nm*1852.0f;
-    int   hdg=g_status.hdg;
+    int   hdg=radarEffHdg();   // north-up auto à l'arrêt, cohérent avec le trafic
     // CTR polygons
     lv_draw_line_dsc_t ctr_d,atz_d;
     lv_draw_line_dsc_init(&ctr_d);
@@ -1981,15 +1992,15 @@ void buildRadarPage(){
     // Outer ring
     lv_obj_t*ro=lv_obj_create(p);lv_obj_set_size(ro,RAD_R*2,RAD_R*2);
     lv_obj_set_pos(ro,RAD_CX-RAD_R,RAD_CY-RAD_R);lv_obj_set_style_radius(ro,LV_RADIUS_CIRCLE,0);
-    lv_obj_set_style_bg_opa(ro,LV_OPA_TRANSP,0);lv_obj_set_style_border_color(ro,TRING(),0);
-    lv_obj_set_style_border_width(ro,2,0);lv_obj_set_style_shadow_opa(ro,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_opa(ro,LV_OPA_TRANSP,0);lv_obj_set_style_border_color(ro,TFG(),0);
+    lv_obj_set_style_border_width(ro,1,0);lv_obj_set_style_shadow_opa(ro,LV_OPA_TRANSP,0);
     lv_obj_set_style_pad_all(ro,0,0);lv_obj_clear_flag(ro,LV_OBJ_FLAG_SCROLLABLE);
 
     // Inner ring (half scale)
     lv_obj_t*ri=lv_obj_create(p);lv_obj_set_size(ri,RAD_R,RAD_R);
     lv_obj_set_pos(ri,RAD_CX-RAD_R/2,RAD_CY-RAD_R/2);lv_obj_set_style_radius(ri,LV_RADIUS_CIRCLE,0);
-    lv_obj_set_style_bg_opa(ri,LV_OPA_TRANSP,0);lv_obj_set_style_border_color(ri,TRING(),0);
-    lv_obj_set_style_border_width(ri,2,0);lv_obj_set_style_shadow_opa(ri,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_opa(ri,LV_OPA_TRANSP,0);lv_obj_set_style_border_color(ri,TFG(),0);
+    lv_obj_set_style_border_width(ri,1,0);lv_obj_set_style_shadow_opa(ri,LV_OPA_TRANSP,0);
     lv_obj_set_style_pad_all(ri,0,0);lv_obj_clear_flag(ri,LV_OBJ_FLAG_SCROLLABLE);
 
     // Tick marks — cardinal (every 90°) longer and brighter
@@ -2002,7 +2013,7 @@ void buildRadarPage(){
         tick_pts[t][1].x=(lv_coord_t)(RAD_CX+sinf(a)*(float)RAD_R);
         tick_pts[t][1].y=(lv_coord_t)(RAD_CY-cosf(a)*(float)RAD_R);
         lv_obj_t*tm=lv_line_create(p);lv_line_set_points(tm,tick_pts[t],2);
-        lv_obj_set_style_line_color(tm,(t%3==0)?TFG():TRING(),0);
+        lv_obj_set_style_line_color(tm,TFG(),0);
         lv_obj_set_style_line_width(tm,(t%3==0)?2:1,0);}
 
     // Cross lines (faint grid)
@@ -2024,7 +2035,7 @@ void buildRadarPage(){
         r_card[ci]=lv_label_create(p);
         lv_label_set_text(r_card[ci],cnames[ci]);
         lv_obj_set_style_text_font(r_card[ci],&lv_font_montserrat_14,0);
-        lv_obj_set_style_text_color(r_card[ci],ci==0?TFG():TRING(),0);
+        lv_obj_set_style_text_color(r_card[ci],TFG(),0);
         lv_obj_set_pos(r_card[ci],RAD_CX-5,RAD_CY-(RAD_R-24)-8);}
 
     // Scale label — entre le S de la rose et la GS (ordre : S → 4nm → GS XXkt)
@@ -2048,8 +2059,10 @@ void buildRadarPage(){
         lv_obj_center(lab);
         lv_obj_add_event_cb(b,cbSetBtn,LV_EVENT_CLICKED,(void*)id);
     };
-    mkZoomBtn("-",-55,0);
-    mkZoomBtn("+", 55,1);
+    // id 0 = nm-- (zoom IN), id 1 = nm++ (zoom OUT). On mappe "+" sur le zoom IN
+    // (pousser + = se rapprocher) et "-" sur le zoom OUT. Settings SCALE inchangé.
+    mkZoomBtn("-",-55,1);
+    mkZoomBtn("+", 55,0);
 
     // AIP overlay — transparent layer between grid and traffic icons
     r_aip_layer=lv_obj_create(p);
@@ -2110,7 +2123,7 @@ void buildRadarPage(){
         lv_obj_set_style_shadow_opa(r_trf_img[i],LV_OPA_TRANSP,0);
         lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);
         r_trf_vect[i]=lv_line_create(p);lv_line_set_points(r_trf_vect[i],r_vect_pts[i],2);
-        lv_obj_set_style_line_color(r_trf_vect[i],C_AMBER,0);lv_obj_set_style_line_width(r_trf_vect[i],2,0);
+        lv_obj_set_style_line_color(r_trf_vect[i],TFG(),0);lv_obj_set_style_line_width(r_trf_vect[i],1,0);
         lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
         r_radar_cs[i]=lv_label_create(p);lv_label_set_text(r_radar_cs[i],"");
         lv_obj_set_style_text_font(r_radar_cs[i],&lv_font_montserrat_14,0);
@@ -2362,13 +2375,14 @@ void createSwipeHandlers(){
     lv_obj_add_event_cb(g_dbgPage,swipeCb,LV_EVENT_ALL,NULL);}
 
 // ── Dead reckoning — radar blips (called every loop for smooth movement) ──────
-// Both g_status.spd and spd_kt in knots → multiply by 0.5144 to get m/s.
+// Traffic e.spd_kt = knots (AT-CORE clé "s"). Own g_status.spd = km/h (AT-CORE
+// clé "spd" = kt*1.852). Donc conversions différentes : own /3.6, trafic *0.5144.
 // Capped at 10s to avoid runaway extrapolation on BLE dropout.
 void updateRadarDR(){
     if(!g_traffic.valid||!g_status.valid)return;
     float dt=fminf((float)(millis()-g_traffic.recv_ms)/1000.0f,10.0f);
-    float our_spd_ms=(float)g_status.spd*0.5144f;
-    float our_rad=(float)g_status.hdg*(float)M_PI/180.0f;
+    float our_spd_ms=(float)g_status.spd/3.6f;   // km/h → m/s (own, pas knots)
+    float our_rad=(float)radarEffHdg()*(float)M_PI/180.0f;
     float our_dx=our_spd_ms*dt*sinf(our_rad);
     float our_dy=our_spd_ms*dt*cosf(our_rad);
     char b[32];
@@ -2397,28 +2411,36 @@ void updateRadarDR(){
             float dr_bear=atan2f(ex,ny)*180.0f/(float)M_PI;
             if(dr_bear<0.0f)dr_bear+=360.0f;
             // Heading-up projection on screen
-            int rb=((int)dr_bear-g_status.hdg+360)%360;
+            int rb=((int)dr_bear-radarEffHdg()+360)%360;
             float brd=(float)rb*(float)M_PI/180.0f;
             float dpx=fminf(dr_dist*(float)RAD_R/scale_m,(float)(RAD_R-8));
             int sx=(int)(RAD_CX+sinf(brd)*dpx);
             int sy=(int)(RAD_CY-cosf(brd)*dpx);
-            int rel_hdg=((e.hdg_deg-g_status.hdg)%360+360)%360;
+            int rel_hdg=((e.hdg_deg-radarEffHdg())%360+360)%360;
             float hr=(float)rel_hdg*(float)M_PI/180.0f;
             float cs=cosf(hr),sn=sinf(hr);
             lv_color_t col=dr_dist<1000?C_RED:dr_dist<3000?C_AMBER:TFG();
             if(e.type!=r_trf_last_type[i]){
                 lv_img_set_src(r_trf_img[i],getAircraftIcon(e.type));
                 r_trf_last_type[i]=e.type;}
-            int ih=kIconHalf[g_cfg.icon_sz];
-            lv_obj_set_pos(r_trf_img[i],sx-ih,sy-ih);
+            // Objet img = 48px, pivot (24,24). On centre TOUJOURS sur (sx,sy) via -24
+            // (sinon en taille S/M le centre visuel dérive et le trait paraît décalé).
+            lv_obj_set_pos(r_trf_img[i],sx-24,sy-24);
+            // set_angle (sens horaire) aligne le nez de l'art nord-up sur +rel_hdg,
+            // cohérent avec la trigo écran du vecteur vitesse (même rel_hdg).
             lv_img_set_angle(r_trf_img[i],(int16_t)(rel_hdg*10));
             lv_obj_set_style_img_recolor(r_trf_img[i],col,0);
             lv_obj_clear_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);
             float px_per_nm=(float)RAD_R/(float)g_cfg.scale_nm;
             float vect_px=fmaxf(6.f,fminf((float)e.spd_kt/60.0f*px_per_nm,35.f));
-            float fih=(float)ih;
-            r_vect_pts[i][0]={(lv_coord_t)(sx+(int)(fih*sn)),(lv_coord_t)(sy-(int)(fih*cs))};
-            r_vect_pts[i][1]={(lv_coord_t)(sx+(int)((fih+vect_px)*sn)),(lv_coord_t)(sy-(int)((fih+vect_px)*cs))};
+            // Trait fin partant juste DEVANT l'avion (≈ nez = 0.5*demi-icône) pour ne
+            // pas se superposer au SVG. Bout = position dans 1 min (vect_px mesuré depuis
+            // le CENTRE → distance impérativement = 1 min). pos(0,0) = coords absolues.
+            int ih=kIconHalf[g_cfg.icon_sz];
+            float nose_r=(float)ih*0.5f;
+            r_vect_pts[i][0]={(lv_coord_t)(sx+(int)(nose_r*sn)),(lv_coord_t)(sy-(int)(nose_r*cs))};
+            r_vect_pts[i][1]={(lv_coord_t)(sx+(int)(vect_px*sn)),(lv_coord_t)(sy-(int)(vect_px*cs))};
+            lv_obj_set_pos(r_trf_vect[i],0,0);
             lv_line_set_points(r_trf_vect[i],r_vect_pts[i],2);
             lv_obj_clear_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_pos(r_radar_cs[i],sx+12,sy-8);lv_label_set_text(r_radar_cs[i],e.cs);
@@ -2546,7 +2568,7 @@ void updateAllPages(){
        if(bat<0){
           // Pas de données — symbole charge grisé
           lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);SET_PILL_TXT(r_hdr_bat,false);
-      }else if(!g_status.charging){
+      }else if(g_status.charging){
           // En charge (USB) — éclair seul, actif/bright
           lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);SET_PILL_TXT(r_hdr_bat,true);
       }else{
@@ -2559,30 +2581,31 @@ void updateAllPages(){
      }
     // Auth popup — attendre BLE conn + STATUS valid + min 2s (laisser voir progression #01)
     // Fallback : 10s apres connexion meme si STATUS n'arrive pas
+#if !BYPASS_PILOT_AUTH
     if(!g_authShown&&!g_auth_ov&&!g_session.valid&&g_connected&&g_connect_ms){
         uint32_t elapsed = millis() - g_connect_ms;
         bool ready = (g_status.valid && elapsed > 2000) || (elapsed > 10000);
         if(ready){g_authShown=true;mkAuthOverlay();}
     }
+#endif
     // Auto-navigate to radar once BLE+GPS ready (one-shot per connection)
     if(!g_autoNavDone&&g_connected&&g_status.valid&&g_status.gps_fix&&g_page==0){
         g_autoNavDone=true;g_navPending=true;g_navPage=1;}
-    // Radar — cap GPS heading-up + rotation cardinaux N/E/S/W
-    // ⚠ TEST EN COURS : cap GPS valide uniquement en mouvement (>15 km/h).
-    // À l'arrêt AT-CORE envoie hdg=0 (track over ground non calculable).
-    // Si le cap reste bloqué à 0° en mouvement → vérifier que AT-CORE
-    // envoie bien g_status.hdg != 0 via le champ "hdg" du JSON STATUS.
-    // Évolution possible : ajouter un magnétomètre côté AT-CORE pour
-    // un cap indépendant de la vitesse (cap magnétique vs cap sol).
+    // Radar — heading-up en mouvement, north-up auto à l'arrêt (radarEffHdg()).
+    // Le cap GPS (course over ground) n'est pas calculable sous RADAR_STILL_KMH :
+    // on verrouille alors la rose au nord et la pill affiche "N".
+    // Évolution possible : magnétomètre côté AT-CORE pour un cap indépendant
+    // de la vitesse (cap magnétique vs cap sol).
     if(g_status.valid){
-        snprintf(b,32,"%d°",g_status.hdg);lv_label_set_text(r_radar_hdg,b);
+        if(g_status.spd < RADAR_STILL_KMH) lv_label_set_text(r_radar_hdg,"N " LV_SYMBOL_UP);
+        else { snprintf(b,32,"%d°",g_status.hdg);lv_label_set_text(r_radar_hdg,b); }
         if(r_radar_gs){
             if(g_cfg.spd_kt) snprintf(b,32,"GS %dkt",g_status.spd);
             else             snprintf(b,32,"GS %dkm/h",(int)((float)g_status.spd*1.852f+0.5f));
             lv_label_set_text(r_radar_gs,b);}
         const int cbear[]={0,90,180,270};
         for(int ci=0;ci<4;ci++){
-            int rel=((cbear[ci]-g_status.hdg)%360+360)%360;
+            int rel=((cbear[ci]-radarEffHdg())%360+360)%360;
             float ra=(float)rel*(float)M_PI/180.0f;
             int r_inner=RAD_R-24;
             int cx=(int)(RAD_CX+sinf(ra)*(float)r_inner)-5;
