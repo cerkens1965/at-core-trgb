@@ -282,6 +282,7 @@ static lv_obj_t* g_ac_disp     = nullptr;
 static lv_obj_t* g_ac_hdr_reg  = nullptr;
 static lv_obj_t* g_ac_hdr_typ  = nullptr;
 static lv_obj_t* g_ac_hdr_hex  = nullptr;
+static lv_obj_t* g_p0_acid     = nullptr;   // page 0 : ligne identité sous logo AEROTRACE
 static lv_obj_t* g_ac_ctn[3]   = {};
 static lv_obj_t* g_ac_tabs[3]  = {};
 static lv_obj_t* g_ac_roller   = nullptr;
@@ -523,6 +524,7 @@ class ATCAdv:public BLEAdvertisedDeviceCallbacks{
             if(dev.getAddress().toString()!=std::string(g_paired_mac))return;}
         BLEDevice::getScan()->stop();
         g_target=new BLEAdvertisedDevice(dev);g_doConnect=true;}};
+void acPushBLE();  // défini plus bas — appelé ici pour auto-push à la connexion
 bool connectBLE(){
     if(!g_client){g_client=BLEDevice::createClient();g_client->setClientCallbacks(new ATCCB());}
     if(!g_client->connect(g_target))return false;
@@ -548,6 +550,11 @@ bool connectBLE(){
     // Les logs sysLog circulaires de DEBUG ne sont pas critiques pour AT-VIEW.
     // if(g_chrD&&g_chrD->canNotify())g_chrD->registerForNotify(notifyD);
     if(g_chrP&&g_chrP->canNotify())g_chrP->registerForNotify(notifyP);
+    // Auto-push identité aéronef (reg/type/hex24) dès la connexion : un AT-CORE
+    // au NVS vide (carte neuve / réinitialisée) repartait sinon sur son fallback
+    // compilé (OO-E07) tant qu'on n'éditait pas l'écran Aircraft. acPushBLE no-op
+    // si l'identité locale n'est pas renseignée ou si CHR_CONFIG non inscriptible.
+    acPushBLE();
     return true;}
 void startScan(){BLEScan*s=BLEDevice::getScan();s->setAdvertisedDeviceCallbacks(new ATCAdv());s->setActiveScan(true);s->start(5,false);}
 
@@ -666,6 +673,9 @@ static void cbSetBtn(lv_event_t*e);
 void mkAircraftOverlay();
 void acLoad();
 void acSave();
+void acSwitchTab(uint8_t tab);
+void acUpdateHeader();
+void p0UpdateAcId();
 
 // ── Theme rebuild ─────────────────────────────────────────────────────────────
 void rebuildAllPages(){
@@ -684,6 +694,23 @@ void rebuildAllPages(){
 // + 6 check rows live (AT-CORE / Bluetooth / GPS / LTE / ADS-B / OGN-FLARM)
 // + batterie AT-CORE + version en bas.
 // Fond force blanc pour preserver la lisibilite du logo bicolore (A bleu + noir).
+// Met à jour la ligne d'identité appareil (page 0, sous le logo AEROTRACE) :
+// "IMMAT / TYPE / HEX" centré, ou rouge "APPAREIL NON CONFIGURE" tant que le pilote
+// n'a pas encodé l'appareil (sans identité, AT-CORE n'émet RIEN vers SafeSky).
+void p0UpdateAcId(){
+    if(!g_p0_acid)return;
+    if(g_ac_reg[0]&&g_ac_type[0]&&g_ac_hex[0]){
+        char t[40];
+        snprintf(t,sizeof(t),"%s  /  %s  /  %s",
+            g_ac_reg, g_ac_type, g_ac_hex);
+        lv_label_set_text(g_p0_acid,t);
+        lv_obj_set_style_text_color(g_p0_acid,TFG(),0);
+    }else{
+        lv_label_set_text(g_p0_acid,LV_SYMBOL_WARNING " APPAREIL NON CONFIGURE");
+        lv_obj_set_style_text_color(g_p0_acid,lv_color_hex(0xD32F2F),0);
+    }
+}
+
 void buildStatusPage(){
     lv_obj_t*p=g_pages[0];
     lv_obj_set_style_bg_color(p,lv_color_hex(0xffffff),0);
@@ -707,6 +734,10 @@ void buildStatusPage(){
     lv_img_set_src(lAt,&img_logo_aerotrace);       // 240×50 source
     lv_img_set_zoom(lAt,384);                      // ×1.5 → ~360×75
     lv_obj_align(lAt,LV_ALIGN_TOP_MID,0,108);
+
+    // ── Identité appareil transmise à SafeSky (sous le logo, centrée).
+    g_p0_acid=mkLbl(p,"",TFG(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,190);
+    p0UpdateAcId();
 
     // ── 6 check rows (cercle bleu + label) — décalées à gauche, plus d'air entre lignes
     const int X = 105;  // colonne cercle (decalee a gauche)
@@ -1528,7 +1559,7 @@ void acLoad(){
     p.end();}
 
 // Push identité aéronef vers AT-CORE via BLE CHR_CONFIG (6E400009).
-// Payload : {"r":"FJFVB","t":"VL3","h":"38EDC5"}
+// Payload : {"r":"FJFVB","t":"VL3","h":"38ED5C"}
 void acPushBLE(){
     if(!g_chrCfg||!g_chrCfg->canWrite())return;
     if(!g_ac_reg[0]||!g_ac_hex[0])return;  // reg+hex24 obligatoires
@@ -1548,7 +1579,8 @@ void acSave(){
     acPushBLE();}
 
 void acUpdateHeader(){
-    if(!g_ac_hdr_reg)return;
+    p0UpdateAcId();                 // page 0 : refresh ligne identité (toujours)
+    if(!g_ac_hdr_reg)return;        // overlay aircraft pas ouvert → stop ici
     lv_label_set_text(g_ac_hdr_reg,g_ac_reg[0]?g_ac_reg:"---");
     lv_label_set_text(g_ac_hdr_typ,g_ac_type[0]?g_ac_type:"---");
     lv_label_set_text(g_ac_hdr_hex,g_ac_hex[0]?g_ac_hex:"------");}
@@ -1572,7 +1604,20 @@ static void _ac_key_cb(lv_event_t*e){
         acSave();acUpdateHeader();
         if(s_ac_v){char t[20];snprintf(t,20,"%s  %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");lv_label_set_text(s_ac_v,t);}
         return;}
-    if(d==202){lv_obj_del(g_ac_ov);g_ac_ov=nullptr;return;} // × close
+    if(d==202){ // FERMER — INTERDIT tant que immat+type+hex non saisis (encodage forcé).
+                // Sans identité complète, la box ne transmet rien à SafeSky : on
+                // bloque le pilote sur cette page et on le pousse au champ manquant.
+        if(!g_ac_reg[0]){acSwitchTab(0);return;}
+        if(!g_ac_type[0]){acSwitchTab(1);return;}
+        if(!g_ac_hex[0]){acSwitchTab(2);return;}
+        lv_obj_del(g_ac_ov);g_ac_ov=nullptr;return;}
+    if(d==203){ // RESET — efface immat/type/hex (globals + NVS) pour ré-encodage
+        g_ac_reg[0]=0;g_ac_type[0]=0;g_ac_hex[0]=0;g_ac_tmp[0]=0;
+        Preferences pr;pr.begin("aircraft",false);pr.clear();pr.end();
+        acUpdateHeader();      // refresh header overlay + ligne page 0 → "NON CONFIGURE"
+        acSwitchTab(0);        // revient sur l'onglet IMMAT, champ vidé
+        if(s_ac_v)lv_label_set_text(s_ac_v,"---  ---");
+        return;}
     if(d==201){int l=strlen(g_ac_tmp);if(l>0)g_ac_tmp[l-1]=0;}
     else{int l=strlen(g_ac_tmp);int mx=(g_ac_tab==2)?6:7;
         if(l<mx){g_ac_tmp[l]=(char)d;g_ac_tmp[l+1]=0;}}
@@ -1801,9 +1846,22 @@ void mkAircraftOverlay(){
     mkAcKey(p,LV_SYMBOL_BACKSPACE,(480-256)/2,8+4*(bh+gp),110,34,201);
     mkAcKey(p,"OK",(480-256)/2+126,8+4*(bh+gp),130,34,200);}
 
-    // FERMER — centered bottom, inside circle (y=440, w=160)
+    // RESET + FERMER — 2 boutons centrés bas, dans le cercle (y=440)
+    {lv_obj_t*rb=lv_btn_create(g_ac_ov);
+     lv_obj_set_size(rb,120,36);lv_obj_set_pos(rb,116,440);
+     lv_obj_set_style_bg_color(rb,lv_color_hex(0x5a1e1e),0);
+     lv_obj_set_style_bg_color(rb,lv_color_hex(0x8a2d2d),LV_STATE_PRESSED);
+     lv_obj_set_style_bg_opa(rb,LV_OPA_COVER,0);
+     lv_obj_set_style_border_color(rb,lv_color_hex(0xD32F2F),0);
+     lv_obj_set_style_border_width(rb,1,0);
+     lv_obj_set_style_radius(rb,18,0);
+     lv_obj_set_style_shadow_opa(rb,LV_OPA_TRANSP,0);
+     lv_obj_t*rl=lv_label_create(rb);lv_label_set_text(rl,"RESET");
+     lv_obj_set_style_text_color(rl,lv_color_hex(0xff9a9a),0);
+     lv_obj_set_style_text_font(rl,&lv_font_montserrat_12,0);lv_obj_center(rl);
+     lv_obj_add_event_cb(rb,_ac_key_cb,LV_EVENT_CLICKED,(void*)203);}
     {lv_obj_t*fb=lv_btn_create(g_ac_ov);
-     lv_obj_set_size(fb,160,36);lv_obj_set_pos(fb,160,440);
+     lv_obj_set_size(fb,120,36);lv_obj_set_pos(fb,244,440);
      lv_obj_set_style_bg_color(fb,lv_color_hex(0x1e2b38),0);
      lv_obj_set_style_bg_color(fb,lv_color_hex(0x2d4358),LV_STATE_PRESSED);
      lv_obj_set_style_bg_opa(fb,LV_OPA_COVER,0);
@@ -2781,6 +2839,10 @@ void setup(){
     // Auth — load DB + restore cached session; popup shown when BLE+GPS ready
     pilotDBLoad();
     checkOwnerNVS();
+    // FORCE encodage appareil : sans immat+type+hex, on ouvre d'office la page
+    // AIRCRAFT et on interdit sa fermeture (cf _ac_key_cb d==202). La box ne doit
+    // jamais opérer sans identité — sinon rien n'est transmis à SafeSky.
+    if(!(g_ac_reg[0]&&g_ac_type[0]&&g_ac_hex[0])) mkAircraftOverlay();
     Serial.println("Ready");}
 
 // ── Loop ──────────────────────────────────────────────────────────────────────
