@@ -481,7 +481,7 @@ void parseDebug(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     strlcpy(g_debug.fid,d["fid"]|"---",24);g_debug.valid=true;g_dataUpdated=true;}
 
 // ── BLE ───────────────────────────────────────────────────────────────────────
-#define BLE_BUF 512
+#define BLE_BUF 600   // > payload ATT max (~509 @ MTU 512) → pas de drop silencieux d'un notify proche limite
 static void notifyS(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){if(l>=BLE_BUF)return;static char b[BLE_BUF];memcpy(b,d,l);b[l]=0;parseStatus(b);}
 static void notifyF(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){if(l>=BLE_BUF)return;static char b[BLE_BUF];memcpy(b,d,l);b[l]=0;parseFlight(b);}
 static void notifyT(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){if(l>=BLE_BUF)return;static char b[BLE_BUF];memcpy(b,d,l);b[l]=0;parseTraffic(b);}
@@ -523,6 +523,9 @@ class ATCAdv:public BLEAdvertisedDeviceCallbacks{
         if(g_paired_mac[0]!=0){
             if(dev.getAddress().toString()!=std::string(g_paired_mac))return;}
         BLEDevice::getScan()->stop();
+        // libère la cible précédente (déjà consommée par le connect antérieur ;
+        // le scan est stoppé donc connectBLE ne l'utilise pas à cet instant)
+        if(g_target){delete g_target;g_target=nullptr;}
         g_target=new BLEAdvertisedDevice(dev);g_doConnect=true;}};
 void acPushBLE();  // défini plus bas — appelé ici pour auto-push à la connexion
 bool connectBLE(){
@@ -1149,7 +1152,9 @@ static void _authSendBLE(const char*pc,const char*ic){
     char payload[96];
     if(ic&&ic[0])snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"ic\":\"%s\",\"role\":\"%s\",\"t\":\"%s\"}",pc,ic,role,trig);
     else         snprintf(payload,sizeof(payload),"{\"pc\":\"%s\",\"role\":\"%s\",\"t\":\"%s\"}",pc,role,trig);
-    if(g_chrW&&g_chrW->canWrite())g_chrW->writeValue((uint8_t*)payload,strlen(payload),false);
+    // g_connected d'abord : un timer auth différé peut tirer après une déco →
+    // g_chrW pointe alors un characteristic libéré (canWrite() crasherait).
+    if(g_connected&&g_chrW&&g_chrW->canWrite())g_chrW->writeValue((uint8_t*)payload,strlen(payload),false);
     bool isOwner = (pe && strcmp(pe->status,"owner")==0);
     if(isOwner){Preferences p;p.begin("auth",false);p.putString("owner",pc);p.end();}
     g_session.valid    = true;
@@ -1703,6 +1708,7 @@ lv_obj_t* mkSrchKey(lv_obj_t*p,const char*t,int x,int y,int w,int h,intptr_t d){
     lv_obj_center(lb);return b;}
 
 void mkAircraftOverlay(){
+    if(g_ac_ov)return;   // déjà ouvert → évite la fuite + l'écrasement des refs g_ac_*
     // Fullscreen overlay
     g_ac_ov=lv_obj_create(lv_scr_act());
     lv_obj_set_size(g_ac_ov,480,480);lv_obj_set_pos(g_ac_ov,0,0);
