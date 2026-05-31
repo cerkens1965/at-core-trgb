@@ -2664,8 +2664,11 @@ void updateAllPages(){
         if(g_status.spd < RADAR_STILL_KMH) lv_label_set_text(r_radar_hdg,"N " LV_SYMBOL_UP);
         else { snprintf(b,32,"%d°",g_status.hdg);lv_label_set_text(r_radar_hdg,b); }
         if(r_radar_gs){
-            if(g_cfg.spd_kt) snprintf(b,32,"GS %dkt",g_status.spd);
-            else             snprintf(b,32,"GS %dkm/h",(int)((float)g_status.spd*1.852f+0.5f));
+            // g_status.spd est en km/h (AT-CORE envoie kt*1.852). Bug GS corrigé :
+            //   kt   → km/h × 0.539957 ; km/h → valeur directe (avant: km/h étiqueté
+            //   "kt", et mode km/h re-multipliait ×1.852 → double conversion).
+            if(g_cfg.spd_kt) snprintf(b,32,"GS %dkt",(int)((float)g_status.spd*0.539957f+0.5f));
+            else             snprintf(b,32,"GS %dkm/h",g_status.spd);
             lv_label_set_text(r_radar_gs,b);}
         const int cbear[]={0,90,180,270};
         for(int ci=0;ci<4;ci++){
