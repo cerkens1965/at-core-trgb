@@ -2217,7 +2217,7 @@ void updSetPage(){
     lv_label_set_text(s_src_v,  kSrcNames[g_cfg.trf_src&3]);
     lv_label_set_text(s_grnd_v, g_cfg.show_grnd?"ON":"OFF");
     lv_label_set_text(s_theme_v,g_cfg.dark?"DARK":"LIGHT");
-    lv_label_set_text(s_icon_sz_v,kIconSzNames[g_cfg.icon_sz&2]);
+    lv_label_set_text(s_icon_sz_v,kIconSzNames[g_cfg.icon_sz]);
     lv_label_set_text(s_wifi_v,g_wifi_active?"192.168.4.1":g_cfg.wifi_en?"ON":"OFF");
     if(s_aip_v)lv_label_set_text(s_aip_v,!g_aip_loaded?"NO DATA":g_cfg.aip_en?"ON":"OFF");
     if(s_heli_v)lv_label_set_text(s_heli_v,g_cfg.ad_heli?"ON":"OFF");
@@ -2379,7 +2379,7 @@ void buildSettingsPage(){
     mkSetSection(sp,"TRAFFIC",0);
     s_src_v    =mkSetRow(sp,"SOURCE",   36,kSrcNames[g_cfg.trf_src&3],10,11);
     s_grnd_v   =mkSetRow(sp,"GROUNDED", 62,g_cfg.show_grnd?"ON":"OFF",14,15);
-    s_icon_sz_v=mkSetRow(sp,"ICONS SIZE",88,kIconSzNames[g_cfg.icon_sz&2],16,17);
+    s_icon_sz_v=mkSetRow(sp,"ICONS SIZE",88,kIconSzNames[g_cfg.icon_sz],16,17);
     {const char*aip_v=!g_aip_loaded?"NO DATA":g_cfg.aip_en?"ON":"OFF";
     s_aip_v=mkSetRow(sp,"AIP",114,aip_v,20,21);}
     s_heli_v=mkSetRow(sp,"HELIPORT",140,g_cfg.ad_heli?"ON":"OFF",22,23);
