@@ -35,6 +35,7 @@ LilyGo_RGBPanel panel;
 #define BLE_CHR_AUTH    "6E400007-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_PILOTS  "6E400008-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_CONFIG  "6E400009-B5A3-F393-E0A9-E50E24DCCA9E"
+#define BLE_CHR_CONTROL "6E40000A-B5A3-F393-E0A9-E50E24DCCA9E"  // write : binding {"cmd":"bind"|"unpair"}
 // ── Bypass auth pilote (temporaire) ───────────────────────────────────────────
 // 1 = on saute la page #02 "Select your name" / #03 welcome : dès que la machine
 // est appairée (BLE) + GPS fix, on file direct au radar. L'appairage machine
@@ -115,13 +116,43 @@ static BLERemoteCharacteristic *g_chrS=nullptr,*g_chrF=nullptr,
                                 *g_chrT=nullptr,*g_chrA=nullptr,*g_chrD=nullptr,
                                 *g_chrW=nullptr,   // AUTH write (6E400007)
                                 *g_chrP=nullptr,   // PILOTS notify (6E400008)
-                                *g_chrCfg=nullptr; // CONFIG write (6E400009) — identité aéronef
+                                *g_chrCfg=nullptr, // CONFIG write (6E400009) — identité aéronef
+                                *g_chrCtl=nullptr; // CONTROL write (6E40000A) — binding bind/unpair
 // Pilot list BLE reassembly buffer
 static char    g_prx_buf[4096] = {};
 static int     g_prx_len       = 0;
 static volatile bool g_connected=false, g_doConnect=false, g_doReconnect=false;
 uint32_t g_connect_ms = 0;   // millis() au moment de la connexion BLE (0 si pas connecte)
 static BLEAdvertisedDevice*    g_target = nullptr;
+
+// ── Pairing AT-CORE (Phase 3) ─────────────────────────────────────────────────
+// Quand aucun AT-CORE n'est lié (g_paired_mac vide), on N'AUTO-CONNECTE PAS au
+// premier boîtier venu : on collecte ceux en mode pairing (manuf-data FF FF 01)
+// et l'utilisateur choisit + confirme (LED fixe) → write {"cmd":"bind"} sur
+// CHR_CONTROL. Empêche de se lier au boîtier d'un avion voisin sur un parking.
+#define PAIR_MAX 6
+struct PairCand{ char mac[18]; char name[24]; int rssi; uint32_t seen; };
+static PairCand g_pcand[PAIR_MAX];
+static int      g_pcand_n  = 0;
+static SemaphoreHandle_t g_pcand_mx = nullptr;     // protège g_pcand (rempli dans le cb scan)
+static volatile bool g_binding      = false;       // connexion dans le cadre d'une cérémonie → pas d'auto-save MAC
+static volatile bool g_bind_confirm = false;       // connecté au candidat → attend confirmation utilisateur
+static uint32_t g_bind_t0       = 0;               // millis() du tap candidat → timeout si pas de connexion
+static char     g_bind_mac[18]  = {};              // MAC du candidat qu'on tente de lier
+static char     g_bind_name[24] = {};
+static lv_obj_t* g_pair_ov    = nullptr;           // overlay pairing (liste + confirmation)
+static lv_obj_t* g_pair_list  = nullptr;           // conteneur liste candidats
+static lv_obj_t* g_pair_confirm = nullptr;         // conteneur confirmation LED
+static lv_obj_t* g_pair_cf_txt  = nullptr;         // label "La LED du boîtier ... fixe ?"
+static lv_obj_t* g_pair_rows[PAIR_MAX] = {};       // boutons candidats pré-créés
+static lv_obj_t* g_pair_row_lbl[PAIR_MAX] = {};
+
+static bool advPairable(BLEAdvertisedDevice& d);
+void pcandUpsert(BLEAdvertisedDevice& d);
+void connectTarget(BLEAdvertisedDevice& d);
+void sendCtl(const char* cmd);
+void pairOverlayShow(); void pairOverlayHide();
+void pairListRefresh(); void pairShowConfirm();
 
 // ── Pages ─────────────────────────────────────────────────────────────────────
 #define NUM_PAGES 3
@@ -505,6 +536,34 @@ static void notifyP(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){
         if(n>0)Serial.printf("[Auth] pilots BLE ok (%d)\n",n);
         else   Serial.println("[Auth] pilots BLE rejected - DB preserved");}}
 
+// Boîtier en mode pairing ? AT-CORE pousse une manuf-data FF FF <pairable>.
+static bool advPairable(BLEAdvertisedDevice& d){
+    if(!d.haveManufacturerData())return false;
+    std::string m=d.getManufacturerData();
+    if(m.size()<3)return false;
+    return (uint8_t)m[0]==0xFF && (uint8_t)m[1]==0xFF && (uint8_t)m[2]==0x01;}
+
+// Insère/actualise un candidat pairing dans g_pcand (appelé depuis le cb scan).
+void pcandUpsert(BLEAdvertisedDevice& d){
+    if(!g_pcand_mx)return;
+    std::string mac=d.getAddress().toString();
+    if(xSemaphoreTake(g_pcand_mx,pdMS_TO_TICKS(20))!=pdTRUE)return;
+    int idx=-1;
+    for(int i=0;i<g_pcand_n;i++) if(mac==std::string(g_pcand[i].mac)){idx=i;break;}
+    if(idx<0 && g_pcand_n<PAIR_MAX) idx=g_pcand_n++;
+    if(idx>=0){
+        strlcpy(g_pcand[idx].mac,mac.c_str(),sizeof(g_pcand[idx].mac));
+        strlcpy(g_pcand[idx].name,d.getName().c_str(),sizeof(g_pcand[idx].name));
+        g_pcand[idx].rssi=d.haveRSSI()?d.getRSSI():0;
+        g_pcand[idx].seen=millis();}
+    xSemaphoreGive(g_pcand_mx);}
+
+// Arme la connexion vers un device (chemin commun : reconnexion liée + pairing).
+void connectTarget(BLEAdvertisedDevice& dev){
+    BLEDevice::getScan()->stop();
+    if(g_target){delete g_target;g_target=nullptr;}
+    g_target=new BLEAdvertisedDevice(dev);g_doConnect=true;}
+
 class ATCCB:public BLEClientCallbacks{
     void onConnect(BLEClient*)override{g_connected=true;g_dataUpdated=true;
         g_connect_ms=millis();
@@ -520,20 +579,27 @@ class ATCAdv:public BLEAdvertisedDeviceCallbacks{
     void onResult(BLEAdvertisedDevice dev)override{
         String nm=dev.getName().c_str();
         if(!nm.startsWith("ATCORE-"))return;
+        std::string mac=dev.getAddress().toString();
         if(g_paired_mac[0]!=0){
-            if(dev.getAddress().toString()!=std::string(g_paired_mac))return;}
-        BLEDevice::getScan()->stop();
-        // libère la cible précédente (déjà consommée par le connect antérieur ;
-        // le scan est stoppé donc connectBLE ne l'utilise pas à cet instant)
-        if(g_target){delete g_target;g_target=nullptr;}
-        g_target=new BLEAdvertisedDevice(dev);g_doConnect=true;}};
+            // Déjà lié → on ne se connecte qu'à NOTRE boîtier (anti-cross-talk).
+            if(mac!=std::string(g_paired_mac))return;
+            connectTarget(dev);return;}
+        // Non lié : cérémonie de pairing.
+        if(g_binding){
+            // On attend le candidat choisi par l'utilisateur dans la liste.
+            if(mac==std::string(g_bind_mac))connectTarget(dev);
+            return;}
+        // Sinon : on collecte les boîtiers en mode pairing (sans se connecter).
+        if(advPairable(dev))pcandUpsert(dev);}};
 void acPushBLE();  // défini plus bas — appelé ici pour auto-push à la connexion
 bool connectBLE(){
     if(!g_client){g_client=BLEDevice::createClient();g_client->setClientCallbacks(new ATCCB());}
     if(!g_client->connect(g_target))return false;
-    // Persist paired MAC + remember peer name
-    unitSaveMac(g_target->getAddress().toString().c_str());
-    strlcpy(g_peer_name, g_target->getName().c_str(), sizeof(g_peer_name));
+    // Persist paired MAC seulement hors cérémonie de pairing : pendant un bind,
+    // on attend la confirmation utilisateur (LED fixe) avant de figer le MAC.
+    if(!g_binding){
+        unitSaveMac(g_target->getAddress().toString().c_str());
+        strlcpy(g_peer_name, g_target->getName().c_str(), sizeof(g_peer_name));}
     g_client->setMTU(512);g_svc=g_client->getService(BLE_SVC_UUID);
     if(!g_svc){g_client->disconnect();return false;}
     g_chrS=g_svc->getCharacteristic(BLE_CHR_STATUS);
@@ -544,6 +610,7 @@ bool connectBLE(){
     g_chrW=g_svc->getCharacteristic(BLE_CHR_AUTH);
     g_chrP=g_svc->getCharacteristic(BLE_CHR_PILOTS);
     g_chrCfg=g_svc->getCharacteristic(BLE_CHR_CONFIG);
+    g_chrCtl=g_svc->getCharacteristic(BLE_CHR_CONTROL);
     if(g_chrS&&g_chrS->canNotify())g_chrS->registerForNotify(notifyS);
     if(g_chrF&&g_chrF->canNotify())g_chrF->registerForNotify(notifyF);
     if(g_chrT&&g_chrT->canNotify())g_chrT->registerForNotify(notifyT);
@@ -553,6 +620,9 @@ bool connectBLE(){
     // Les logs sysLog circulaires de DEBUG ne sont pas critiques pour AT-VIEW.
     // if(g_chrD&&g_chrD->canNotify())g_chrD->registerForNotify(notifyD);
     if(g_chrP&&g_chrP->canNotify())g_chrP->registerForNotify(notifyP);
+    // Cérémonie de pairing : connecté au candidat → l'AT-CORE passe LED fixe.
+    // On demande la confirmation visuelle avant d'écrire {"cmd":"bind"}.
+    if(g_binding){g_bind_confirm=true;return true;}
     // Auto-push identité aéronef (reg/type/hex24) dès la connexion : un AT-CORE
     // au NVS vide (carte neuve / réinitialisée) repartait sinon sur son fallback
     // compilé (OO-E07) tant qu'on n'éditait pas l'écran Aircraft. acPushBLE no-op
@@ -572,8 +642,8 @@ static lv_coord_t g_swipe_sx=-1, g_swipe_lx=0, g_swipe_sy=0, g_swipe_ly=0;
 // qui sinon déclencherait une navigation de page parasite.
 static bool g_bright_drag=false;
 static void swipeCb(lv_event_t*e){
-    // Bloque la navigation tant que l'auth code n'est pas valide
-    if(g_auth_ov)return;
+    // Bloque la navigation tant que l'auth code ou le pairing n'est pas résolu
+    if(g_auth_ov||g_pair_ov)return;
     if(g_bright_drag)return;
     lv_event_code_t code=lv_event_get_code(e);
     lv_indev_t*indev=lv_indev_get_act();if(!indev)return;
@@ -660,10 +730,156 @@ void unitForgetMac(){
     Serial.println("[BLE] Pair AT-CORE oublié — reboot");}
 
 // Callback long-press logo AT-VIEW = oublie la pair BLE + reboot.
+// On demande d'abord à l'AT-CORE de ré-armer son mode pairing ({"cmd":"unpair"})
+// pour qu'il accepte un nouveau binding au prochain boot.
 static void _cbForgetPair(lv_event_t*e){
+    sendCtl("unpair");
+    delay(150);
     unitForgetMac();
     delay(500);
     ESP.restart();}
+
+// ── Pairing AT-CORE — overlay + binding (Phase 3) ─────────────────────────────
+// Écrit une commande binding sur CHR_CONTROL (6E40000A).
+void sendCtl(const char* cmd){
+    if(!g_connected||!g_chrCtl||!g_chrCtl->canWrite())return;
+    char p[32];snprintf(p,sizeof(p),"{\"cmd\":\"%s\"}",cmd);
+    g_chrCtl->writeValue((uint8_t*)p,strlen(p),false);
+    Serial.printf("[BLE] CTRL %s\n",p);}
+
+// Tap sur un candidat : on mémorise son MAC/nom, on passe en mode binding et on
+// relance le scan → ATCAdv se connecte à CE boîtier (sans figer le MAC encore).
+static void cbPairPick(lv_event_t*e){
+    int i=(int)(intptr_t)lv_event_get_user_data(e);
+    if(g_pcand_mx && xSemaphoreTake(g_pcand_mx,pdMS_TO_TICKS(20))==pdTRUE){
+        if(i>=0&&i<g_pcand_n){
+            strlcpy(g_bind_mac, g_pcand[i].mac, sizeof(g_bind_mac));
+            strlcpy(g_bind_name,g_pcand[i].name,sizeof(g_bind_name));}
+        xSemaphoreGive(g_pcand_mx);}
+    if(!g_bind_mac[0])return;
+    g_binding=true;g_bind_confirm=false;g_bind_t0=millis();
+    Serial.printf("[PAIR] candidat %s (%s)\n",g_bind_name,g_bind_mac);
+    startScan();}
+
+// Confirmation utilisateur (LED fixe vérifiée) → fige le binding des deux côtés.
+static void cbPairConfirm(lv_event_t*e){
+    sendCtl("bind");
+    unitSaveMac(g_bind_mac);
+    strlcpy(g_peer_name,g_bind_name,sizeof(g_peer_name));
+    g_binding=false;g_bind_confirm=false;
+    Serial.printf("[PAIR] lié → %s\n",g_paired_mac);
+    pairOverlayHide();
+    acPushBLE();}
+
+// Annulation : on se déconnecte du candidat et on revient à la liste.
+static void cbPairCancel(lv_event_t*e){
+    if(g_connected&&g_client)g_client->disconnect();
+    g_binding=false;g_bind_confirm=false;g_bind_mac[0]=0;g_bind_name[0]=0;
+    if(g_pair_confirm)lv_obj_add_flag(g_pair_confirm,LV_OBJ_FLAG_HIDDEN);
+    if(g_pair_list)lv_obj_clear_flag(g_pair_list,LV_OBJ_FLAG_HIDDEN);}
+
+void pairOverlayHide(){
+    if(!g_pair_ov)return;
+    lv_obj_del(g_pair_ov);
+    g_pair_ov=g_pair_list=g_pair_confirm=g_pair_cf_txt=nullptr;
+    for(int i=0;i<PAIR_MAX;i++){g_pair_rows[i]=g_pair_row_lbl[i]=nullptr;}}
+
+void pairOverlayShow(){
+    if(g_pair_ov)return;
+    g_pair_ov=lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_pair_ov,480,480);lv_obj_set_pos(g_pair_ov,0,0);
+    lv_obj_set_style_bg_color(g_pair_ov,lv_color_hex(0x000000),0);
+    lv_obj_set_style_bg_opa(g_pair_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(g_pair_ov,0,0);lv_obj_set_style_radius(g_pair_ov,0,0);
+    lv_obj_set_style_pad_all(g_pair_ov,0,0);
+    lv_obj_clear_flag(g_pair_ov,LV_OBJ_FLAG_SCROLLABLE);
+
+    mkLbl(g_pair_ov,"APPAIRAGE",C_BRAND,&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,70);
+    mkLbl(g_pair_ov,"Choisis ton boitier",TGREY(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,102);
+
+    // Conteneur liste candidats (rangées pré-créées, peuplées par pairListRefresh)
+    g_pair_list=lv_obj_create(g_pair_ov);
+    lv_obj_set_size(g_pair_list,360,220);lv_obj_align(g_pair_list,LV_ALIGN_TOP_MID,0,130);
+    lv_obj_set_style_bg_color(g_pair_list,lv_color_hex(0x0d1117),0);
+    lv_obj_set_style_bg_opa(g_pair_list,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(g_pair_list,C_BRAND,0);
+    lv_obj_set_style_border_width(g_pair_list,1,0);
+    lv_obj_set_style_radius(g_pair_list,8,0);lv_obj_set_style_pad_all(g_pair_list,6,0);
+    lv_obj_set_scroll_dir(g_pair_list,LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(g_pair_list,LV_SCROLLBAR_MODE_AUTO);
+    for(int i=0;i<PAIR_MAX;i++){
+        lv_obj_t* row=lv_btn_create(g_pair_list);
+        lv_obj_set_size(row,332,32);lv_obj_set_pos(row,0,i*36);
+        lv_obj_set_style_bg_color(row,C_BRAND,0);
+        lv_obj_set_style_bg_color(row,lv_color_hex(0x5a7a99),LV_STATE_PRESSED);
+        lv_obj_set_style_bg_opa(row,LV_OPA_COVER,0);
+        lv_obj_set_style_radius(row,6,0);lv_obj_set_style_shadow_opa(row,LV_OPA_TRANSP,0);
+        lv_obj_add_event_cb(row,cbPairPick,LV_EVENT_CLICKED,(void*)(intptr_t)i);
+        lv_obj_add_flag(row,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_t* l=lv_label_create(row);lv_label_set_text(l,"");
+        lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+        lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);
+        g_pair_rows[i]=row;g_pair_row_lbl[i]=l;}
+
+    mkLbl(g_pair_ov,"LED fixe = boitier selectionne",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,366);
+
+    // Conteneur confirmation (caché tant qu'on n'est pas connecté au candidat)
+    g_pair_confirm=lv_obj_create(g_pair_ov);
+    lv_obj_set_size(g_pair_confirm,400,250);lv_obj_align(g_pair_confirm,LV_ALIGN_TOP_MID,0,120);
+    lv_obj_set_style_bg_opa(g_pair_confirm,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_width(g_pair_confirm,0,0);lv_obj_set_style_pad_all(g_pair_confirm,0,0);
+    lv_obj_clear_flag(g_pair_confirm,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(g_pair_confirm,LV_OBJ_FLAG_HIDDEN);
+    g_pair_cf_txt=lv_label_create(g_pair_confirm);
+    lv_label_set_text(g_pair_cf_txt,"");
+    lv_obj_set_width(g_pair_cf_txt,360);
+    lv_label_set_long_mode(g_pair_cf_txt,LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_align(g_pair_cf_txt,LV_TEXT_ALIGN_CENTER,0);
+    lv_obj_set_style_text_color(g_pair_cf_txt,lv_color_hex(0xffffff),0);
+    lv_obj_set_style_text_font(g_pair_cf_txt,&lv_font_montserrat_16,0);
+    lv_obj_align(g_pair_cf_txt,LV_ALIGN_TOP_MID,0,10);
+    {lv_obj_t* b=lv_btn_create(g_pair_confirm);
+     lv_obj_set_size(b,170,52);lv_obj_align(b,LV_ALIGN_BOTTOM_LEFT,10,-10);
+     lv_obj_set_style_bg_color(b,C_GREEN,0);lv_obj_set_style_radius(b,8,0);
+     lv_obj_add_event_cb(b,cbPairConfirm,LV_EVENT_CLICKED,NULL);
+     lv_obj_t* l=lv_label_create(b);lv_label_set_text(l,"CONFIRMER");lv_obj_center(l);
+     lv_obj_set_style_text_color(l,lv_color_hex(0x000000),0);}
+    {lv_obj_t* b=lv_btn_create(g_pair_confirm);
+     lv_obj_set_size(b,170,52);lv_obj_align(b,LV_ALIGN_BOTTOM_RIGHT,-10,-10);
+     lv_obj_set_style_bg_color(b,C_RED,0);lv_obj_set_style_radius(b,8,0);
+     lv_obj_add_event_cb(b,cbPairCancel,LV_EVENT_CLICKED,NULL);
+     lv_obj_t* l=lv_label_create(b);lv_label_set_text(l,"ANNULER");lv_obj_center(l);
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);}}
+
+// Bascule l'overlay en mode confirmation et renseigne le nom du boîtier.
+void pairShowConfirm(){
+    if(!g_pair_ov||!g_pair_confirm)return;
+    if(!lv_obj_has_flag(g_pair_confirm,LV_OBJ_FLAG_HIDDEN))return;  // déjà affiché
+    if(g_pair_cf_txt){
+        char b[96];snprintf(b,sizeof(b),
+            "La LED de %s\nest-elle FIXE ?\nConfirme pour lier ce boitier.",
+            g_bind_name[0]?g_bind_name:"ce boitier");
+        lv_label_set_text(g_pair_cf_txt,b);}
+    lv_obj_add_flag(g_pair_list,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(g_pair_confirm,LV_OBJ_FLAG_HIDDEN);}
+
+// Peuple la liste depuis g_pcand (entrées vues < 15 s). Throttlé par l'appelant.
+// Mapping 1:1 slot==index candidat → le user_data des rows (figé à la création)
+// reste valide, pas de ré-attache de callback.
+void pairListRefresh(){
+    if(!g_pair_ov||!g_pair_list)return;
+    if(g_pair_confirm&&!lv_obj_has_flag(g_pair_confirm,LV_OBJ_FLAG_HIDDEN))return;
+    uint32_t now=millis();
+    if(g_pcand_mx && xSemaphoreTake(g_pcand_mx,pdMS_TO_TICKS(20))==pdTRUE){
+        for(int i=0;i<PAIR_MAX;i++){
+            if(!g_pair_rows[i])continue;
+            bool fresh=(i<g_pcand_n)&&((now-g_pcand[i].seen)<15000);
+            if(fresh){
+                char b[40];snprintf(b,sizeof(b),"%s  %ddBm",g_pcand[i].name,g_pcand[i].rssi);
+                lv_label_set_text(g_pair_row_lbl[i],b);
+                lv_obj_clear_flag(g_pair_rows[i],LV_OBJ_FLAG_HIDDEN);
+            }else lv_obj_add_flag(g_pair_rows[i],LV_OBJ_FLAG_HIDDEN);}
+        xSemaphoreGive(g_pcand_mx);}}
 
 // ── Forward declarations ──────────────────────────────────────────────────────
 void buildStatusPage();
@@ -1891,6 +2107,7 @@ static void _open_aircraft_cb(lv_event_t*e){
 // Boot sequence — init BLE et lance scan ; les checks live sont anim s par updateAllPages.
 void runBootOnPage(){
     lv_timer_handler();delay(900);          // laisse les logos visibles
+    if(!g_pcand_mx)g_pcand_mx=xSemaphoreCreateMutex();
     BLEDevice::init(g_unit_name);
     lv_timer_handler();delay(200);
     startScan();
@@ -2653,7 +2870,7 @@ void updateAllPages(){
     }
 #endif
     // Auto-navigate to radar once BLE+GPS ready (one-shot per connection)
-    if(!g_autoNavDone&&g_connected&&g_status.valid&&g_status.gps_fix&&g_page==0){
+    if(!g_autoNavDone&&!g_pair_ov&&g_connected&&g_status.valid&&g_status.gps_fix&&g_page==0){
         g_autoNavDone=true;g_navPending=true;g_navPage=1;}
     // Radar — heading-up en mouvement, north-up auto à l'arrêt (radarEffHdg()).
     // Le cap GPS (course over ground) n'est pas calculable sous RADAR_STILL_KMH :
@@ -2863,6 +3080,20 @@ void loop(){
         else{delay(2000);startScan();}}
     if(!g_connected&&!g_doConnect){
         static uint32_t ls=0;if(now-ls>8000){ls=now;startScan();}}
+    // ── Pairing AT-CORE : tant qu'aucun boîtier n'est lié, overlay de sélection ──
+    if(g_paired_mac[0]==0){
+        if(!g_pair_ov)pairOverlayShow();
+        if(g_bind_confirm)pairShowConfirm();
+        else if(g_binding){
+            // connexion au candidat ne s'établit pas → abandon, retour liste
+            if(g_bind_t0&&now-g_bind_t0>10000){
+                if(g_connected&&g_client)g_client->disconnect();
+                g_binding=false;g_bind_mac[0]=0;g_bind_name[0]=0;g_bind_t0=0;}
+        }else{
+            static uint32_t pr=0;if(now-pr>1000){pr=now;pairListRefresh();}}
+    }else if(g_pair_ov){
+        pairOverlayHide();   // devenu lié (post-bind) → ferme l'overlay
+    }
     if(g_rebuildPages){g_rebuildPages=false;rebuildAllPages();}
     if(g_dataUpdated){g_dataUpdated=false;updateAllPages();}
     bool alert=hasAlert();

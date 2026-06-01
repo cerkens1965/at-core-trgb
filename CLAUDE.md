@@ -89,6 +89,7 @@ Scan filtre actuellement sur nom `"AT-CORE NimBLE"`.
 | AUTH | `6E400007-...` | **write** | codes pilote/instructeur (V2 popup) |
 | PILOTS | `6E400008-...` | notify | liste pilotes JSON chunké (Firestore). Format : `[{c,n,r,t,i}, ...]` ou `{"_date":"YYYY-MM-DD","pilots":[{...}]}` (wrapper recommandé pour traçabilité). Protocole chunks : `0x01`=start, `0x02`=data, `0x03`=end (déclenche parse). Résilient : DB préservée si JSON invalide / array vide. |
 | CONFIG | `6E400009-...` | **write** | identité aéronef `{r,t,h}` — auto-push depuis `acSave()` (V1) |
+| CONTROL | `6E40000A-...` | **write** | binding `{"cmd":"bind"\|"unpair"}` — cérémonie d'appairage (Phase 3) |
 
 Service UUID AT-CORE : `4FAFC201-1FB5-459E-8FCC-C5C9C331914B`
 
@@ -109,29 +110,42 @@ Exemple : `ATVIEW-EBBY1-01`
 AT-CORE correspondant : `ATCORE-EBBY1-01`
 Liaison sécurisée : MAC AT-CORE stockée en NVS → reconnexion auto.
 
-## Écran Settings BLE + Config aéronef (à implémenter)
+## Appairage AT-CORE — cérémonie de binding (Phase 3 — 2026-06-01)
 
-Nouvel écran Settings pour :
+Implémenté dans `examples/at_core_debug/at_core_debug.ino`. Empêche AT-VIEW de se
+connecter au mauvais boîtier (parking dense). **Plus d'auto-bind silencieux** : tant
+qu'aucun MAC n'est lié, on ne se connecte pas au premier `ATCORE-` venu.
 
-### Pairing BLE
-- Scan BLE filtré sur préfixe `ATCORE-`
-- Liste LVGL des AT-CORE détectés (nom + RSSI)
-- Sélection → MAC stockée en NVS (`paired_mac`)
-- Au démarrage : connexion directe si MAC connue + device présent
+| Étape | Comportement AT-VIEW |
+|-------|----------------------|
+| Non lié (`paired_mac` vide) | Overlay modal `pairOverlayShow()` (LVGL `lv_layer_top`) bloque la navigation |
+| Découverte | `ATCAdv::onResult` ne **collecte** que les boîtiers en mode pairing (manuf-data `FF FF 01`, `advPairable()`) dans `g_pcand[]` — pas de connexion |
+| Liste | `pairListRefresh()` affiche nom + RSSI des candidats (rafraîchi 1 Hz, TTL 15 s) |
+| Sélection (`cbPairPick`) | Mémorise MAC/nom, `g_binding=true`, relance le scan → connexion à CE boîtier **sans figer le MAC** (timeout 10 s → retour liste) |
+| Confirmation | Connecté → AT-CORE passe LED **fixe** ; overlay demande « LED fixe ? » (`pairShowConfirm`) |
+| Bind (`cbPairConfirm`) | Write `{"cmd":"bind"}` sur CHR_CONTROL + `unitSaveMac()` → fige NVS `unit/paired_mac`, ferme l'overlay |
+| Annuler (`cbPairCancel`) | `disconnect()` + retour liste |
 
-### Configuration aéronef
+- **Déjà lié** : `ATCAdv` ne se connecte qu'au `paired_mac` (inchangé). L'AT-CORE rejette
+  de son côté tout peer ≠ `paired_view` (enforcement réciproque).
+- **Oublier** : long-press logo AT-VIEW → `_cbForgetPair` envoie `{"cmd":"unpair"}` à
+  l'AT-CORE (ré-arme son pairing) puis efface `paired_mac` + reboot.
+- Le mutex `g_pcand_mx` protège `g_pcand[]` (rempli dans le cb scan, lu par la loop UI).
+
+⚠️ **À valider hardware** : que la manuf-data `FF FF 01` de l'AT-CORE n'évince pas le nom
+du paquet d'advertising (le nom doit rester dans la scan response pour le filtre `ATCORE-`).
+
+## Configuration aéronef (écran Settings)
+
 | Champ | Exemple | Notes |
 |-------|---------|-------|
 | Immatriculation | `FJFVB` | 2-6 chars, sans préfixe pays |
 | Type OACI | `VL3`, `MCR01`, `FK9` | Liste déroulante — codes à fournir |
 | Hex transpondeur | `38EDC5` | 6 digits hex |
 
-Stockage NVS (`Preferences` namespace `atview`) :
-- `unit_name` — nom BLE complet
-- `paired_mac` — MAC AT-CORE associé
-- `ac_reg` — immatriculation
-- `ac_type` — type OACI
-- `ac_hex` — hex transpondeur
+Stockage NVS :
+- namespace `unit` : `name` (nom BLE complet), `paired_mac` (MAC AT-CORE lié)
+- namespace `aircraft` : `reg` / `type` / `hex24` (identité aéronef, pushée via CHR_CONFIG)
 
 ## Alertes
 
