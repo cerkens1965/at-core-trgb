@@ -151,6 +151,7 @@ static bool advPairable(BLEAdvertisedDevice& d);
 void pcandUpsert(BLEAdvertisedDevice& d);
 void connectTarget(BLEAdvertisedDevice& d);
 void sendCtl(const char* cmd);
+static void macToBoxId(const char* mac, char* out, size_t sz);  // défini plus bas
 void pairOverlayShow(); void pairOverlayHide();
 void pairListRefresh(); void pairShowConfirm();
 
@@ -599,7 +600,9 @@ bool connectBLE(){
     // on attend la confirmation utilisateur (LED fixe) avant de figer le MAC.
     if(!g_binding){
         unitSaveMac(g_target->getAddress().toString().c_str());
-        strlcpy(g_peer_name, g_target->getName().c_str(), sizeof(g_peer_name));}
+        // g_peer_name = Box ID (DD-EE-FF) du boîtier connecté, pas le nom BLE
+        // générique (tous "ATCORE-EBBY1-01") → identifiant unique à l'écran.
+        macToBoxId(g_target->getAddress().toString().c_str(), g_peer_name, sizeof(g_peer_name));}
     g_client->setMTU(512);g_svc=g_client->getService(BLE_SVC_UUID);
     if(!g_svc){g_client->disconnect();return false;}
     g_chrS=g_svc->getCharacteristic(BLE_CHR_STATUS);
@@ -776,7 +779,7 @@ static void cbPairPick(lv_event_t*e){
 static void cbPairConfirm(lv_event_t*e){
     sendCtl("bind");
     unitSaveMac(g_bind_mac);
-    strlcpy(g_peer_name,g_bind_name,sizeof(g_peer_name));
+    macToBoxId(g_bind_mac,g_peer_name,sizeof(g_peer_name));   // Box ID, pas le nom générique
     g_binding=false;g_bind_confirm=false;
     Serial.printf("[PAIR] lié → %s\n",g_paired_mac);
     pairOverlayHide();
