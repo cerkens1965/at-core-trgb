@@ -2856,21 +2856,25 @@ void updateAllPages(){
      {bool adsb_ok=g_connected&&g_status.valid&&g_status.adsb_ok;
       SET_PILL_TXT(r_hdr_adsb, adsb_ok);}
      // Battery — g_status.bat (STATUS char, ~1s) prioritaire sur g_debug.bat_pct (DEBUG char).
-     // Charging détecté par AT-CORE via tendance tension LiPo (champ "chg" JSON STATUS).
-     // ⚠ TEST EN COURS : brancher AT-CORE sur secteur et vérifier "BAT xx% ⚡" page Status.
+     // Charging (champ "chg" JSON STATUS) détecté AT-CORE : hausse tension OU float ≥4.13V.
+     // Radar : sur secteur = "⚡xx%" vert | sur batterie = "xx%" (rouge si <20%).
      {int bat=(g_status.valid&&g_status.bat>=0)?g_status.bat:
               (g_debug.valid&&g_debug.bat_pct>=0)?g_debug.bat_pct:-1;
+       char bb[12];
        if(bat<0){
-          // Pas de données — symbole charge grisé
-          lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);SET_PILL_TXT(r_hdr_bat,false);
+          // Pas de données
+          lv_label_set_text(r_hdr_bat,"--");
+          lv_obj_set_style_text_color(r_hdr_bat,PILL_IC_OFF(),0);
       }else if(g_status.charging){
-          // En charge (USB) — éclair seul, actif/bright
-          lv_label_set_text(r_hdr_bat,LV_SYMBOL_CHARGE);SET_PILL_TXT(r_hdr_bat,true);
+          // Sur secteur / en charge — NIVEAU + éclair, vert (super clair en 1 coup d'œil)
+          snprintf(bb,sizeof(bb),LV_SYMBOL_CHARGE "%d%%",bat);
+          lv_label_set_text(r_hdr_bat,bb);
+          lv_obj_set_style_text_color(r_hdr_bat,C_GREEN,0);
       }else{
-          // Sur batterie — jauge seule, sans %, rouge si <20%
-          const char*bi=bat>=75?LV_SYMBOL_BATTERY_FULL:bat>=50?LV_SYMBOL_BATTERY_3:
-                         bat>=25?LV_SYMBOL_BATTERY_2:bat>=10?LV_SYMBOL_BATTERY_1:LV_SYMBOL_BATTERY_EMPTY;
-          lv_label_set_text(r_hdr_bat,bi);SET_PILL_TXT(r_hdr_bat,bat>=20);}}
+          // Sur batterie — niveau seul, PAS d'éclair, rouge si <20%
+          snprintf(bb,sizeof(bb),"%d%%",bat);
+          lv_label_set_text(r_hdr_bat,bb);
+          lv_obj_set_style_text_color(r_hdr_bat,bat<20?C_RED:PILL_IC_ON(),0);}}
      #undef SET_PILL_TXT
      #undef SET_PILL_IMG
      }
