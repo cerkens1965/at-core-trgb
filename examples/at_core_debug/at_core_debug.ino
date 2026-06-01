@@ -747,6 +747,17 @@ void sendCtl(const char* cmd){
     g_chrCtl->writeValue((uint8_t*)p,strlen(p),false);
     Serial.printf("[BLE] CTRL %s\n",p);}
 
+// Box ID = 3 derniers octets du MAC → "DD-EE-FF" (majuscules). Identifiant unique
+// gravé en usine, imprimé sur le sticker sous le boîtier → authentification physique.
+// mac attendu au format "aa:bb:cc:dd:ee:ff".
+static void macToBoxId(const char* mac, char* out, size_t sz){
+    int n=strlen(mac);
+    if(n>=8){
+        const char* p=mac+n-8;   // "dd:ee:ff"
+        snprintf(out,sz,"%c%c-%c%c-%c%c",
+            toupper(p[0]),toupper(p[1]),toupper(p[3]),toupper(p[4]),toupper(p[6]),toupper(p[7]));
+    }else strlcpy(out,mac,sz);}
+
 // Tap sur un candidat : on mémorise son MAC/nom, on passe en mode binding et on
 // relance le scan → ATCAdv se connecte à CE boîtier (sans figer le MAC encore).
 static void cbPairPick(lv_event_t*e){
@@ -821,7 +832,7 @@ void pairOverlayShow(){
         lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);
         g_pair_rows[i]=row;g_pair_row_lbl[i]=l;}
 
-    mkLbl(g_pair_ov,"LED fixe = boitier selectionne",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,366);
+    mkLbl(g_pair_ov,"Box ID = sticker sous le boitier",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,366);
 
     // Conteneur confirmation (caché tant qu'on n'est pas connecté au candidat)
     g_pair_confirm=lv_obj_create(g_pair_ov);
@@ -856,9 +867,10 @@ void pairShowConfirm(){
     if(!g_pair_ov||!g_pair_confirm)return;
     if(!lv_obj_has_flag(g_pair_confirm,LV_OBJ_FLAG_HIDDEN))return;  // déjà affiché
     if(g_pair_cf_txt){
+        char id[12];macToBoxId(g_bind_mac,id,sizeof(id));
         char b[96];snprintf(b,sizeof(b),
-            "La LED de %s\nest-elle FIXE ?\nConfirme pour lier ce boitier.",
-            g_bind_name[0]?g_bind_name:"ce boitier");
+            "Boitier  %s\n\nVerifie le sticker\nsous le boitier,\npuis confirme.",
+            id);
         lv_label_set_text(g_pair_cf_txt,b);}
     lv_obj_add_flag(g_pair_list,LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(g_pair_confirm,LV_OBJ_FLAG_HIDDEN);}
@@ -875,7 +887,8 @@ void pairListRefresh(){
             if(!g_pair_rows[i])continue;
             bool fresh=(i<g_pcand_n)&&((now-g_pcand[i].seen)<15000);
             if(fresh){
-                char b[40];snprintf(b,sizeof(b),"%s  %ddBm",g_pcand[i].name,g_pcand[i].rssi);
+                char id[12];macToBoxId(g_pcand[i].mac,id,sizeof(id));
+                char b[40];snprintf(b,sizeof(b),"%s    %ddBm",id,g_pcand[i].rssi);
                 lv_label_set_text(g_pair_row_lbl[i],b);
                 lv_obj_clear_flag(g_pair_rows[i],LV_OBJ_FLAG_HIDDEN);
             }else lv_obj_add_flag(g_pair_rows[i],LV_OBJ_FLAG_HIDDEN);}
