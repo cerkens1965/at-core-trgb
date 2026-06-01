@@ -936,7 +936,7 @@ void p0UpdateAcId(){
         snprintf(t,sizeof(t),"%s  /  %s  /  %s",
             g_ac_reg, g_ac_type, g_ac_hex);
         lv_label_set_text(g_p0_acid,t);
-        lv_obj_set_style_text_color(g_p0_acid,TFG(),0);
+        lv_obj_set_style_text_color(g_p0_acid,lv_color_hex(0x0f172a),0);  // fixe foncé : la page statut force un fond blanc (TFG=blanc en dark → invisible)
     }else{
         lv_label_set_text(g_p0_acid,LV_SYMBOL_WARNING " APPAREIL NON CONFIGURE");
         lv_obj_set_style_text_color(g_p0_acid,lv_color_hex(0xD32F2F),0);
@@ -983,7 +983,7 @@ void buildStatusPage(){
     mkCheckRow(p,CHK_OGN, X,Y0+5*DY,"OGN / FLARM (868Mhz)");
 
     // ── Batterie AT-CORE + version
-    r_p0_bat=mkLbl(p,"Battery AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,418);
+    r_p0_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,418);
     mkLbl(p,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
 }
 
@@ -1342,9 +1342,9 @@ static void showWelcome(const char* pilotName, const char* instrName){
     // Footer batterie + version
     char bbuf[40];
     if(g_status.valid && g_status.bat>=0)
-        snprintf(bbuf,sizeof(bbuf),"Battery AT-CORE : %d%%",g_status.bat);
+        snprintf(bbuf,sizeof(bbuf),"%s : %d%%",g_peer_name[0]?g_peer_name:"AT-CORE",g_status.bat);
     else
-        snprintf(bbuf,sizeof(bbuf),"Battery AT-CORE : ---%%");
+        snprintf(bbuf,sizeof(bbuf),"%s : ---%%",g_peer_name[0]?g_peer_name:"AT-CORE");
     mkLbl(g_welcome_ov,bbuf,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,418);
     mkLbl(g_welcome_ov,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
 
@@ -1672,9 +1672,9 @@ void mkAuthOverlay(){
     // Footer : batterie + version (cohérent avec page #01)
     char bbuf[40];
     if(g_status.valid && g_status.bat>=0)
-        snprintf(bbuf,sizeof(bbuf),"Battery AT-CORE : %d%%",g_status.bat);
+        snprintf(bbuf,sizeof(bbuf),"%s : %d%%",g_peer_name[0]?g_peer_name:"AT-CORE",g_status.bat);
     else
-        snprintf(bbuf,sizeof(bbuf),"Battery AT-CORE : ---%%");
+        snprintf(bbuf,sizeof(bbuf),"%s : ---%%",g_peer_name[0]?g_peer_name:"AT-CORE");
     mkLbl(g_auth_ov,bbuf,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,418);
     mkLbl(g_auth_ov,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
 
@@ -2639,7 +2639,7 @@ void buildSettingsPage(){
     // hardware, le filtre par MAC bloque sinon).
     lv_obj_add_flag(lVw,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(lVw,_cbForgetPair,LV_EVENT_LONG_PRESSED,NULL);
-    r_p2_bat=mkLbl(p,"Battery AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,448);
+    r_p2_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,448);
     lv_obj_t*ver=mkLbl(p,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,464);
     lv_obj_add_flag(ver,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(ver,LV_OPA_TRANSP,0);
@@ -2790,16 +2790,17 @@ void updateAllPages(){
         // Batterie AT-CORE (footer page #01 + page Settings)
         const char* bat_txt;
         lv_color_t  bat_col;
+        const char* nm = g_peer_name[0]?g_peer_name:"AT-CORE";
         if(g_status.valid && g_status.bat>=0){
-            snprintf(b,32,"Battery AT-CORE : %d%%%s",g_status.bat,g_status.charging?" " LV_SYMBOL_CHARGE:"");
-            bat_txt=b;
+            snprintf(b,32,"%s : %d%%%s",nm,g_status.bat,g_status.charging?" " LV_SYMBOL_CHARGE:"");
             bat_col=g_status.charging?C_GREEN:
                     g_status.bat>=50?lv_color_hex(0x0f172a):
                     g_status.bat>=20?C_AMBER:C_RED;
         }else{
-            bat_txt="Battery AT-CORE : ---%";
+            snprintf(b,32,"%s : ---%%",nm);
             bat_col=TGREY();
         }
+        bat_txt=b;
         if(r_p0_bat){lv_label_set_text(r_p0_bat,bat_txt);lv_obj_set_style_text_color(r_p0_bat,bat_col,0);}
         if(r_p2_bat){lv_label_set_text(r_p2_bat,bat_txt);lv_obj_set_style_text_color(r_p2_bat,bat_col,0);}
     }
