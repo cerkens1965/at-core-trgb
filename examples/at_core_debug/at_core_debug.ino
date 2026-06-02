@@ -2615,10 +2615,12 @@ static lv_obj_t* mkSetSliderRow(lv_obj_t*p,const char*k,int y,uint8_t val){
 }
 
 // ── Maintenance overlay (Modèle 1 : hotspot + transfert vol) ──────────────────
+static lv_obj_t* g_maint_scanlist;   // fwd : annulé ici aussi (enfant de l'overlay)
 static void _maint_close(){
     if(!g_maint_ov)return;
-    lv_obj_del(g_maint_ov);
-    g_maint_ov=nullptr;g_maint_ssid_ta=nullptr;g_maint_pass_ta=nullptr;g_maint_kb=nullptr;}
+    lv_obj_del(g_maint_ov);   // supprime aussi le panneau scan (enfant)
+    g_maint_ov=nullptr;g_maint_ssid_ta=nullptr;g_maint_pass_ta=nullptr;g_maint_kb=nullptr;
+    g_maint_scanlist=nullptr;}
 static void _maint_close_cb(lv_event_t*e){
     if(lv_event_get_code(e)==LV_EVENT_CLICKED)_maint_close();}
 static void _maint_upload_cb(lv_event_t*e){
@@ -2651,6 +2653,61 @@ static void _maint_kb_cb(lv_event_t*e){
     if((c==LV_EVENT_READY||c==LV_EVENT_CANCEL)&&g_maint_kb)
         lv_obj_add_flag(g_maint_kb,LV_OBJ_FLAG_HIDDEN);}
 
+// Scan WiFi (Fix 1) — l'AT-VIEW (ESP32-S3) liste les réseaux 2.4 GHz à proximité.
+// g_maint_scanlist est déclaré plus haut (près de _maint_close).
+static char      g_scan_ssids[12][33];
+static int       g_scan_n=0;
+static void _maint_scanpick_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    int idx=(int)(intptr_t)lv_event_get_user_data(e);
+    if(idx>=0&&idx<g_scan_n&&g_maint_ssid_ta)
+        lv_textarea_set_text(g_maint_ssid_ta,g_scan_ssids[idx]);
+    if(g_maint_scanlist){lv_obj_del(g_maint_scanlist);g_maint_scanlist=nullptr;}}
+static void _maint_scan_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED||g_maint_scanlist)return;
+    if(g_maint_kb)lv_obj_add_flag(g_maint_kb,LV_OBJ_FLAG_HIDDEN);
+    // Panneau résultats centré, taillé pour le cercle (320 px), scroll vertical.
+    g_maint_scanlist=lv_obj_create(g_maint_ov);
+    lv_obj_set_size(g_maint_scanlist,320,300);lv_obj_center(g_maint_scanlist);
+    lv_obj_set_style_bg_color(g_maint_scanlist,lv_color_hex(0x161b22),0);
+    lv_obj_set_style_border_color(g_maint_scanlist,C_BRAND,0);lv_obj_set_style_border_width(g_maint_scanlist,1,0);
+    lv_obj_set_style_radius(g_maint_scanlist,8,0);
+    lv_obj_set_flex_flow(g_maint_scanlist,LV_FLEX_FLOW_COLUMN);
+    lv_obj_t*tt=lv_label_create(g_maint_scanlist);lv_label_set_text(tt,"Scan WiFi 2.4GHz...");
+    lv_obj_set_style_text_color(tt,TGREY(),0);lv_obj_set_style_text_font(tt,&lv_font_montserrat_14,0);
+    // Bouton Fermer (idx=-1 → _maint_scanpick_cb ne set pas le SSID, ferme juste) :
+    // indispensable si aucun réseau n'est trouvé, sinon le panneau resterait bloqué.
+    {lv_obj_t*xb=lv_btn_create(g_maint_scanlist);lv_obj_set_width(xb,120);
+     lv_obj_set_style_bg_color(xb,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(xb,6,0);
+     lv_obj_set_style_shadow_opa(xb,LV_OPA_TRANSP,0);
+     lv_obj_add_event_cb(xb,_maint_scanpick_cb,LV_EVENT_CLICKED,(void*)(intptr_t)(-1));
+     lv_obj_t*l=lv_label_create(xb);lv_label_set_text(l,"Fermer");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);lv_obj_center(l);}
+    // Si l'AP (Settings WIFI) tourne, NE PAS scanner : passer en STA tuerait l'AP +
+    // le WebServer (g_wifi_active resterait incohérent). On refuse proprement.
+    if(g_wifi_active){lv_label_set_text(tt,"Desactive WIFI (Settings) d'abord");return;}
+    lv_refr_now(NULL);   // dessine "Scan..." + Fermer AVANT le scan bloquant (~2-4 s)
+    WiFi.mode(WIFI_STA);
+    int n=WiFi.scanNetworks();
+    g_scan_n=0;
+    for(int i=0;i<n&&g_scan_n<12;i++){
+        String s=WiFi.SSID(i);
+        if(s.length()==0)continue;   // SSID caché
+        strlcpy(g_scan_ssids[g_scan_n],s.c_str(),sizeof(g_scan_ssids[0]));
+        lv_obj_t*b=lv_btn_create(g_maint_scanlist);lv_obj_set_width(b,280);
+        lv_obj_set_style_bg_color(b,lv_color_hex(0x21262d),0);lv_obj_set_style_radius(b,6,0);
+        lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+        lv_obj_add_event_cb(b,_maint_scanpick_cb,LV_EVENT_CLICKED,(void*)(intptr_t)g_scan_n);
+        char row[52];snprintf(row,sizeof(row),"%s  %ddBm",g_scan_ssids[g_scan_n],(int)WiFi.RSSI(i));
+        lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,row);
+        lv_obj_set_style_text_color(l,lv_color_hex(0xe6edf3),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);
+        g_scan_n++;
+    }
+    WiFi.scanDelete();
+    WiFi.mode(WIFI_OFF);   // restaure l'état dormant (BLE-only) → wifiStart() repartira proprement OFF→AP
+    lv_label_set_text(tt,g_scan_n?"Choisis ton hotspot (2.4GHz):":"Aucun reseau 2.4GHz (5GHz?)");}
+
 void mkMaintenanceOverlay(){
     if(g_maint_ov)return;
     g_maint_ov=lv_obj_create(lv_scr_act());
@@ -2661,11 +2718,11 @@ void mkMaintenanceOverlay(){
 
     lv_obj_t*tl=lv_label_create(g_maint_ov);lv_label_set_text(tl,"MAINTENANCE");
     lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_20,0);
-    lv_obj_align(tl,LV_ALIGN_TOP_MID,0,42);
+    lv_obj_align(tl,LV_ALIGN_TOP_MID,0,34);
 
     // Bouton transfert vol
-    lv_obj_t*bu=lv_btn_create(g_maint_ov);lv_obj_set_size(bu,300,40);
-    lv_obj_align(bu,LV_ALIGN_TOP_MID,0,78);
+    lv_obj_t*bu=lv_btn_create(g_maint_ov);lv_obj_set_size(bu,300,38);
+    lv_obj_align(bu,LV_ALIGN_TOP_MID,0,62);
     lv_obj_set_style_bg_color(bu,C_BRAND,0);lv_obj_set_style_radius(bu,8,0);
     lv_obj_set_style_border_width(bu,0,0);lv_obj_set_style_shadow_opa(bu,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bu,_maint_upload_cb,LV_EVENT_CLICKED,NULL);
@@ -2673,28 +2730,36 @@ void mkMaintenanceOverlay(){
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
-    // Section hotspot
-    mkLbl(g_maint_ov,"HOTSPOT TELEPHONE",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,132);
+    // Champ SSID (gauche) + bouton Scan (droite)
     g_maint_ssid_ta=lv_textarea_create(g_maint_ov);
     lv_textarea_set_one_line(g_maint_ssid_ta,true);
-    lv_textarea_set_placeholder_text(g_maint_ssid_ta,"SSID");
+    lv_textarea_set_placeholder_text(g_maint_ssid_ta,"SSID hotspot");
     lv_textarea_set_text(g_maint_ssid_ta,g_hs_ssid);
-    lv_textarea_set_max_length(g_maint_ssid_ta,32);   // SSID 802.11
-    lv_obj_set_size(g_maint_ssid_ta,360,42);lv_obj_align(g_maint_ssid_ta,LV_ALIGN_TOP_MID,0,150);
+    lv_textarea_set_max_length(g_maint_ssid_ta,32);
+    lv_obj_set_size(g_maint_ssid_ta,228,38);lv_obj_align(g_maint_ssid_ta,LV_ALIGN_TOP_MID,-56,114);
     lv_obj_add_event_cb(g_maint_ssid_ta,_maint_ta_cb,LV_EVENT_ALL,NULL);
+    lv_obj_t*bsc=lv_btn_create(g_maint_ov);lv_obj_set_size(bsc,84,38);
+    lv_obj_align(bsc,LV_ALIGN_TOP_MID,150,114);
+    lv_obj_set_style_bg_color(bsc,lv_color_hex(0x1f4068),0);lv_obj_set_style_radius(bsc,8,0);
+    lv_obj_set_style_border_width(bsc,0,0);lv_obj_set_style_shadow_opa(bsc,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bsc,_maint_scan_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bsc);lv_label_set_text(l,"Scan");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
+    // Champ mot de passe
     g_maint_pass_ta=lv_textarea_create(g_maint_ov);
     lv_textarea_set_one_line(g_maint_pass_ta,true);
     lv_textarea_set_password_mode(g_maint_pass_ta,true);
     lv_textarea_set_placeholder_text(g_maint_pass_ta,"Mot de passe");
     lv_textarea_set_text(g_maint_pass_ta,g_hs_pass);
-    lv_textarea_set_max_length(g_maint_pass_ta,63);   // WPA2 PSK max
-    lv_obj_set_size(g_maint_pass_ta,360,42);lv_obj_align(g_maint_pass_ta,LV_ALIGN_TOP_MID,0,198);
+    lv_textarea_set_max_length(g_maint_pass_ta,63);
+    lv_obj_set_size(g_maint_pass_ta,340,38);lv_obj_align(g_maint_pass_ta,LV_ALIGN_TOP_MID,0,160);
     lv_obj_add_event_cb(g_maint_pass_ta,_maint_ta_cb,LV_EVENT_ALL,NULL);
 
     // Boutons Enregistrer / Fermer
-    lv_obj_t*bs=lv_btn_create(g_maint_ov);lv_obj_set_size(bs,170,38);
-    lv_obj_align(bs,LV_ALIGN_TOP_MID,-92,250);
+    lv_obj_t*bs=lv_btn_create(g_maint_ov);lv_obj_set_size(bs,160,36);
+    lv_obj_align(bs,LV_ALIGN_TOP_MID,-86,206);
     lv_obj_set_style_bg_color(bs,C_GREEN,0);lv_obj_set_style_radius(bs,8,0);
     lv_obj_set_style_border_width(bs,0,0);lv_obj_set_style_shadow_opa(bs,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bs,_maint_save_cb,LV_EVENT_CLICKED,NULL);
@@ -2702,8 +2767,8 @@ void mkMaintenanceOverlay(){
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
-    lv_obj_t*bc=lv_btn_create(g_maint_ov);lv_obj_set_size(bc,170,38);
-    lv_obj_align(bc,LV_ALIGN_TOP_MID,92,250);
+    lv_obj_t*bc=lv_btn_create(g_maint_ov);lv_obj_set_size(bc,160,36);
+    lv_obj_align(bc,LV_ALIGN_TOP_MID,86,206);
     lv_obj_set_style_bg_color(bc,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bc,8,0);
     lv_obj_set_style_border_width(bc,0,0);lv_obj_set_style_shadow_opa(bc,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bc,_maint_close_cb,LV_EVENT_CLICKED,NULL);
@@ -2712,12 +2777,15 @@ void mkMaintenanceOverlay(){
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
     // Aide OTA (non pilotable en BLE : flux AP du portail AT-CORE)
-    mkLbl(g_maint_ov,"MAJ AT-CORE: BOOT 6s -> WiFi ATCORE-SETUP",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,300);
-    mkLbl(g_maint_ov,"MAJ AT-VIEW: WIFI ON (Settings) -> 192.168.4.1",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,316);
+    mkLbl(g_maint_ov,"MAJ AT-CORE: BOOT 6s -> ATCORE-SETUP",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,250);
+    mkLbl(g_maint_ov,"MAJ AT-VIEW: WIFI ON -> 192.168.4.1",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,266);
 
-    // Clavier alphanumérique LVGL — caché par défaut, suit le textarea focalisé.
+    // Clavier LVGL — TAILLÉ POUR LE CERCLE : 320x175 centré (les coins restent
+    // dans le disque 480, contrairement au plein-largeur dont la rangée du bas
+    // sortait du cercle). Caché par défaut, suit le textarea focalisé ; les
+    // champs (y114/y160) restent visibles au-dessus quand il s'affiche.
     g_maint_kb=lv_keyboard_create(g_maint_ov);
-    lv_obj_set_size(g_maint_kb,480,220);lv_obj_align(g_maint_kb,LV_ALIGN_BOTTOM_MID,0,0);
+    lv_obj_set_size(g_maint_kb,320,175);lv_obj_align(g_maint_kb,LV_ALIGN_TOP_MID,0,224);
     lv_keyboard_set_textarea(g_maint_kb,g_maint_ssid_ta);
     lv_obj_add_flag(g_maint_kb,LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(g_maint_kb,_maint_kb_cb,LV_EVENT_ALL,NULL);}

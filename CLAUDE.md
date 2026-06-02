@@ -203,14 +203,17 @@ Overlay plein écran ouvert via le bouton **MAINTENANCE** (Settings sous-page 1)
 | Élément | Action |
 |---------|--------|
 | Bouton « Transferer le dernier vol » | `sendCtl("upload")` → AT-CORE connecte son hotspot + upload Firebase. L'**overlay de progression `up_pct` existant** s'affiche tout seul (STATUS `flt_ph≥1`). |
-| Champs SSID + mot de passe | `lv_textarea` × 2 + un `lv_keyboard` partagé (caché par défaut, apparaît au focus, masqué sur ✓/✕). Max 32 / 63. |
+| Champ SSID + bouton **Scan** | `lv_textarea` + scan WiFi 2.4 GHz (`WiFi.scanNetworks`, restauré `WIFI_OFF` après, refusé si AP active) → liste cliquable qui remplit le SSID. Un hotspot absent du scan = il est en 5 GHz (diag intégré). |
+| Champ mot de passe | `lv_textarea` password. Les deux partagent un `lv_keyboard` **taillé pour le cercle** (320×175 centré — le plein-largeur avait sa rangée du bas hors disque), caché par défaut, suit le focus, masqué sur ✓/✕. Max 32 / 63. |
 | Bouton « Enregistrer » | `unitSaveHotspot()` (NVS `hs_ssid`/`hs_pass`) **+** `sendWifiCreds()` → BLE `{"cmd":"wifi","s","p"}`. Feedback « Envoye » (poussé BLE) ou « Sauve (hors ligne) ». |
 | Aide MAJ firmware | Texte 2 lignes : **AT-CORE** = BOOT 6 s → WiFi `ATCORE-SETUP` ; **AT-VIEW** = WIFI ON (Settings) → `192.168.4.1`. |
 
 `sendWifiCreds()` échappe `"`/`\` (JSON) et respecte la limite write AT-CORE 200 B.
 
-⚠️ Écran rond 480×480 : le `lv_keyboard` plein largeur a ses coins bas légèrement
-rognés par le cercle — à valider hardware (cf. [[trgb_round_screen_geometry]]).
+Écran rond 480×480 : clavier 320×175 centré → coins dans le disque (cf.
+[[trgb_round_screen_geometry]]). Le scan WiFi bloque ~2-4 s (coex BLE) → si le lien
+BLE tombe, `_maint_save_cb` ne fait que la sauvegarde NVS locale (« Sauve hors ligne »)
+et le portail AT-CORE reste le plan B confortable pour saisir le hotspot.
 
 ### OTA firmware AT-VIEW (WP7 — 2026-06-02)
 
