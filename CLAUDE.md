@@ -44,6 +44,13 @@ pio run -e T-RGB -t upload
 
 Le `platformio.ini` à la racine pointe sur `src_dir = examples/at_core_debug`.
 
+### CI — GitHub Actions
+
+`.github/workflows/pio.yml` : build env **`T-RGB`** à chaque push touchant `src/**`,
+`examples/at_core_debug/**`, `platformio.ini` ou le workflow. **✅ vert** (commit `4a8b708`).
+Plateforme pinnée `espressif32@6.9.0` (reproductibilité CI/local). Pas de `secrets.h`
+requis côté AT-VIEW. Couvre aussi `arduino_ci.yml`.
+
 ## Architecture — Pages LVGL
 
 | Page | Accès | Contenu |
