@@ -198,12 +198,29 @@ Overlay plein écran ouvert via le bouton **MAINTENANCE** (Settings sous-page 1)
 | Bouton « Transferer le dernier vol » | `sendCtl("upload")` → AT-CORE connecte son hotspot + upload Firebase. L'**overlay de progression `up_pct` existant** s'affiche tout seul (STATUS `flt_ph≥1`). |
 | Champs SSID + mot de passe | `lv_textarea` × 2 + un `lv_keyboard` partagé (caché par défaut, apparaît au focus, masqué sur ✓/✕). Max 32 / 63. |
 | Bouton « Enregistrer » | `unitSaveHotspot()` (NVS `hs_ssid`/`hs_pass`) **+** `sendWifiCreds()` → BLE `{"cmd":"wifi","s","p"}`. Feedback « Envoye » (poussé BLE) ou « Sauve (hors ligne) ». |
-| Aide MAJ firmware | Texte seul : l'OTA AT-CORE est un flux **AP du portail** (BOOT 6 s → WiFi `ATCORE-SETUP` depuis le téléphone), **pas pilotable en BLE**. |
+| Aide MAJ firmware | Texte 2 lignes : **AT-CORE** = BOOT 6 s → WiFi `ATCORE-SETUP` ; **AT-VIEW** = WIFI ON (Settings) → `192.168.4.1`. |
 
 `sendWifiCreds()` échappe `"`/`\` (JSON) et respecte la limite write AT-CORE 200 B.
 
 ⚠️ Écran rond 480×480 : le `lv_keyboard` plein largeur a ses coins bas légèrement
 rognés par le cercle — à valider hardware (cf. [[trgb_round_screen_geometry]]).
+
+### OTA firmware AT-VIEW (WP7 — 2026-06-02)
+
+Le T-RGB se met à jour **sans câble** via son propre AP (l'infra existait déjà pour
+l'upload AIP). Partition `default_16MB.csv` = **2 slots OTA** → aucune migration.
+
+1. **WIFI ON** (Settings) → `wifiStart()` lève l'AP (SSID = nom BLE, pass `wifi_pass`)
+   + `WebServer` sur `192.168.4.1`.
+2. Téléphone sur l'AP → page web → section **« Firmware (OTA) »** → choisir le
+   `firmware.bin` AT-VIEW (`/tmp/pio_build_atview/T-RGB/firmware.bin`) → Flasher.
+3. Route `/update` (distincte du `/upload` AIP→SD) : `handleOtaData` → `Update.write`
+   sur le slot inactif → `Update.end(true)` → reboot différé (`g_ota_reboot_ms`, loop).
+
+**Garde anti-brick** : `handleOtaData` vérifie l'en-tête image (magic `0xE9` + chip_id
+`9` = ESP32-S3 à l'offset 12) sur le 1er chunk → un `.bin` étranger (ex : firmware
+**AT-CORE** qui est ESP32 chip_id 0) est refusé (`Update.abort`) avant tout flash.
+`yield()` dans la boucle d'écriture (respiration WiFi + WDT éventuel).
 
 ## Roadmap
 

@@ -17,6 +17,7 @@
 #include <math.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <Update.h>   // OTA firmware AT-VIEW (WP7) — réception .bin via l'AP du WebServer
 #include <ESPmDNS.h>
 #include "img_vl3.h"
 #include "img_aircraft_icons.h"
@@ -2711,8 +2712,8 @@ void mkMaintenanceOverlay(){
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
     // Aide OTA (non pilotable en BLE : flux AP du portail AT-CORE)
-    mkLbl(g_maint_ov,"MAJ firmware: BOOT 6s sur AT-CORE",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,300);
-    mkLbl(g_maint_ov,"puis WiFi ATCORE-SETUP (ce telephone)",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,316);
+    mkLbl(g_maint_ov,"MAJ AT-CORE: BOOT 6s -> WiFi ATCORE-SETUP",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,300);
+    mkLbl(g_maint_ov,"MAJ AT-VIEW: WIFI ON (Settings) -> 192.168.4.1",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,316);
 
     // Clavier alphanumérique LVGL — caché par défaut, suit le textarea focalisé.
     g_maint_kb=lv_keyboard_create(g_maint_ov);
@@ -3145,6 +3146,11 @@ static void handleRoot(){
         "<form method='POST' action='/upload' enctype='multipart/form-data'>"
         "<input type='file' name='file'><br>"
         "<input type='submit' value='Envoyer sur la carte SD'></form>"
+        "<h2>Firmware (OTA)</h2>"
+        "<p style='color:#9ca3af;font-size:.8em'>firmware.bin AT-VIEW &rarr; flash slot OTA + reboot</p>"
+        "<form method='POST' action='/update' enctype='multipart/form-data'>"
+        "<input type='file' name='fw' accept='.bin'><br>"
+        "<input type='submit' value='Flasher le firmware'></form>"
         "<h2>Fichiers dans /aip/</h2><ul>");
     page+=sdFileListHtml();
     page+="</ul></body></html>";
@@ -3174,6 +3180,48 @@ static void handleUploadDone(){
         "<h2>&#10003; Upload OK</h2>"
         "<a style='color:#60a5fa' href='/'>&#8592; Retour</a></body></html>");}
 
+// ── OTA firmware AT-VIEW (WP7) ────────────────────────────────────────────────
+// Réception du firmware.bin via l'AP (route /update, distincte du /upload AIP→SD).
+// Partition default_16MB.csv = 2 slots OTA → flash du slot inactif, pas de migration.
+// Reboot différé (g_ota_reboot_ms) pour laisser la réponse HTTP partir.
+static volatile uint32_t g_ota_reboot_ms=0;
+static void handleOtaDone(){
+    bool ok=!Update.hasError();
+    g_webserver->sendHeader("Connection","close");
+    g_webserver->send(200,"text/html",ok
+        ? "<!DOCTYPE html><html><head><meta charset='UTF-8'></head>"
+          "<body style='background:#0d1117;color:#22c55e;font-family:sans-serif;padding:20px'>"
+          "<h2>&#10003; Firmware OK</h2><p>Redemarrage sur la nouvelle version...</p></body></html>"
+        : "<!DOCTYPE html><html><head><meta charset='UTF-8'></head>"
+          "<body style='background:#0d1117;color:#ef4444;font-family:sans-serif;padding:20px'>"
+          "<h2>Echec flash</h2><p>Firmware inchange. Reessayez.</p></body></html>");
+    if(ok)g_ota_reboot_ms=millis();}
+static bool s_ota_hdr_ok=false;
+static void handleOtaData(){
+    HTTPUpload& u=g_webserver->upload();
+    if(u.status==UPLOAD_FILE_START){
+        s_ota_hdr_ok=false;
+        Serial.printf("[OTA] start: %s\n",u.filename.c_str());
+        if(!Update.begin(UPDATE_SIZE_UNKNOWN))Serial.println("[OTA] begin FAIL");
+    }else if(u.status==UPLOAD_FILE_WRITE){
+        // Garde anti-brick : refuse un .bin qui n'est pas une image ESP32-S3
+        // (magic 0xE9 @0 + chip_id 9 @12 de l'en-tête esp_image). Évite de flasher
+        // le firmware AT-CORE (ESP32, chip_id 0) ou un binaire étranger. 1er chunk.
+        if(!s_ota_hdr_ok && u.currentSize>=13){
+            s_ota_hdr_ok=true;
+            if(u.buf[0]!=0xE9 || u.buf[12]!=0x09){
+                Serial.println("[OTA] refuse: pas une image ESP32-S3");
+                Update.abort();
+            }
+        }
+        if(!Update.hasError() && Update.write(u.buf,u.currentSize)!=u.currentSize)
+            Serial.println("[OTA] write incomplet");
+        yield();   // feed WDT éventuel + respiration stack WiFi sur upload multi-MB
+    }else if(u.status==UPLOAD_FILE_END){
+        if(Update.end(true))Serial.printf("[OTA] OK %u bytes\n",u.totalSize);
+        else Serial.printf("[OTA] end FAIL err=%d\n",Update.getError());
+    }else if(u.status==UPLOAD_FILE_ABORTED){Update.abort();Serial.println("[OTA] aborte");}}
+
 void wifiStart(){
     WiFi.mode(WIFI_AP);
     WiFi.softAP(g_unit_name,g_wifi_pass);
@@ -3181,6 +3229,7 @@ void wifiStart(){
     g_webserver=new WebServer(80);
     g_webserver->on("/",HTTP_GET,handleRoot);
     g_webserver->on("/upload",HTTP_POST,handleUploadDone,handleUploadData);
+    g_webserver->on("/update",HTTP_POST,handleOtaDone,handleOtaData);   // OTA firmware (WP7)
     g_webserver->begin();
     g_wifi_active=true;
     if(s_wifi_v)lv_label_set_text(s_wifi_v,"192.168.4.1");
@@ -3295,4 +3344,5 @@ void loop(){
     if(g_page==1&&now-drLast>=200){drLast=now;updateRadarDR();
         if(g_cfg.aip_en&&r_aip_layer&&g_status.valid)lv_obj_invalidate(r_aip_layer);}
     if(g_wifi_active&&g_webserver)g_webserver->handleClient();
+    if(g_ota_reboot_ms&&millis()-g_ota_reboot_ms>1200){Serial.println("[OTA] reboot");delay(200);ESP.restart();}
     lv_timer_handler();delay(5);}
