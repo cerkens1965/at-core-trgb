@@ -204,6 +204,16 @@ Overlay plein écran ouvert via le bouton **MAINTENANCE** (Settings sous-page 1)
 |---------|--------|
 | Bouton « Transferer le dernier vol » | `sendCtl("upload")` → AT-CORE connecte son hotspot + upload Firebase. L'**overlay de progression `up_pct` existant** s'affiche tout seul (STATUS `flt_ph≥1`). |
 | Bouton « Tester le hotspot » | `sendCtl("wifitest")` → l'AT-CORE se connecte au hotspot et logue `[WIFI] IP=...`/`FAIL` en série. Diagnostic **au sol sans vol** (l'upload réel exige un vol finalisé). |
+| Ligne « Dernier vol » / « Liste des vols » | Le 1er transfère le vol courant ; le 2nd ouvre l'**écran Vols** (WP8). |
+
+### Écran Vols (WP8) — `mkVolsOverlay`
+
+Lit **CHR_FLIGHTS `6E40000B`** (READ) après `{"cmd":"flights"}` (attend `STATUS.flt_rdy==1`
++ ≥1,5 s, lecture seulement si connecté → pas de freeze loop). Liste scrollable taillée
+pour le cercle : `MM-DD HH:MM>HH:MM` + `[ ]` cochable ; vols **transférés en gris**
+(non sélectionnables, label « envoye »). Boutons : **Transferer (N)** → `{"cmd":"uploadlist"}`
+(≤8 fids), **Suppr. transferes** (double-tap de confirmation) → `{"cmd":"delflights"}`,
+**Fermer**. Le vol de la session courante n'apparaît pas (→ bouton « Dernier vol »).
 | Champ SSID + bouton **Scan** | `lv_textarea` + scan WiFi 2.4 GHz (`WiFi.scanNetworks`, restauré `WIFI_OFF` après, refusé si AP active) → liste cliquable qui remplit le SSID. Un hotspot absent du scan = il est en 5 GHz (diag intégré). |
 | Champ mot de passe | `lv_textarea` password. Les deux partagent un `lv_keyboard` **taillé pour le cercle** (320×175 centré — le plein-largeur avait sa rangée du bas hors disque), caché par défaut, suit le focus, masqué sur ✓/✕. Max 32 / 63. |
 | Bouton « Enregistrer » | `unitSaveHotspot()` (NVS `hs_ssid`/`hs_pass`) **+** `sendWifiCreds()` → BLE `{"cmd":"wifi","s","p"}`. Feedback « Envoye » (poussé BLE) ou « Sauve (hors ligne) ». |

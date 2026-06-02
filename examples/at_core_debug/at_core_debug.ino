@@ -37,6 +37,7 @@ LilyGo_RGBPanel panel;
 #define BLE_CHR_PILOTS  "6E400008-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_CONFIG  "6E400009-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_CONTROL "6E40000A-B5A3-F393-E0A9-E50E24DCCA9E"  // write : binding {"cmd":"bind"|"unpair"}
+#define BLE_CHR_FLIGHTS "6E40000B-B5A3-F393-E0A9-E50E24DCCA9E"  // read  : liste vols SD (WP8)
 // ── Bypass auth pilote (temporaire) ───────────────────────────────────────────
 // 1 = on saute la page #02 "Select your name" / #03 welcome : dès que la machine
 // est appairée (BLE) + GPS fix, on file direct au radar. L'appairage machine
@@ -71,6 +72,7 @@ struct StatusData {
     bool gps_fix,sd_ok,flarm_ok,adsb_ok,charging,valid;
     uint8_t flt_phase;   // 0=fly 1=ended 2=closed 3=uploading 4=done 5=fail (tâche D)
     uint8_t upload_pct;  // 0..100 (tâche D)
+    uint8_t flt_rdy;     // WP8 : 1=liste vols prête à lire (CHR_FLIGHTS)
     };
 struct FlightData  { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
@@ -118,7 +120,8 @@ static BLERemoteCharacteristic *g_chrS=nullptr,*g_chrF=nullptr,
                                 *g_chrW=nullptr,   // AUTH write (6E400007)
                                 *g_chrP=nullptr,   // PILOTS notify (6E400008)
                                 *g_chrCfg=nullptr, // CONFIG write (6E400009) — identité aéronef
-                                *g_chrCtl=nullptr; // CONTROL write (6E40000A) — binding bind/unpair
+                                *g_chrCtl=nullptr, // CONTROL write (6E40000A) — binding bind/unpair
+                                *g_chrFl=nullptr;  // FLIGHTS read (6E40000B) — liste vols SD (WP8)
 // Pilot list BLE reassembly buffer
 static char    g_prx_buf[4096] = {};
 static int     g_prx_len       = 0;
@@ -490,7 +493,7 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.gps_fix=d["gps_fix"]|false;g_status.sd_ok=d["sd_ok"]|false;
     g_status.flarm_ok=d["flarm"]|false;g_status.adsb_ok=d["adsb"]|false;
     g_status.charging=d["chg"]|false;
-    g_status.flt_phase=d["flt_ph"]|0;g_status.upload_pct=d["up_pct"]|0;
+    g_status.flt_phase=d["flt_ph"]|0;g_status.upload_pct=d["up_pct"]|0;g_status.flt_rdy=d["flt_rdy"]|0;
     g_status.valid=true;g_dataUpdated=true;}
 void parseFlight(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_flight.gforce_z=d["gf"]|1.0f;g_flight.co_ppm=d["co"]|0;
@@ -622,6 +625,7 @@ bool connectBLE(){
     g_chrP=g_svc->getCharacteristic(BLE_CHR_PILOTS);
     g_chrCfg=g_svc->getCharacteristic(BLE_CHR_CONFIG);
     g_chrCtl=g_svc->getCharacteristic(BLE_CHR_CONTROL);
+    g_chrFl =g_svc->getCharacteristic(BLE_CHR_FLIGHTS);
     if(g_chrS&&g_chrS->canNotify())g_chrS->registerForNotify(notifyS);
     if(g_chrF&&g_chrF->canNotify())g_chrF->registerForNotify(notifyF);
     if(g_chrT&&g_chrT->canNotify())g_chrT->registerForNotify(notifyT);
@@ -2713,6 +2717,158 @@ static void _maint_scan_cb(lv_event_t*e){
     WiFi.mode(WIFI_OFF);   // restaure l'état dormant (BLE-only) → wifiStart() repartira proprement OFF→AP
     lv_label_set_text(tt,g_scan_n?"Choisis ton hotspot (2.4GHz):":"Aucun reseau 2.4GHz (5GHz?)");}
 
+// ── Écran VOLS (WP8) — liste multi-select, transfert, suppression ─────────────
+struct VolItem { char fid[20]; char d[12]; char s[6]; char e[6]; uint8_t up; bool sel; lv_obj_t* lbl; lv_obj_t* row; };
+static VolItem  g_vols[16];
+static int      g_vols_n=0;
+static lv_obj_t* g_vols_ov=nullptr;
+static lv_obj_t* g_vols_list=nullptr;
+static lv_obj_t* g_vols_load=nullptr;   // label "Chargement..."
+static lv_obj_t* g_vols_xfer=nullptr;   // label du bouton Transferer (N)
+static bool     g_vols_loading=false, g_vols_del_armed=false;
+static uint32_t g_vols_t0=0;
+
+static void volsClose(){
+    if(!g_vols_ov)return;
+    lv_obj_del(g_vols_ov);
+    g_vols_ov=nullptr;g_vols_list=nullptr;g_vols_load=nullptr;g_vols_xfer=nullptr;
+    g_vols_loading=false;g_vols_del_armed=false;g_vols_n=0;}
+static void _vols_close_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED)volsClose(); }
+
+static void volsUpdXfer(){
+    if(!g_vols_xfer)return;
+    int n=0; for(int i=0;i<g_vols_n;i++) if(g_vols[i].sel)n++;
+    char b[24]; snprintf(b,sizeof(b),"Transferer (%d)",n); lv_label_set_text(g_vols_xfer,b);}
+
+static void _vols_row_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    int i=(int)(intptr_t)lv_event_get_user_data(e);
+    if(i<0||i>=g_vols_n||g_vols[i].up)return;
+    g_vols[i].sel=!g_vols[i].sel;
+    const char* md=strlen(g_vols[i].d)>=10?g_vols[i].d+5:g_vols[i].d;
+    char r[48]; snprintf(r,sizeof(r),"[%s] %s %s>%s",g_vols[i].sel?"x":" ",md,g_vols[i].s,g_vols[i].e);
+    lv_label_set_text(g_vols[i].lbl,r);
+    lv_obj_set_style_bg_color(g_vols[i].row,g_vols[i].sel?C_BRAND:lv_color_hex(0x21262d),0);
+    volsUpdXfer();}
+
+// Construit {"cmd":"uploadlist","f":[...]} et l'écrit sur CHR_CONTROL (≤200 B → ≤8 fids).
+static void _vols_xfer_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED||!g_chrCtl||!g_chrCtl->canWrite())return;
+    char p[200]; int w=snprintf(p,sizeof(p),"{\"cmd\":\"uploadlist\",\"f\":["); int cnt=0;
+    for(int i=0;i<g_vols_n;i++){
+        if(!g_vols[i].sel)continue;
+        int n=snprintf(p+w,sizeof(p)-w,"%s\"%s\"",cnt?",":"",g_vols[i].fid);
+        if(w+n>178)break; w+=n; cnt++;
+    }
+    w+=snprintf(p+w,sizeof(p)-w,"]}");
+    if(cnt){ g_chrCtl->writeValue((uint8_t*)p,strlen(p),false); volsClose(); }  // overlay progress up_pct prend le relais
+}
+// Suppression des .up (transférés) — double-tap de confirmation.
+static void _vols_del_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
+    if(!g_vols_del_armed){
+        g_vols_del_armed=true;
+        if(l)lv_label_set_text(l,"Confirmer ?");
+        lv_obj_set_style_bg_color(b,C_RED,0);
+        return;
+    }
+    sendCtl("delflights");   // AT-CORE efface les .up puis re-scanne
+    volsClose();}
+
+// Lit CHR_FLIGHTS, parse le JSON, construit les lignes.
+static void volsBuildList(){
+    if(!g_chrFl||!g_vols_list)return;
+    if(g_vols_load){lv_obj_add_flag(g_vols_load,LV_OBJ_FLAG_HIDDEN);}
+    std::string v=g_chrFl->readValue();
+    JsonDocument d; if(deserializeJson(d,v.c_str()))return;
+    JsonArray arr=d.as<JsonArray>();
+    lv_obj_clean(g_vols_list); g_vols_n=0;
+    for(JsonObject o:arr){
+        if(g_vols_n>=16)break;
+        VolItem& it=g_vols[g_vols_n];
+        strlcpy(it.fid,o["f"]|"",sizeof(it.fid));
+        strlcpy(it.d,o["d"]|"?",sizeof(it.d));
+        strlcpy(it.s,o["s"]|"?",sizeof(it.s));
+        strlcpy(it.e,o["e"]|"?",sizeof(it.e));
+        it.up=o["u"]|0; it.sel=false;
+        lv_obj_t*b=lv_btn_create(g_vols_list);lv_obj_set_size(b,270,30);
+        lv_obj_set_style_radius(b,6,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+        lv_obj_set_style_bg_color(b,it.up?lv_color_hex(0x161b22):lv_color_hex(0x21262d),0);
+        const char* md=strlen(it.d)>=10?it.d+5:it.d;
+        char r[52];
+        if(it.up) snprintf(r,sizeof(r),"%s %s>%s  envoye",md,it.s,it.e);
+        else      snprintf(r,sizeof(r),"[ ] %s %s>%s",md,it.s,it.e);
+        lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,r);
+        lv_obj_set_style_text_color(l,it.up?lv_color_hex(0x6b7280):lv_color_hex(0xe6edf3),0);
+        lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);
+        it.lbl=l; it.row=b;
+        if(!it.up)lv_obj_add_event_cb(b,_vols_row_cb,LV_EVENT_CLICKED,(void*)(intptr_t)g_vols_n);
+        g_vols_n++;
+    }
+    if(g_vols_n==0){
+        lv_obj_t*l=lv_label_create(g_vols_list);lv_label_set_text(l,"Aucun vol sur la SD");
+        lv_obj_set_style_text_color(l,TGREY(),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);
+    }
+    volsUpdXfer();}
+
+void mkVolsOverlay(){
+    if(g_vols_ov)return;
+    g_vols_ov=lv_obj_create(lv_scr_act());
+    lv_obj_set_size(g_vols_ov,480,480);lv_obj_set_pos(g_vols_ov,0,0);
+    lv_obj_set_style_bg_color(g_vols_ov,TBG(),0);lv_obj_set_style_bg_opa(g_vols_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(g_vols_ov,0,0);lv_obj_set_style_radius(g_vols_ov,0,0);
+    lv_obj_set_style_pad_all(g_vols_ov,0,0);lv_obj_clear_flag(g_vols_ov,LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t*tl=lv_label_create(g_vols_ov);lv_label_set_text(tl,"VOLS (UTC)");
+    lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_20,0);
+    lv_obj_align(tl,LV_ALIGN_TOP_MID,0,26);
+
+    // Liste scrollable (taillée pour le cercle)
+    g_vols_list=lv_obj_create(g_vols_ov);
+    lv_obj_set_size(g_vols_list,290,238);lv_obj_align(g_vols_list,LV_ALIGN_TOP_MID,0,56);
+    lv_obj_set_style_bg_color(g_vols_list,lv_color_hex(0x0d1117),0);
+    lv_obj_set_style_border_width(g_vols_list,0,0);lv_obj_set_style_pad_all(g_vols_list,4,0);
+    lv_obj_set_flex_flow(g_vols_list,LV_FLEX_FLOW_COLUMN);
+    g_vols_load=lv_label_create(g_vols_list);lv_label_set_text(g_vols_load,"Chargement...");
+    lv_obj_set_style_text_color(g_vols_load,TGREY(),0);lv_obj_set_style_text_font(g_vols_load,&lv_font_montserrat_14,0);
+
+    // Boutons
+    lv_obj_t*bx=lv_btn_create(g_vols_ov);lv_obj_set_size(bx,210,34);lv_obj_align(bx,LV_ALIGN_TOP_MID,0,302);
+    lv_obj_set_style_bg_color(bx,C_GREEN,0);lv_obj_set_style_radius(bx,8,0);
+    lv_obj_set_style_border_width(bx,0,0);lv_obj_set_style_shadow_opa(bx,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bx,_vols_xfer_cb,LV_EVENT_CLICKED,NULL);
+    g_vols_xfer=lv_label_create(bx);lv_label_set_text(g_vols_xfer,"Transferer (0)");
+    lv_obj_set_style_text_color(g_vols_xfer,lv_color_hex(0xffffff),0);
+    lv_obj_set_style_text_font(g_vols_xfer,&lv_font_montserrat_14,0);lv_obj_center(g_vols_xfer);
+
+    lv_obj_t*bd=lv_btn_create(g_vols_ov);lv_obj_set_size(bd,210,30);lv_obj_align(bd,LV_ALIGN_TOP_MID,0,342);
+    lv_obj_set_style_bg_color(bd,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bd,8,0);
+    lv_obj_set_style_border_width(bd,0,0);lv_obj_set_style_shadow_opa(bd,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bd,_vols_del_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bd);lv_label_set_text(l,"Suppr. transferes");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+
+    lv_obj_t*bc=lv_btn_create(g_vols_ov);lv_obj_set_size(bc,210,30);lv_obj_align(bc,LV_ALIGN_TOP_MID,0,378);
+    lv_obj_set_style_bg_color(bc,lv_color_hex(0x30363d),0);lv_obj_set_style_radius(bc,8,0);
+    lv_obj_set_style_border_width(bc,0,0);lv_obj_set_style_shadow_opa(bc,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bc,_vols_close_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bc);lv_label_set_text(l,"Fermer");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+
+    // Demande la liste. On seed flt_rdy=0 localement : l'AT-CORE le met aussi à 0
+    // à la réception puis 1 quand la liste est prête. Le poll (loop) attend
+    // flt_rdy==1 + ≥1.5 s écoulées (couvre un STATUS périmé encore en transit).
+    sendCtl("flights");
+    g_status.flt_rdy=0;
+    g_vols_loading=true;g_vols_t0=millis();}
+
+static void _open_vols_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    if(!g_vols_ov)mkVolsOverlay();}
+
 void mkMaintenanceOverlay(){
     if(g_maint_ov)return;
     g_maint_ov=lv_obj_create(lv_scr_act());
@@ -2725,13 +2881,21 @@ void mkMaintenanceOverlay(){
     lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_20,0);
     lv_obj_align(tl,LV_ALIGN_TOP_MID,0,34);
 
-    // Bouton transfert vol
-    lv_obj_t*bu=lv_btn_create(g_maint_ov);lv_obj_set_size(bu,300,36);
-    lv_obj_align(bu,LV_ALIGN_TOP_MID,0,56);
+    // Ligne transfert : "Dernier vol" (rapide) + "Liste des vols" (multi-select, WP8)
+    lv_obj_t*bu=lv_btn_create(g_maint_ov);lv_obj_set_size(bu,145,36);
+    lv_obj_align(bu,LV_ALIGN_TOP_MID,-78,56);
     lv_obj_set_style_bg_color(bu,C_BRAND,0);lv_obj_set_style_radius(bu,8,0);
     lv_obj_set_style_border_width(bu,0,0);lv_obj_set_style_shadow_opa(bu,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bu,_maint_upload_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(bu);lv_label_set_text(l,"Transferer le dernier vol");
+    {lv_obj_t*l=lv_label_create(bu);lv_label_set_text(l,"Dernier vol");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+    lv_obj_t*bv=lv_btn_create(g_maint_ov);lv_obj_set_size(bv,145,36);
+    lv_obj_align(bv,LV_ALIGN_TOP_MID,78,56);
+    lv_obj_set_style_bg_color(bv,lv_color_hex(0x1f4068),0);lv_obj_set_style_radius(bv,8,0);
+    lv_obj_set_style_border_width(bv,0,0);lv_obj_set_style_shadow_opa(bv,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bv,_open_vols_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bv);lv_label_set_text(l,"Liste des vols");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
@@ -3428,4 +3592,13 @@ void loop(){
         if(g_cfg.aip_en&&r_aip_layer&&g_status.valid)lv_obj_invalidate(r_aip_layer);}
     if(g_wifi_active&&g_webserver)g_webserver->handleClient();
     if(g_ota_reboot_ms&&millis()-g_ota_reboot_ms>1200){Serial.println("[OTA] reboot");delay(200);ESP.restart();}
+    // WP8 — liste vols prête : handshake flt_rdy 0→1 (AT-CORE met 0 à la réception
+    // de {"cmd":"flights"}, 1 quand la liste est construite) → lit CHR_FLIGHTS.
+    if(g_vols_loading&&g_vols_ov){
+        if(g_connected&&g_status.flt_rdy==1&&millis()-g_vols_t0>1500){
+            g_vols_loading=false;volsBuildList();   // lecture BLE seulement si connecté + liste fraîche
+        }else if(millis()-g_vols_t0>9000){
+            g_vols_loading=false;if(g_vols_load)lv_label_set_text(g_vols_load,"Timeout - reessaie");
+        }
+    }
     lv_timer_handler();delay(5);}
