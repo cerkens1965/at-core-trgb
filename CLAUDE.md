@@ -89,7 +89,7 @@ Scan filtre actuellement sur nom `"AT-CORE NimBLE"`.
 | AUTH | `6E400007-...` | **write** | codes pilote/instructeur (V2 popup) |
 | PILOTS | `6E400008-...` | notify | liste pilotes JSON chunké (Firestore). Format : `[{c,n,r,t,i}, ...]` ou `{"_date":"YYYY-MM-DD","pilots":[{...}]}` (wrapper recommandé pour traçabilité). Protocole chunks : `0x01`=start, `0x02`=data, `0x03`=end (déclenche parse). Résilient : DB préservée si JSON invalide / array vide. |
 | CONFIG | `6E400009-...` | **write** | identité aéronef `{r,t,h}` — auto-push depuis `acSave()` (V1) |
-| CONTROL | `6E40000A-...` | **write** | binding `{"cmd":"bind"\|"unpair"}` — cérémonie d'appairage (Phase 3) |
+| CONTROL | `6E40000A-...` | **write** | `{"cmd":"bind"\|"unpair"}` (appairage) + `{"cmd":"wifi","s","p"}` / `{"cmd":"upload"}` (Maintenance — Modèle 1). Helpers `sendCtl()` / `sendWifiCreds()` |
 
 Service UUID AT-CORE : `4FAFC201-1FB5-459E-8FCC-C5C9C331914B`
 
@@ -169,7 +169,9 @@ Namespace `aircraft` (V1 — saisi via écran Aircraft, auto-pushé vers AT-CORE
 Namespace `unit` :
 - `name` — nom BLE AT-VIEW (`ATVIEW-EBBY1-01`)
 - `paired_mac` — MAC AT-CORE choisi (reconnexion auto)
-- `wifi_pass` — mot de passe AP local
+- `wifi_pass` — mot de passe AP **propre** d'AT-VIEW (maj AIP)
+- `hs_ssid` / `hs_pass` — credentials du **hotspot téléphone** à pousser vers AT-CORE
+  (écran Maintenance → BLE `{"cmd":"wifi"}`). Distincts de `wifi_pass`.
 
 ## Upload progress overlay (V1)
 
@@ -185,6 +187,23 @@ Modal LVGL full-screen (`mkUploadOverlay()`) qui s'affiche sur transition de pha
 | 5 (UPLOAD_FAIL) | "Échec — nouvelle tentative..." rouge, persiste |
 
 Hook : `updUploadOverlay()` appelé depuis `updateAllPages()` (1s).
+
+## Écran Maintenance (Modèle 1 — 2026-06-02)
+
+Overlay plein écran ouvert via le bouton **MAINTENANCE** (Settings sous-page 1).
+`mkMaintenanceOverlay()` (fullscreen `lv_scr_act()`, fermé par `lv_obj_del`).
+
+| Élément | Action |
+|---------|--------|
+| Bouton « Transferer le dernier vol » | `sendCtl("upload")` → AT-CORE connecte son hotspot + upload Firebase. L'**overlay de progression `up_pct` existant** s'affiche tout seul (STATUS `flt_ph≥1`). |
+| Champs SSID + mot de passe | `lv_textarea` × 2 + un `lv_keyboard` partagé (caché par défaut, apparaît au focus, masqué sur ✓/✕). Max 32 / 63. |
+| Bouton « Enregistrer » | `unitSaveHotspot()` (NVS `hs_ssid`/`hs_pass`) **+** `sendWifiCreds()` → BLE `{"cmd":"wifi","s","p"}`. Feedback « Envoye » (poussé BLE) ou « Sauve (hors ligne) ». |
+| Aide MAJ firmware | Texte seul : l'OTA AT-CORE est un flux **AP du portail** (BOOT 6 s → WiFi `ATCORE-SETUP` depuis le téléphone), **pas pilotable en BLE**. |
+
+`sendWifiCreds()` échappe `"`/`\` (JSON) et respecte la limite write AT-CORE 200 B.
+
+⚠️ Écran rond 480×480 : le `lv_keyboard` plein largeur a ses coins bas légèrement
+rognés par le cercle — à valider hardware (cf. [[trgb_round_screen_geometry]]).
 
 ## Roadmap
 

@@ -311,6 +311,13 @@ char g_ac_type[8] = "";   // code OACI ex "VL3"
 char g_ac_hex[7]  = "";   // hex transpondeur ex "38EDC5"
 static lv_obj_t* g_ac_ov       = nullptr;
 static lv_obj_t* g_ac_disp     = nullptr;
+// Maintenance (Modèle 1 : hotspot téléphone à pousser vers AT-CORE + transfert vol)
+char g_hs_ssid[33] = "";   // SSID hotspot (à pousser via BLE {"cmd":"wifi"})
+char g_hs_pass[64] = "";   // mot de passe hotspot (NVS unit/hs_*, ≠ wifi_pass = AP propre AT-VIEW)
+static lv_obj_t* g_maint_ov      = nullptr;
+static lv_obj_t* g_maint_ssid_ta = nullptr;
+static lv_obj_t* g_maint_pass_ta = nullptr;
+static lv_obj_t* g_maint_kb      = nullptr;
 static lv_obj_t* g_ac_hdr_reg  = nullptr;
 static lv_obj_t* g_ac_hdr_typ  = nullptr;
 static lv_obj_t* g_ac_hdr_hex  = nullptr;
@@ -718,10 +725,19 @@ void unitLoad(){
     p.getString("name","ATVIEW-EBBY1-01").toCharArray(g_unit_name,sizeof(g_unit_name));
     p.getString("paired_mac","").toCharArray(g_paired_mac,sizeof(g_paired_mac));
     p.getString("wifi_pass","atview1234").toCharArray(g_wifi_pass,sizeof(g_wifi_pass));
+    p.getString("hs_ssid","").toCharArray(g_hs_ssid,sizeof(g_hs_ssid));
+    p.getString("hs_pass","").toCharArray(g_hs_pass,sizeof(g_hs_pass));
     p.end();}
 void unitSaveMac(const char*mac){
     strlcpy(g_paired_mac,mac,sizeof(g_paired_mac));
     Preferences p;p.begin("unit",false);p.putString("paired_mac",mac);p.end();}
+// Persiste localement les creds hotspot téléphone (clés dédiées hs_ssid/hs_pass,
+// distinctes de wifi_pass qui est le mot de passe de l'AP propre d'AT-VIEW).
+void unitSaveHotspot(const char*ssid,const char*pass){
+    strlcpy(g_hs_ssid,ssid,sizeof(g_hs_ssid));
+    strlcpy(g_hs_pass,pass?pass:"",sizeof(g_hs_pass));
+    Preferences p;p.begin("unit",false);
+    p.putString("hs_ssid",g_hs_ssid);p.putString("hs_pass",g_hs_pass);p.end();}
 
 // Efface la MAC AT-CORE pairée du NVS et de la RAM. À utiliser quand on
 // change de carte AT-CORE (la MAC du nouveau hardware diffère). Sans ça
@@ -749,6 +765,27 @@ void sendCtl(const char* cmd){
     char p[32];snprintf(p,sizeof(p),"{\"cmd\":\"%s\"}",cmd);
     g_chrCtl->writeValue((uint8_t*)p,strlen(p),false);
     Serial.printf("[BLE] CTRL %s\n",p);}
+
+// Échappe " et \ pour insertion sûre dans une chaîne JSON (SSID/pass WPA2 peuvent
+// en contenir → sinon ArduinoJson côté AT-CORE rejette la trame).
+static void jsonEsc(const char* in,char* out,size_t osz){
+    size_t o=0;
+    for(size_t i=0;in&&in[i]&&o+2<osz;i++){
+        if(in[i]=='"'||in[i]=='\\')out[o++]='\\';
+        out[o++]=in[i];
+    }
+    out[o]=0;}
+// Pousse les credentials hotspot vers AT-CORE via CHR_CONTROL {"cmd":"wifi",...}.
+// sendCtl ne suffit pas (buffer 32 + champs s/p). Limite AT-CORE = 200 B.
+void sendWifiCreds(const char* ssid,const char* pass){
+    if(!g_connected||!g_chrCtl||!g_chrCtl->canWrite())return;
+    char es[68],ep[130];
+    jsonEsc(ssid,es,sizeof(es));jsonEsc(pass,ep,sizeof(ep));
+    char p[220];
+    int n=snprintf(p,sizeof(p),"{\"cmd\":\"wifi\",\"s\":\"%s\",\"p\":\"%s\"}",es,ep);
+    if(n<=0||n>200)return;   // respecte la limite write AT-CORE
+    g_chrCtl->writeValue((uint8_t*)p,strlen(p),false);
+    Serial.printf("[BLE] CTRL wifi s=%s\n",ssid);}
 
 // Box ID = 3 derniers octets du MAC → "DD-EE-FF" (majuscules). Identifiant unique
 // gravé en usine, imprimé sur le sticker sous le boîtier → authentification physique.
@@ -2576,6 +2613,118 @@ static lv_obj_t* mkSetSliderRow(lv_obj_t*p,const char*k,int y,uint8_t val){
     return vl;
 }
 
+// ── Maintenance overlay (Modèle 1 : hotspot + transfert vol) ──────────────────
+static void _maint_close(){
+    if(!g_maint_ov)return;
+    lv_obj_del(g_maint_ov);
+    g_maint_ov=nullptr;g_maint_ssid_ta=nullptr;g_maint_pass_ta=nullptr;g_maint_kb=nullptr;}
+static void _maint_close_cb(lv_event_t*e){
+    if(lv_event_get_code(e)==LV_EVENT_CLICKED)_maint_close();}
+static void _maint_upload_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    sendCtl("upload");   // AT-CORE connecte le hotspot + upload → overlay progress auto
+    _maint_close();      // referme pour laisser voir l'overlay de progression up_pct
+}
+static void _maint_save_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    const char*s=lv_textarea_get_text(g_maint_ssid_ta);
+    const char*p=lv_textarea_get_text(g_maint_pass_ta);
+    if(!s||!s[0])return;                 // SSID obligatoire
+    unitSaveHotspot(s,p);                // NVS local (toujours)
+    sendWifiCreds(s,p);                  // push BLE vers AT-CORE (si connecté)
+    // Feedback honnête : "Envoye" si poussé en BLE, sinon juste sauvé localement.
+    bool pushed=g_connected&&g_chrCtl&&g_chrCtl->canWrite();
+    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
+    if(l)lv_label_set_text(l,pushed?"Envoye":"Sauve (hors ligne)");}
+// Clavier : suit le textarea focalisé, caché tant qu'on ne tape pas. On gère
+// FOCUSED (1re entrée) ET CLICKED (re-tap d'un champ déjà focalisé, sinon LVGL
+// ne renvoie pas FOCUSED et le clavier ne reviendrait pas après l'avoir fermé).
+static void _maint_ta_cb(lv_event_t*e){
+    lv_event_code_t c=lv_event_get_code(e);
+    if((c!=LV_EVENT_FOCUSED&&c!=LV_EVENT_CLICKED)||!g_maint_kb)return;
+    lv_keyboard_set_textarea(g_maint_kb,lv_event_get_target(e));
+    lv_obj_clear_flag(g_maint_kb,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_move_foreground(g_maint_kb);}
+static void _maint_kb_cb(lv_event_t*e){
+    lv_event_code_t c=lv_event_get_code(e);
+    if((c==LV_EVENT_READY||c==LV_EVENT_CANCEL)&&g_maint_kb)
+        lv_obj_add_flag(g_maint_kb,LV_OBJ_FLAG_HIDDEN);}
+
+void mkMaintenanceOverlay(){
+    if(g_maint_ov)return;
+    g_maint_ov=lv_obj_create(lv_scr_act());
+    lv_obj_set_size(g_maint_ov,480,480);lv_obj_set_pos(g_maint_ov,0,0);
+    lv_obj_set_style_bg_color(g_maint_ov,TBG(),0);lv_obj_set_style_bg_opa(g_maint_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(g_maint_ov,0,0);lv_obj_set_style_radius(g_maint_ov,0,0);
+    lv_obj_set_style_pad_all(g_maint_ov,0,0);lv_obj_clear_flag(g_maint_ov,LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t*tl=lv_label_create(g_maint_ov);lv_label_set_text(tl,"MAINTENANCE");
+    lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_20,0);
+    lv_obj_align(tl,LV_ALIGN_TOP_MID,0,42);
+
+    // Bouton transfert vol
+    lv_obj_t*bu=lv_btn_create(g_maint_ov);lv_obj_set_size(bu,300,40);
+    lv_obj_align(bu,LV_ALIGN_TOP_MID,0,78);
+    lv_obj_set_style_bg_color(bu,C_BRAND,0);lv_obj_set_style_radius(bu,8,0);
+    lv_obj_set_style_border_width(bu,0,0);lv_obj_set_style_shadow_opa(bu,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bu,_maint_upload_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bu);lv_label_set_text(l,"Transferer le dernier vol");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+
+    // Section hotspot
+    mkLbl(g_maint_ov,"HOTSPOT TELEPHONE",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,132);
+    g_maint_ssid_ta=lv_textarea_create(g_maint_ov);
+    lv_textarea_set_one_line(g_maint_ssid_ta,true);
+    lv_textarea_set_placeholder_text(g_maint_ssid_ta,"SSID");
+    lv_textarea_set_text(g_maint_ssid_ta,g_hs_ssid);
+    lv_textarea_set_max_length(g_maint_ssid_ta,32);   // SSID 802.11
+    lv_obj_set_size(g_maint_ssid_ta,360,42);lv_obj_align(g_maint_ssid_ta,LV_ALIGN_TOP_MID,0,150);
+    lv_obj_add_event_cb(g_maint_ssid_ta,_maint_ta_cb,LV_EVENT_ALL,NULL);
+
+    g_maint_pass_ta=lv_textarea_create(g_maint_ov);
+    lv_textarea_set_one_line(g_maint_pass_ta,true);
+    lv_textarea_set_password_mode(g_maint_pass_ta,true);
+    lv_textarea_set_placeholder_text(g_maint_pass_ta,"Mot de passe");
+    lv_textarea_set_text(g_maint_pass_ta,g_hs_pass);
+    lv_textarea_set_max_length(g_maint_pass_ta,63);   // WPA2 PSK max
+    lv_obj_set_size(g_maint_pass_ta,360,42);lv_obj_align(g_maint_pass_ta,LV_ALIGN_TOP_MID,0,198);
+    lv_obj_add_event_cb(g_maint_pass_ta,_maint_ta_cb,LV_EVENT_ALL,NULL);
+
+    // Boutons Enregistrer / Fermer
+    lv_obj_t*bs=lv_btn_create(g_maint_ov);lv_obj_set_size(bs,170,38);
+    lv_obj_align(bs,LV_ALIGN_TOP_MID,-92,250);
+    lv_obj_set_style_bg_color(bs,C_GREEN,0);lv_obj_set_style_radius(bs,8,0);
+    lv_obj_set_style_border_width(bs,0,0);lv_obj_set_style_shadow_opa(bs,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bs,_maint_save_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bs);lv_label_set_text(l,"Enregistrer");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+
+    lv_obj_t*bc=lv_btn_create(g_maint_ov);lv_obj_set_size(bc,170,38);
+    lv_obj_align(bc,LV_ALIGN_TOP_MID,92,250);
+    lv_obj_set_style_bg_color(bc,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bc,8,0);
+    lv_obj_set_style_border_width(bc,0,0);lv_obj_set_style_shadow_opa(bc,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bc,_maint_close_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bc);lv_label_set_text(l,"Fermer");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+
+    // Aide OTA (non pilotable en BLE : flux AP du portail AT-CORE)
+    mkLbl(g_maint_ov,"MAJ firmware: BOOT 6s sur AT-CORE",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,300);
+    mkLbl(g_maint_ov,"puis WiFi ATCORE-SETUP (ce telephone)",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,316);
+
+    // Clavier alphanumérique LVGL — caché par défaut, suit le textarea focalisé.
+    g_maint_kb=lv_keyboard_create(g_maint_ov);
+    lv_obj_set_size(g_maint_kb,480,220);lv_obj_align(g_maint_kb,LV_ALIGN_BOTTOM_MID,0,0);
+    lv_keyboard_set_textarea(g_maint_kb,g_maint_ssid_ta);
+    lv_obj_add_flag(g_maint_kb,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(g_maint_kb,_maint_kb_cb,LV_EVENT_ALL,NULL);}
+
+static void _open_maintenance_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    if(!g_maint_ov)mkMaintenanceOverlay();}
+
 void buildSettingsPage(){
     lv_obj_t*p=g_pages[2]; char b[16];
     s_pg_idx=0;
@@ -2630,8 +2779,7 @@ void buildSettingsPage(){
      if(g_sd_ok)snprintf(sd_str,12,"%u GB",g_sd_gb);else strlcpy(sd_str,"NO CARD",12);
      mkLblP(sp,"SDCARD (AT-CORE)",lv_color_hex(0x4b5563),&lv_font_montserrat_14,55,260);
      s_sd_v=mkLblP(sp,sd_str,g_sd_ok?C_GREEN:lv_color_hex(0x4b5563),&lv_font_montserrat_14,295,260);}
-    // Indicateur "..." pour signaler le scroll vertical
-    mkLbl(sp,". . .",TGREY(),&lv_font_montserrat_16,LV_ALIGN_TOP_MID,0,290);}
+    mkSetRowBtn(sp,"MAINTENANCE",286,"",_open_maintenance_cb);}
 
     // ── Footer (toujours visible) : logo AT-VIEW + battery + version
     lv_obj_t*lVw=lv_img_create(p);
