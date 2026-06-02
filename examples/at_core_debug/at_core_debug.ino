@@ -2639,6 +2639,11 @@ static void _maint_save_cb(lv_event_t*e){
     bool pushed=g_connected&&g_chrCtl&&g_chrCtl->canWrite();
     lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
     if(l)lv_label_set_text(l,pushed?"Envoye":"Sauve (hors ligne)");}
+static void _maint_test_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    sendCtl("wifitest");   // AT-CORE connecte le hotspot, logue [WIFI] IP=.../FAIL en série
+    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
+    if(l)lv_label_set_text(l,g_connected?"Test envoye (voir log)":"Hors ligne");}
 // Clavier : suit le textarea focalisé, caché tant qu'on ne tape pas. On gère
 // FOCUSED (1re entrée) ET CLICKED (re-tap d'un champ déjà focalisé, sinon LVGL
 // ne renvoie pas FOCUSED et le clavier ne reviendrait pas après l'avoir fermé).
@@ -2721,8 +2726,8 @@ void mkMaintenanceOverlay(){
     lv_obj_align(tl,LV_ALIGN_TOP_MID,0,34);
 
     // Bouton transfert vol
-    lv_obj_t*bu=lv_btn_create(g_maint_ov);lv_obj_set_size(bu,300,38);
-    lv_obj_align(bu,LV_ALIGN_TOP_MID,0,62);
+    lv_obj_t*bu=lv_btn_create(g_maint_ov);lv_obj_set_size(bu,300,36);
+    lv_obj_align(bu,LV_ALIGN_TOP_MID,0,56);
     lv_obj_set_style_bg_color(bu,C_BRAND,0);lv_obj_set_style_radius(bu,8,0);
     lv_obj_set_style_border_width(bu,0,0);lv_obj_set_style_shadow_opa(bu,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bu,_maint_upload_cb,LV_EVENT_CLICKED,NULL);
@@ -2736,10 +2741,10 @@ void mkMaintenanceOverlay(){
     lv_textarea_set_placeholder_text(g_maint_ssid_ta,"SSID hotspot");
     lv_textarea_set_text(g_maint_ssid_ta,g_hs_ssid);
     lv_textarea_set_max_length(g_maint_ssid_ta,32);
-    lv_obj_set_size(g_maint_ssid_ta,228,38);lv_obj_align(g_maint_ssid_ta,LV_ALIGN_TOP_MID,-56,114);
+    lv_obj_set_size(g_maint_ssid_ta,228,36);lv_obj_align(g_maint_ssid_ta,LV_ALIGN_TOP_MID,-56,100);
     lv_obj_add_event_cb(g_maint_ssid_ta,_maint_ta_cb,LV_EVENT_ALL,NULL);
-    lv_obj_t*bsc=lv_btn_create(g_maint_ov);lv_obj_set_size(bsc,84,38);
-    lv_obj_align(bsc,LV_ALIGN_TOP_MID,150,114);
+    lv_obj_t*bsc=lv_btn_create(g_maint_ov);lv_obj_set_size(bsc,84,36);
+    lv_obj_align(bsc,LV_ALIGN_TOP_MID,150,100);
     lv_obj_set_style_bg_color(bsc,lv_color_hex(0x1f4068),0);lv_obj_set_style_radius(bsc,8,0);
     lv_obj_set_style_border_width(bsc,0,0);lv_obj_set_style_shadow_opa(bsc,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bsc,_maint_scan_cb,LV_EVENT_CLICKED,NULL);
@@ -2754,12 +2759,22 @@ void mkMaintenanceOverlay(){
     lv_textarea_set_placeholder_text(g_maint_pass_ta,"Mot de passe");
     lv_textarea_set_text(g_maint_pass_ta,g_hs_pass);
     lv_textarea_set_max_length(g_maint_pass_ta,63);
-    lv_obj_set_size(g_maint_pass_ta,340,38);lv_obj_align(g_maint_pass_ta,LV_ALIGN_TOP_MID,0,160);
+    lv_obj_set_size(g_maint_pass_ta,340,36);lv_obj_align(g_maint_pass_ta,LV_ALIGN_TOP_MID,0,142);
     lv_obj_add_event_cb(g_maint_pass_ta,_maint_ta_cb,LV_EVENT_ALL,NULL);
 
+    // Bouton Tester le hotspot (diagnostic connexion, sans vol) → BLE {"cmd":"wifitest"}
+    lv_obj_t*bt=lv_btn_create(g_maint_ov);lv_obj_set_size(bt,300,34);
+    lv_obj_align(bt,LV_ALIGN_TOP_MID,0,182);
+    lv_obj_set_style_bg_color(bt,C_CYAN,0);lv_obj_set_style_radius(bt,8,0);
+    lv_obj_set_style_border_width(bt,0,0);lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bt,_maint_test_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bt);lv_label_set_text(l,"Tester le hotspot");
+     lv_obj_set_style_text_color(l,lv_color_hex(0x0d1117),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+
     // Boutons Enregistrer / Fermer
-    lv_obj_t*bs=lv_btn_create(g_maint_ov);lv_obj_set_size(bs,160,36);
-    lv_obj_align(bs,LV_ALIGN_TOP_MID,-86,206);
+    lv_obj_t*bs=lv_btn_create(g_maint_ov);lv_obj_set_size(bs,160,34);
+    lv_obj_align(bs,LV_ALIGN_TOP_MID,-86,220);
     lv_obj_set_style_bg_color(bs,C_GREEN,0);lv_obj_set_style_radius(bs,8,0);
     lv_obj_set_style_border_width(bs,0,0);lv_obj_set_style_shadow_opa(bs,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bs,_maint_save_cb,LV_EVENT_CLICKED,NULL);
@@ -2767,8 +2782,8 @@ void mkMaintenanceOverlay(){
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
-    lv_obj_t*bc=lv_btn_create(g_maint_ov);lv_obj_set_size(bc,160,36);
-    lv_obj_align(bc,LV_ALIGN_TOP_MID,86,206);
+    lv_obj_t*bc=lv_btn_create(g_maint_ov);lv_obj_set_size(bc,160,34);
+    lv_obj_align(bc,LV_ALIGN_TOP_MID,86,220);
     lv_obj_set_style_bg_color(bc,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bc,8,0);
     lv_obj_set_style_border_width(bc,0,0);lv_obj_set_style_shadow_opa(bc,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bc,_maint_close_cb,LV_EVENT_CLICKED,NULL);
@@ -2777,8 +2792,8 @@ void mkMaintenanceOverlay(){
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
     // Aide OTA (non pilotable en BLE : flux AP du portail AT-CORE)
-    mkLbl(g_maint_ov,"MAJ AT-CORE: BOOT 6s -> ATCORE-SETUP",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,250);
-    mkLbl(g_maint_ov,"MAJ AT-VIEW: WIFI ON -> 192.168.4.1",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,266);
+    mkLbl(g_maint_ov,"MAJ AT-CORE: BOOT 6s -> ATCORE-SETUP",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,258);
+    mkLbl(g_maint_ov,"MAJ AT-VIEW: WIFI ON -> 192.168.4.1",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,274);
 
     // Clavier LVGL — TAILLÉ POUR LE CERCLE : 320x175 centré (les coins restent
     // dans le disque 480, contrairement au plein-largeur dont la rangée du bas

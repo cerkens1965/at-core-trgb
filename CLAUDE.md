@@ -203,6 +203,7 @@ Overlay plein écran ouvert via le bouton **MAINTENANCE** (Settings sous-page 1)
 | Élément | Action |
 |---------|--------|
 | Bouton « Transferer le dernier vol » | `sendCtl("upload")` → AT-CORE connecte son hotspot + upload Firebase. L'**overlay de progression `up_pct` existant** s'affiche tout seul (STATUS `flt_ph≥1`). |
+| Bouton « Tester le hotspot » | `sendCtl("wifitest")` → l'AT-CORE se connecte au hotspot et logue `[WIFI] IP=...`/`FAIL` en série. Diagnostic **au sol sans vol** (l'upload réel exige un vol finalisé). |
 | Champ SSID + bouton **Scan** | `lv_textarea` + scan WiFi 2.4 GHz (`WiFi.scanNetworks`, restauré `WIFI_OFF` après, refusé si AP active) → liste cliquable qui remplit le SSID. Un hotspot absent du scan = il est en 5 GHz (diag intégré). |
 | Champ mot de passe | `lv_textarea` password. Les deux partagent un `lv_keyboard` **taillé pour le cercle** (320×175 centré — le plein-largeur avait sa rangée du bas hors disque), caché par défaut, suit le focus, masqué sur ✓/✕. Max 32 / 63. |
 | Bouton « Enregistrer » | `unitSaveHotspot()` (NVS `hs_ssid`/`hs_pass`) **+** `sendWifiCreds()` → BLE `{"cmd":"wifi","s","p"}`. Feedback « Envoye » (poussé BLE) ou « Sauve (hors ligne) ». |
