@@ -1036,8 +1036,7 @@ void buildStatusPage(){
     mkCheckRow(p,CHK_BT,  X,Y0+1*DY,"Bluetooth");
     mkCheckRow(p,CHK_GPS, X,Y0+2*DY,"GPS");
     mkCheckRow(p,CHK_LTE, X,Y0+3*DY,"LTE");
-    mkCheckRow(p,CHK_ADSB,X,Y0+4*DY,"ADS-B / ADS-L");
-    mkCheckRow(p,CHK_OGN, X,Y0+5*DY,"OGN / FLARM (868Mhz)");
+    // ADS-B / ADS-L et OGN / FLARM retirés (non poussés pour l'instant).
 
     // ── Batterie AT-CORE + version
     r_p0_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,418);
@@ -2346,11 +2345,8 @@ void buildRadarPage(){
     // Right: GPS      y_c=96  x=388  LTE     y_c=134 x=411  WiFi  y_c=172 x=426  BLE   y_c=210 x=434
     r_hdr_bat  = mkTabPill(p, LV_SYMBOL_CHARGE,       40, 80);
     r_hdr_sky  = mkImgPill(p, &img_safesky,           17, 118);
-    r_hdr_flrm = mkImgPill(p, &img_flarm,              2, 156);
-    r_hdr_adsb = mkTabPill(p, "ADS-B",                -6, 194);
-    // ADS-B: font_10 + shift label toward visible inner side so text clears the physical bezel
-    lv_obj_set_style_text_font(r_hdr_adsb,&lv_font_montserrat_10,0);
-    lv_obj_align(r_hdr_adsb, LV_ALIGN_CENTER, 12, 0);
+    // Pastilles FLARM et ADS-B retirées du radar (non poussées pour l'instant).
+    r_hdr_flrm = nullptr; r_hdr_adsb = nullptr;
     r_hdr_gps  = mkTabPill(p, LV_SYMBOL_GPS,         388, 80);
     r_hdr_lte  = mkLTEPill(p, 411, 118);
     r_hdr_wifi = mkTabPill(p, LV_SYMBOL_WIFI,        426, 156);
@@ -2648,11 +2644,24 @@ static lv_obj_t* mkSetSliderRow(lv_obj_t*p,const char*k,int y,uint8_t val){
 
 // ── Maintenance overlay (Modèle 1 : hotspot + transfert vol) ──────────────────
 static lv_obj_t* g_maint_scanlist;   // fwd : annulé ici aussi (enfant de l'overlay)
+static lv_obj_t* g_maint_upd=nullptr;   // annonce de MAJ firmware (au-dessus du bouton Update)
+// Met à jour l'annonce de MAJ dans Maintenance (appelée à chaque STATUS quand l'écran est ouvert).
+static void maintUpdAnnounce(){
+    if(!g_maint_upd)return;
+    if(g_status.valid && g_status.oav>g_status.fwv){
+        char b[36]; snprintf(b,sizeof(b),"Update available: v%d",g_status.oav);
+        lv_label_set_text(g_maint_upd,b);
+        lv_obj_set_style_text_color(g_maint_upd,C_AMBER,0);
+    }else{
+        lv_label_set_text(g_maint_upd,"Firmware up to date");
+        lv_obj_set_style_text_color(g_maint_upd,TGREY(),0);
+    }
+}
 static void _maint_close(){
     if(!g_maint_ov)return;
     lv_obj_del(g_maint_ov);   // supprime aussi le panneau scan (enfant)
     g_maint_ov=nullptr;g_maint_ssid_ta=nullptr;g_maint_pass_ta=nullptr;g_maint_kb=nullptr;
-    g_maint_scanlist=nullptr;}
+    g_maint_scanlist=nullptr;g_maint_upd=nullptr;}
 static void _maint_close_cb(lv_event_t*e){
     if(lv_event_get_code(e)==LV_EVENT_CLICKED)_maint_close();}
 static void _maint_upload_cb(lv_event_t*e){
@@ -3056,8 +3065,13 @@ void mkMaintenanceOverlay(){
     {lv_obj_t*l=lv_label_create(bo);lv_label_set_text(l,"Update firmware");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+    // Annonce de MAJ firmware (ambre "Update available: vN" si dispo, gris "up to date" sinon).
+    g_maint_upd=lv_label_create(g_maint_ov);
+    lv_obj_set_style_text_font(g_maint_upd,&lv_font_montserrat_12,0);
+    lv_obj_align(g_maint_upd,LV_ALIGN_TOP_MID,0,292);
+    maintUpdAnnounce();
     // Fallback OTA sans internet : AP du portail (BOOT 6s -> ATCORE-SETUP -> 192.168.4.1).
-    mkLbl(g_maint_ov,"or BOOT 6s -> AP ATCORE-SETUP",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,294);
+    mkLbl(g_maint_ov,"or BOOT 6s -> AP ATCORE-SETUP",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,310);
 
     // Clavier LVGL — TAILLÉ POUR LE CERCLE : 320x175 centré (les coins restent
     // dans le disque 480, contrairement au plein-largeur dont la rangée du bas
@@ -3412,16 +3426,15 @@ void updateAllPages(){
     updFlightState();   // bannière FLIGHT STARTED / chip Start flight / overlay arrêt
     updOtaOverlay();    // overlay MAJ firmware (OTA cloud)
     if(g_vols_ov) volsUpdWifi();   // ligne état WiFi hotspot dans la page Flights
-    // Version firmware AT-CORE + date (+ "UPD vN!" ambre si MAJ dispo) — bas page radar
+    // Version firmware AT-CORE + date de build — bas page radar (l'annonce de MAJ est dans Maintenance)
     if(r_radar_ver){
-        char vb[52];
-        if(g_status.valid && g_status.fwv){
-            if(g_status.oav>g_status.fwv) snprintf(vb,sizeof(vb),"CORE v%d %s  UPD v%d!",g_status.fwv,g_status.fwd,g_status.oav);
-            else snprintf(vb,sizeof(vb),"CORE v%d  %s",g_status.fwv,g_status.fwd);
-        } else strcpy(vb,"CORE --");
+        char vb[40];
+        if(g_status.valid && g_status.fwv) snprintf(vb,sizeof(vb),"CORE v%d  %s",g_status.fwv,g_status.fwd);
+        else strcpy(vb,"CORE --");
         lv_label_set_text(r_radar_ver,vb);
-        lv_obj_set_style_text_color(r_radar_ver,(g_status.valid&&g_status.oav>g_status.fwv)?C_AMBER:TGREY(),0);
     }
+    // Annonce de MAJ firmware → page Maintenance (près du bouton Update firmware)
+    if(g_maint_ov) maintUpdAnnounce();
     // Refresh live de la ligne diagnostique DB sur page #02 (si auth en cours)
     if(g_auth_ov && g_auth_diag){
         char dbg[48];
@@ -3446,15 +3459,11 @@ void updateAllPages(){
         updCheckRow(CHK_CORE,clbl,        g_connected);
         // Bluetooth radio : ON dès que BLE est initialisé
         updCheckRow(CHK_BT,  "Bluetooth", g_bootDone);
-        // GPS / LTE / ADS-B / OGN — sourcés depuis g_status (vu via AT-CORE)
+        // GPS / LTE — sourcés depuis g_status (vu via AT-CORE). ADS-B / OGN retirés.
         bool gps_ok = g_status.valid && g_status.gps_fix;
         bool lte_ok = g_status.valid && g_status.csq>5;
-        bool adsb_ok= g_connected && g_status.valid && g_status.adsb_ok;
-        bool ogn_ok = g_connected && g_status.valid && g_status.flarm_ok;
         updCheckRow(CHK_GPS, "GPS",                   gps_ok);
         updCheckRow(CHK_LTE, "LTE",                   lte_ok);
-        updCheckRow(CHK_ADSB,"ADS-B / ADS-L",         adsb_ok);
-        updCheckRow(CHK_OGN, "OGN / FLARM (868Mhz)",  ogn_ok);
         // Batterie AT-CORE (footer page #01 + page Settings)
         const char* bat_txt;
         lv_color_t  bat_col;
@@ -3517,12 +3526,7 @@ void updateAllPages(){
      // SafeSky — active when AT-CORE streams live traffic
      {bool sky_ok=g_connected&&g_traffic.valid&&g_traffic.count>0;
       SET_PILL_IMG(r_hdr_sky, sky_ok);}
-     // FLARM
-     {bool flrm_ok=g_connected&&g_status.valid&&g_status.flarm_ok;
-      SET_PILL_IMG(r_hdr_flrm, flrm_ok);}
-     // ADS-B
-     {bool adsb_ok=g_connected&&g_status.valid&&g_status.adsb_ok;
-      SET_PILL_TXT(r_hdr_adsb, adsb_ok);}
+     // FLARM / ADS-B retirés du radar (pastilles supprimées).
      // Battery — g_status.bat (STATUS char, ~1s) prioritaire sur g_debug.bat_pct (DEBUG char).
      // Charging (champ "chg" JSON STATUS) détecté AT-CORE : hausse tension OU float ≥4.13V.
      // Radar : sur secteur = "⚡xx%" vert | sur batterie = "xx%" (rouge si <20%).
