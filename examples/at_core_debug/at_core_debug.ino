@@ -3753,11 +3753,18 @@ void loop(){
         uint8_t ph=g_status.flt_phase;
         uint32_t el=millis()-g_vols_xfer_t0;
         if(ph==3)g_vols_xfer_seen3=true;
+        // Progression visible : "Transferring... N%" (up_pct par paliers, MAJ quand un STATUS
+        // passe — le BLE est ralenti pendant l'upload WiFi, d'où la roue en complément).
+        if(g_vols_load && ph==3){
+            char b[28]; snprintf(b,sizeof(b),"Transferring... %d%%",g_status.upload_pct);
+            lv_label_set_text(g_vols_load,b);
+        }
         if((g_vols_xfer_seen3||el>8000)&&(ph==4||ph==5)){
             g_vols_xfer_pending=false;
             if(g_vols_load)lv_label_set_text(g_vols_load,ph==4?"Transfer OK":"Transfer failed");
             if(ph==4){ sendCtl("flights"); g_status.flt_rdy=0; g_vols_loading=true; g_vols_t0=millis(); }
-        }else if(el>90000){
+        }else if((ph!=3 && el>90000) || el>180000){
+            // timeout seulement si PAS en upload actif (ph!=3) à 90s, ou backstop dur 180s
             g_vols_xfer_pending=false;if(g_vols_load)lv_label_set_text(g_vols_load,"Transfer timeout");
         }
     }
