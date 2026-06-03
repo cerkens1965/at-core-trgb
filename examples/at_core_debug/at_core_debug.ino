@@ -76,6 +76,8 @@ struct StatusData {
     uint8_t flt_st;      // cycle de vol : 0=sol (pas démarré) 1=en vol 2=arrêt imminent
     uint8_t wst;         // WiFi : 0 idle 1 connexion 2 OK 3 SSID absent 4 échec
     char    wip[16];     // dernière IP WiFi (proof de connexion)
+    uint8_t ota;         // OTA : 0 idle 1 check 2 download 3 OK(reboot) 4 échec 5 à jour
+    uint8_t opct;        // OTA download %
     };
 struct FlightData  { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
@@ -498,6 +500,7 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.charging=d["chg"]|false;
     g_status.flt_phase=d["flt_ph"]|0;g_status.upload_pct=d["up_pct"]|0;g_status.flt_rdy=d["flt_rdy"]|0;g_status.flt_st=d["flt_st"]|0;
     g_status.wst=d["wst"]|0; strlcpy(g_status.wip,d["wip"]|"",sizeof(g_status.wip));
+    g_status.ota=d["ota"]|0; g_status.opct=d["opct"]|0;
     g_status.valid=true;g_dataUpdated=true;}
 void parseFlight(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_flight.gforce_z=d["gf"]|1.0f;g_flight.co_ppm=d["co"]|0;
@@ -2930,6 +2933,22 @@ static void _open_vols_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
     if(!g_vols_ov)mkVolsOverlay();}
 
+// OTA cloud-pull : double-tap de confirmation (action destructive = reflash + reboot).
+static bool g_maint_ota_armed=false;
+static void _maint_ota_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
+    if(!g_maint_ota_armed){
+        g_maint_ota_armed=true;
+        if(l)lv_label_set_text(l,"Confirm update?");
+        lv_obj_set_style_bg_color(b,C_AMBER,0);
+        return;
+    }
+    g_maint_ota_armed=false;
+    if(l)lv_label_set_text(l,"Update firmware");
+    sendCtl("otaupdate");   // AT-CORE : connecte hotspot → check version → download → flash
+}
+
 void mkMaintenanceOverlay(){
     if(g_maint_ov)return;
     g_maint_ov=lv_obj_create(lv_scr_act());
@@ -3016,9 +3035,18 @@ void mkMaintenanceOverlay(){
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
-    // Aide OTA (non pilotable en BLE : flux AP du portail AT-CORE)
-    mkLbl(g_maint_ov,"AT-CORE update: BOOT 6s -> ATCORE-SETUP",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,258);
-    mkLbl(g_maint_ov,"AT-VIEW update: WIFI ON -> 192.168.4.1",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,274);
+    // OTA cloud-pull : bouton "Update firmware" → {"cmd":"otaupdate"} (download via hotspot).
+    g_maint_ota_armed=false;
+    lv_obj_t*bo=lv_btn_create(g_maint_ov);lv_obj_set_size(bo,300,32);
+    lv_obj_align(bo,LV_ALIGN_TOP_MID,0,256);
+    lv_obj_set_style_bg_color(bo,C_BRAND,0);lv_obj_set_style_radius(bo,8,0);
+    lv_obj_set_style_border_width(bo,0,0);lv_obj_set_style_shadow_opa(bo,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bo,_maint_ota_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bo);lv_label_set_text(l,"Update firmware");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+    // Fallback OTA sans internet : AP du portail (BOOT 6s -> ATCORE-SETUP -> 192.168.4.1).
+    mkLbl(g_maint_ov,"or BOOT 6s -> AP ATCORE-SETUP",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,294);
 
     // Clavier LVGL — TAILLÉ POUR LE CERCLE : 320x175 centré (les coins restent
     // dans le disque 480, contrairement au plein-largeur dont la rangée du bas
@@ -3319,11 +3347,59 @@ void updFlightState(){
     g_prev_flt_st=st;
 }
 
+// ── OTA firmware overlay (MAJ par hotspot cloud) ─────────────────────────────
+static lv_obj_t* g_ota_ov=nullptr,*g_ota_lbl=nullptr,*g_ota_bar=nullptr;
+static uint32_t  g_ota_done_ms=0;
+static void mkOtaOverlay(){
+    if(g_ota_ov)return;
+    g_ota_ov=lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_ota_ov,400,210);lv_obj_center(g_ota_ov);
+    lv_obj_set_style_bg_color(g_ota_ov,lv_color_hex(0x0d1117),0);
+    lv_obj_set_style_bg_opa(g_ota_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(g_ota_ov,C_BRAND,0);lv_obj_set_style_border_width(g_ota_ov,2,0);
+    lv_obj_set_style_radius(g_ota_ov,12,0);lv_obj_clear_flag(g_ota_ov,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t*t=lv_label_create(g_ota_ov);lv_label_set_text(t,"FIRMWARE UPDATE");
+    lv_obj_set_style_text_color(t,C_BRAND,0);lv_obj_set_style_text_font(t,&lv_font_montserrat_20,0);
+    lv_obj_align(t,LV_ALIGN_TOP_MID,0,22);
+    g_ota_lbl=lv_label_create(g_ota_ov);lv_label_set_text(g_ota_lbl,"Checking...");
+    lv_obj_set_style_text_color(g_ota_lbl,lv_color_hex(0xffffff),0);
+    lv_obj_set_style_text_font(g_ota_lbl,&lv_font_montserrat_16,0);
+    lv_obj_align(g_ota_lbl,LV_ALIGN_TOP_MID,0,80);
+    g_ota_bar=lv_bar_create(g_ota_ov);lv_obj_set_size(g_ota_bar,320,16);
+    lv_obj_align(g_ota_bar,LV_ALIGN_TOP_MID,0,135);
+    lv_bar_set_range(g_ota_bar,0,100);lv_bar_set_value(g_ota_bar,0,LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(g_ota_bar,lv_color_hex(0x1f2937),0);
+    lv_obj_set_style_bg_color(g_ota_bar,C_BRAND,LV_PART_INDICATOR);
+}
+static void hideOtaOverlay(){ if(g_ota_ov){lv_obj_del(g_ota_ov);g_ota_ov=nullptr;g_ota_lbl=nullptr;g_ota_bar=nullptr;} g_ota_done_ms=0; }
+// MAJ selon g_status.ota (0 idle/1 check/2 download/3 OK reboot/4 fail/5 à jour).
+void updOtaOverlay(){
+    if(!g_status.valid||g_status.ota==0){ if(g_ota_ov)hideOtaOverlay(); return; }
+    uint8_t s=g_status.ota;
+    if(!g_ota_ov)mkOtaOverlay();
+    const char* msg="..."; lv_color_t c=C_BRAND;
+    switch(s){
+        case 1: msg="Checking version..."; break;
+        case 2: msg="Downloading firmware..."; break;
+        case 3: msg="Update OK - rebooting"; c=C_GREEN; if(!g_ota_done_ms)g_ota_done_ms=millis(); break;
+        case 4: msg="Update failed"; c=C_RED; if(!g_ota_done_ms)g_ota_done_ms=millis(); break;
+        case 5: msg="Already up to date"; c=C_GREEN; if(!g_ota_done_ms)g_ota_done_ms=millis(); break;
+    }
+    if(g_ota_lbl){
+        if(s==2){ char b[28]; snprintf(b,sizeof(b),"Downloading %d%%",g_status.opct); lv_label_set_text(g_ota_lbl,b); }
+        else lv_label_set_text(g_ota_lbl,msg);
+        lv_obj_set_style_text_color(g_ota_lbl,c,0);
+    }
+    if(g_ota_bar) lv_bar_set_value(g_ota_bar, s==2?g_status.opct:(s>=3?100:0), LV_ANIM_OFF);
+    if((s==4||s==5)&&g_ota_done_ms&&millis()-g_ota_done_ms>5000) hideOtaOverlay();
+}
+
 void updateAllPages(){
     char b[32];
     // Tâche F : overlay upload progress (full-screen modal post-vol)
     updUploadOverlay();
     updFlightState();   // bannière FLIGHT STARTED / chip Start flight / overlay arrêt
+    updOtaOverlay();    // overlay MAJ firmware (OTA cloud)
     if(g_vols_ov) volsUpdWifi();   // ligne état WiFi hotspot dans la page Flights
     // Refresh live de la ligne diagnostique DB sur page #02 (si auth en cours)
     if(g_auth_ov && g_auth_diag){
