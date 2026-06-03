@@ -3069,9 +3069,7 @@ void mkMaintenanceOverlay(){
     g_maint_upd=lv_label_create(g_maint_ov);
     lv_obj_set_style_text_font(g_maint_upd,&lv_font_montserrat_12,0);
     lv_obj_align(g_maint_upd,LV_ALIGN_TOP_MID,0,292);
-    maintUpdAnnounce();
-    // Fallback OTA sans internet : AP du portail (BOOT 6s -> ATCORE-SETUP -> 192.168.4.1).
-    mkLbl(g_maint_ov,"or BOOT 6s -> AP ATCORE-SETUP",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,310);
+    maintUpdAnnounce();   // (fallback AP-OTA par BOUTON BOOT retiré : boîtier scellé, BOOT inaccessible)
 
     // Clavier LVGL — TAILLÉ POUR LE CERCLE : 320x175 centré (les coins restent
     // dans le disque 480, contrairement au plein-largeur dont la rangée du bas
