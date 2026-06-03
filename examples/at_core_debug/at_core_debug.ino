@@ -1739,6 +1739,7 @@ static lv_obj_t* g_up_status   = nullptr;
 static lv_obj_t* g_up_bar      = nullptr;
 static lv_obj_t* g_up_pct_lbl  = nullptr;
 static uint32_t  g_up_done_ms  = 0;
+static uint32_t  g_up_p12_t0   = 0;   // début phase 1/2 (auto-dismiss si pas d'upload auto)
 // Init à true → un ph=4 résiduel reçu au boot (état post-upload AT-CORE figé) est ignoré.
 // Reset à false dès que ph repasse à 0 (nouveau vol), pour que le prochain cycle 1→2→3→4 affiche bien l'overlay.
 static bool      g_up_acked    = true;
@@ -1755,7 +1756,7 @@ void mkUploadOverlay(){
     lv_obj_clear_flag(g_up_ov,LV_OBJ_FLAG_SCROLLABLE);
 
     g_up_title=mkLblP(g_up_ov,"FLIGHT UPLOAD",C_AMBER,&lv_font_montserrat_20,118,18);
-    g_up_status=mkLblP(g_up_ov,"Flight ended — closing CSV...",lv_color_hex(0xffffff),&lv_font_montserrat_16,40,72);
+    g_up_status=mkLblP(g_up_ov,"Flight ended - closing CSV...",lv_color_hex(0xffffff),&lv_font_montserrat_16,40,72);
     lv_obj_set_width(g_up_status,320);
     lv_obj_set_style_text_align(g_up_status,LV_TEXT_ALIGN_CENTER,0);
 
@@ -1787,6 +1788,14 @@ void updUploadOverlay(){
         return;
     }
 
+    // Phases 1/2 (ended/closed) : en config hotspot l'upload ne démarre PAS tout seul
+    // (LTE cloud off, transfert WiFi manuel via Flights). Feedback bref puis on libère
+    // l'écran — sinon l'overlay reste figé sur "CSV closed - waiting upload".
+    if(ph==1||ph==2){
+        if(g_up_p12_t0==0) g_up_p12_t0=millis();
+        if(millis()-g_up_p12_t0>5000){ if(g_up_ov) hideUploadOverlay(); return; }
+    } else g_up_p12_t0=0;
+
     // Reset ack dès que la phase quitte 4 (nouveau cycle d'upload possible)
     if(ph != 4) g_up_acked = false;
 
@@ -1806,18 +1815,19 @@ void updUploadOverlay(){
     // Texte selon phase
     const char* msg = "...";
     switch(ph){
-        case 1: msg="Flight ended — closing CSV"; break;
-        case 2: msg="CSV closed — waiting upload"; break;
+        case 1: msg="Flight ended - closing CSV"; break;
+        case 2: msg="CSV closed - waiting upload"; break;
         case 3: msg="Uploading to Firebase..."; break;
         case 4: msg="Transfer OK";
                 if(g_up_done_ms==0) g_up_done_ms=millis(); break;
-        case 5: msg="Failed — retrying...";
+        case 5: msg="Failed - retrying...";
                 g_up_done_ms=0; break;
     }
     if(g_up_status) lv_label_set_text(g_up_status,msg);
-    if(g_up_bar)    lv_bar_set_value(g_up_bar,pct,LV_ANIM_OFF);
+    int barv = (ph<3)?0:pct;   // phases 1/2 = pas d'upload en cours → pas de 100% trompeur
+    if(g_up_bar)    lv_bar_set_value(g_up_bar,barv,LV_ANIM_OFF);
     if(g_up_pct_lbl){
-        char p[8]; snprintf(p,sizeof(p),"%d%%",pct);
+        char p[8]; snprintf(p,sizeof(p),"%d%%",barv);
         lv_label_set_text(g_up_pct_lbl,p);
     }
 
@@ -2751,6 +2761,10 @@ static void volsShowStatus(const char* msg, lv_color_t col){
     lv_label_set_text(g_vols_load,msg);
     lv_obj_set_style_text_color(g_vols_load,col,0);
     lv_obj_set_style_text_font(g_vols_load,&lv_font_montserrat_16,0);
+    // Roue qui tourne — montre que le process tourne en arrière-plan (transfert lent).
+    lv_obj_t*sp=lv_spinner_create(g_vols_list,900,55);
+    lv_obj_set_size(sp,44,44);
+    lv_obj_set_style_arc_color(sp,col,LV_PART_INDICATOR);
     volsUpdXfer();}
 
 static void _vols_row_cb(lv_event_t*e){
@@ -3174,13 +3188,15 @@ void updateRadarDR(){
 // STARTED" au décollage, chip "Start flight" au sol, overlay "stopping in Ns" + Cancel.
 static lv_obj_t* g_fb_ov=nullptr;     // bannière FLIGHT STARTED
 static uint32_t  g_fb_t0=0;
-static lv_obj_t* g_startchip=nullptr; // chip Start flight (au sol)
+static lv_obj_t* g_startchip=nullptr; // chip Start/End flight
+static uint8_t   g_chip_kind=0;       // 0=aucun 1=Start flight 2=End flight
 static lv_obj_t* g_stop_ov=nullptr;   // overlay arrêt imminent
 static lv_obj_t* g_stop_lbl=nullptr;
 static uint32_t  g_stop_seen_ms=0;
 static uint8_t   g_prev_flt_st=0xFF;
 
 static void _startflight_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("start_flight"); }
+static void _endflight_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("stop_flight"); }
 static void _continueflight_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("continue_flight"); }
 
 static void fbShow(){
@@ -3201,19 +3217,21 @@ static void fbShow(){
 }
 static void fbHide(){ if(g_fb_ov){lv_obj_del(g_fb_ov);g_fb_ov=nullptr;} }
 
-static void chipShow(){
-    if(g_startchip)return;
+static void chipShow(uint8_t kind){   // 1=Start flight 2=End flight
+    if(g_startchip && g_chip_kind==kind) return;
+    if(g_startchip){ lv_obj_del(g_startchip); g_startchip=nullptr; }
+    g_chip_kind=kind;
     g_startchip=lv_btn_create(lv_layer_top());
-    lv_obj_set_size(g_startchip,160,46);
-    lv_obj_align(g_startchip,LV_ALIGN_BOTTOM_MID,0,-26);
-    lv_obj_set_style_bg_color(g_startchip,C_BRAND,0);lv_obj_set_style_radius(g_startchip,23,0);
+    lv_obj_set_size(g_startchip,170,48);
+    lv_obj_align(g_startchip,LV_ALIGN_BOTTOM_MID,0,-24);
+    lv_obj_set_style_bg_color(g_startchip,kind==2?C_RED:C_BRAND,0);lv_obj_set_style_radius(g_startchip,24,0);
     lv_obj_set_style_border_width(g_startchip,0,0);lv_obj_set_style_shadow_opa(g_startchip,LV_OPA_TRANSP,0);
-    lv_obj_add_event_cb(g_startchip,_startflight_cb,LV_EVENT_CLICKED,NULL);
-    lv_obj_t*l=lv_label_create(g_startchip);lv_label_set_text(l,"Start flight");
+    lv_obj_add_event_cb(g_startchip,kind==2?_endflight_cb:_startflight_cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t*l=lv_label_create(g_startchip);lv_label_set_text(l,kind==2?"End flight":"Start flight");
     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
     lv_obj_set_style_text_font(l,&lv_font_montserrat_16,0);lv_obj_center(l);
 }
-static void chipHide(){ if(g_startchip){lv_obj_del(g_startchip);g_startchip=nullptr;} }
+static void chipHide(){ if(g_startchip){lv_obj_del(g_startchip);g_startchip=nullptr;g_chip_kind=0;} }
 
 static void stopShow(){
     if(g_stop_ov)return;
@@ -3262,11 +3280,14 @@ void updFlightState(){
         }
     } else if(g_stop_ov) stopHide();
 
-    // Chip "Start flight" : connecté, au sol, pas démarré, vue radar, aucun overlay ouvert
-    bool clear = g_connected && st==0 && ph==0 && g_page==0
+    // Chip Start flight (au sol) / End flight (en vol) : vue radar, aucun overlay ouvert.
+    // "End flight" force l'arrêt immédiat (stop_flight) — fin de vol quoiqu'il arrive.
+    bool base = g_connected && ph==0 && g_page==0
               && !g_up_ov && !g_stop_ov && !g_fb_ov && !g_maint_ov && !g_vols_ov
               && !g_pair_ov && !g_auth_ov;
-    if(clear) chipShow(); else chipHide();
+    if(base && st==0) chipShow(1);
+    else if(base && st==1) chipShow(2);
+    else chipHide();
 
     g_prev_flt_st=st;
 }
