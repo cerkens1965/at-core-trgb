@@ -2928,12 +2928,7 @@ void mkVolsOverlay(){
     lv_obj_set_style_bg_color(g_vols_list,lv_color_hex(0x0d1117),0);
     lv_obj_set_style_border_width(g_vols_list,0,0);lv_obj_set_style_pad_all(g_vols_list,4,0);
     lv_obj_set_flex_flow(g_vols_list,LV_FLEX_FLOW_COLUMN);
-    g_vols_load=lv_label_create(g_vols_list);
-    // DIAGNOSTIC : état des chars BLE (con/CTRL/FLIGHTS) — si CTRL=NUL ou ro, l'écriture
-    // {"cmd":"flights"} ne part pas → la liste timeout. Visible direct à l'ouverture.
-    { char dbg[44]; snprintf(dbg,sizeof(dbg),"Loading... [con=%d CTRL=%s FL=%s]",g_connected,
-        g_chrCtl?(g_chrCtl->canWrite()?"W":"ro"):"NUL", g_chrFl?"ok":"NUL");
-      lv_label_set_text(g_vols_load,dbg); }
+    g_vols_load=lv_label_create(g_vols_list);lv_label_set_text(g_vols_load,"Loading...");
     lv_obj_set_style_text_color(g_vols_load,TGREY(),0);lv_obj_set_style_text_font(g_vols_load,&lv_font_montserrat_14,0);
 
     // Boutons
@@ -3898,7 +3893,7 @@ void loop(){
     if(g_vols_loading&&g_vols_ov){
         if(g_connected&&g_status.flt_rdy==1&&millis()-g_vols_t0>1500){
             g_vols_loading=false;volsBuildList();   // lecture BLE seulement si connecté + liste fraîche
-        }else if(millis()-g_vols_t0>12000){
+        }else if(millis()-g_vols_t0>30000){   // SD bien remplie = scan lent (16 vols ≈ 13s)
             g_vols_loading=false;if(g_vols_load)lv_label_set_text(g_vols_load,"Timeout - retry");
         }
     }
