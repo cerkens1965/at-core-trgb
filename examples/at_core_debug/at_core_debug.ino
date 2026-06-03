@@ -74,6 +74,8 @@ struct StatusData {
     uint8_t upload_pct;  // 0..100 (tâche D)
     uint8_t flt_rdy;     // WP8 : 1=liste vols prête à lire (CHR_FLIGHTS)
     uint8_t flt_st;      // cycle de vol : 0=sol (pas démarré) 1=en vol 2=arrêt imminent
+    uint8_t wst;         // WiFi : 0 idle 1 connexion 2 OK 3 SSID absent 4 échec
+    char    wip[16];     // dernière IP WiFi (proof de connexion)
     };
 struct FlightData  { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
@@ -495,6 +497,7 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.flarm_ok=d["flarm"]|false;g_status.adsb_ok=d["adsb"]|false;
     g_status.charging=d["chg"]|false;
     g_status.flt_phase=d["flt_ph"]|0;g_status.upload_pct=d["up_pct"]|0;g_status.flt_rdy=d["flt_rdy"]|0;g_status.flt_st=d["flt_st"]|0;
+    g_status.wst=d["wst"]|0; strlcpy(g_status.wip,d["wip"]|"",sizeof(g_status.wip));
     g_status.valid=true;g_dataUpdated=true;}
 void parseFlight(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_flight.gforce_z=d["gf"]|1.0f;g_flight.co_ppm=d["co"]|0;
@@ -2736,6 +2739,7 @@ static lv_obj_t* g_vols_ov=nullptr;
 static lv_obj_t* g_vols_list=nullptr;
 static lv_obj_t* g_vols_load=nullptr;   // label "Loading..."
 static lv_obj_t* g_vols_xfer=nullptr;   // label du bouton Transferer (N)
+static lv_obj_t* g_vols_wifi=nullptr;   // ligne état WiFi hotspot (SSID + connexion/IP)
 static bool     g_vols_loading=false, g_vols_del_armed=false;
 static bool     g_vols_xfer_pending=false, g_vols_xfer_seen3=false;  // suivi transfert sur la page
 static uint32_t g_vols_t0=0, g_vols_xfer_t0=0;
@@ -2743,8 +2747,25 @@ static uint32_t g_vols_t0=0, g_vols_xfer_t0=0;
 static void volsClose(){
     if(!g_vols_ov)return;
     lv_obj_del(g_vols_ov);
-    g_vols_ov=nullptr;g_vols_list=nullptr;g_vols_load=nullptr;g_vols_xfer=nullptr;
+    g_vols_ov=nullptr;g_vols_list=nullptr;g_vols_load=nullptr;g_vols_xfer=nullptr;g_vols_wifi=nullptr;
     g_vols_loading=false;g_vols_del_armed=false;g_vols_xfer_pending=false;g_vols_n=0;}
+
+// Ligne d'état WiFi hotspot (page Flights) : SSID configuré + état de connexion + IP.
+// Appelée à chaque STATUS quand la page est ouverte → l'utilisateur voit si le box est
+// bien connecté et à quel réseau (cause n°1 d'échec : hotspot iPhone éteint).
+static void volsUpdWifi(){
+    if(!g_vols_wifi)return;
+    const char* ss = g_hs_ssid[0]?g_hs_ssid:"(no hotspot)";
+    char b[48]; lv_color_t c=TGREY();
+    switch(g_status.wst){
+        case 1: snprintf(b,sizeof(b),"WiFi: connecting to %s...",ss); c=C_AMBER; break;
+        case 2: snprintf(b,sizeof(b),"WiFi OK: %s  %s",ss,g_status.wip); c=C_GREEN; break;
+        case 3: snprintf(b,sizeof(b),"WiFi: %s NOT FOUND (hotspot off?)",ss); c=C_RED; break;
+        case 4: snprintf(b,sizeof(b),"WiFi: %s connection failed",ss); c=C_RED; break;
+        default: snprintf(b,sizeof(b),"WiFi: %s (idle)",ss); c=TGREY(); break;
+    }
+    lv_label_set_text(g_vols_wifi,b);
+    lv_obj_set_style_text_color(g_vols_wifi,c,0);}
 static void _vols_close_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED)volsClose(); }
 
 static void volsUpdXfer(){
@@ -2891,6 +2912,12 @@ void mkVolsOverlay(){
     {lv_obj_t*l=lv_label_create(bc);lv_label_set_text(l,"Close");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+
+    // Ligne d'état WiFi hotspot (bas de page) — visibilité connexion pendant le transfert.
+    g_vols_wifi=lv_label_create(g_vols_ov);
+    lv_obj_set_style_text_font(g_vols_wifi,&lv_font_montserrat_14,0);
+    lv_obj_align(g_vols_wifi,LV_ALIGN_TOP_MID,0,414);
+    volsUpdWifi();
 
     // Demande la liste. On seed flt_rdy=0 localement : l'AT-CORE le met aussi à 0
     // à la réception puis 1 quand la liste est prête. Le poll (loop) attend
@@ -3297,6 +3324,7 @@ void updateAllPages(){
     // Tâche F : overlay upload progress (full-screen modal post-vol)
     updUploadOverlay();
     updFlightState();   // bannière FLIGHT STARTED / chip Start flight / overlay arrêt
+    if(g_vols_ov) volsUpdWifi();   // ligne état WiFi hotspot dans la page Flights
     // Refresh live de la ligne diagnostique DB sur page #02 (si auth en cours)
     if(g_auth_ov && g_auth_diag){
         char dbg[48];
