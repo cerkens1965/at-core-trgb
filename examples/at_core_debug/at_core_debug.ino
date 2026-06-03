@@ -73,6 +73,7 @@ struct StatusData {
     uint8_t flt_phase;   // 0=fly 1=ended 2=closed 3=uploading 4=done 5=fail (tâche D)
     uint8_t upload_pct;  // 0..100 (tâche D)
     uint8_t flt_rdy;     // WP8 : 1=liste vols prête à lire (CHR_FLIGHTS)
+    uint8_t flt_st;      // cycle de vol : 0=sol (pas démarré) 1=en vol 2=arrêt imminent
     };
 struct FlightData  { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
@@ -493,7 +494,7 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.gps_fix=d["gps_fix"]|false;g_status.sd_ok=d["sd_ok"]|false;
     g_status.flarm_ok=d["flarm"]|false;g_status.adsb_ok=d["adsb"]|false;
     g_status.charging=d["chg"]|false;
-    g_status.flt_phase=d["flt_ph"]|0;g_status.upload_pct=d["up_pct"]|0;g_status.flt_rdy=d["flt_rdy"]|0;
+    g_status.flt_phase=d["flt_ph"]|0;g_status.upload_pct=d["up_pct"]|0;g_status.flt_rdy=d["flt_rdy"]|0;g_status.flt_st=d["flt_st"]|0;
     g_status.valid=true;g_dataUpdated=true;}
 void parseFlight(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_flight.gforce_z=d["gf"]|1.0f;g_flight.co_ppm=d["co"]|0;
@@ -1753,8 +1754,8 @@ void mkUploadOverlay(){
     lv_obj_set_style_radius(g_up_ov,12,0);
     lv_obj_clear_flag(g_up_ov,LV_OBJ_FLAG_SCROLLABLE);
 
-    g_up_title=mkLblP(g_up_ov,"TRANSFERT VOL",C_AMBER,&lv_font_montserrat_20,118,18);
-    g_up_status=mkLblP(g_up_ov,"Vol termine — close CSV...",lv_color_hex(0xffffff),&lv_font_montserrat_16,40,72);
+    g_up_title=mkLblP(g_up_ov,"FLIGHT UPLOAD",C_AMBER,&lv_font_montserrat_20,118,18);
+    g_up_status=mkLblP(g_up_ov,"Flight ended — closing CSV...",lv_color_hex(0xffffff),&lv_font_montserrat_16,40,72);
     lv_obj_set_width(g_up_status,320);
     lv_obj_set_style_text_align(g_up_status,LV_TEXT_ALIGN_CENTER,0);
 
@@ -3168,10 +3169,113 @@ void updateRadarDR(){
             lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);}}}
 
 // ── Update all live data ──────────────────────────────────────────────────────
+// ── Cycle de vol (Start/Stop manuel + countdown d'arrêt) ─────────────────────
+// Piloté par g_status.flt_st (0=sol 1=en vol 2=arrêt imminent). Bannière "FLIGHT
+// STARTED" au décollage, chip "Start flight" au sol, overlay "stopping in Ns" + Cancel.
+static lv_obj_t* g_fb_ov=nullptr;     // bannière FLIGHT STARTED
+static uint32_t  g_fb_t0=0;
+static lv_obj_t* g_startchip=nullptr; // chip Start flight (au sol)
+static lv_obj_t* g_stop_ov=nullptr;   // overlay arrêt imminent
+static lv_obj_t* g_stop_lbl=nullptr;
+static uint32_t  g_stop_seen_ms=0;
+static uint8_t   g_prev_flt_st=0xFF;
+
+static void _startflight_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("start_flight"); }
+static void _continueflight_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("continue_flight"); }
+
+static void fbShow(){
+    if(g_fb_ov)return;
+    g_fb_ov=lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_fb_ov,360,120);lv_obj_center(g_fb_ov);
+    lv_obj_set_style_bg_color(g_fb_ov,lv_color_hex(0x0d1117),0);
+    lv_obj_set_style_bg_opa(g_fb_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(g_fb_ov,C_GREEN,0);
+    lv_obj_set_style_border_width(g_fb_ov,3,0);
+    lv_obj_set_style_radius(g_fb_ov,14,0);
+    lv_obj_clear_flag(g_fb_ov,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t*l=lv_label_create(g_fb_ov);lv_label_set_text(l,"FLIGHT STARTED");
+    lv_obj_set_style_text_color(l,C_GREEN,0);
+    lv_obj_set_style_text_font(l,&lv_font_montserrat_20,0);
+    lv_obj_center(l);
+    g_fb_t0=millis();
+}
+static void fbHide(){ if(g_fb_ov){lv_obj_del(g_fb_ov);g_fb_ov=nullptr;} }
+
+static void chipShow(){
+    if(g_startchip)return;
+    g_startchip=lv_btn_create(lv_layer_top());
+    lv_obj_set_size(g_startchip,160,46);
+    lv_obj_align(g_startchip,LV_ALIGN_BOTTOM_MID,0,-26);
+    lv_obj_set_style_bg_color(g_startchip,C_BRAND,0);lv_obj_set_style_radius(g_startchip,23,0);
+    lv_obj_set_style_border_width(g_startchip,0,0);lv_obj_set_style_shadow_opa(g_startchip,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(g_startchip,_startflight_cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t*l=lv_label_create(g_startchip);lv_label_set_text(l,"Start flight");
+    lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+    lv_obj_set_style_text_font(l,&lv_font_montserrat_16,0);lv_obj_center(l);
+}
+static void chipHide(){ if(g_startchip){lv_obj_del(g_startchip);g_startchip=nullptr;} }
+
+static void stopShow(){
+    if(g_stop_ov)return;
+    g_stop_ov=lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_stop_ov,420,200);lv_obj_center(g_stop_ov);
+    lv_obj_set_style_bg_color(g_stop_ov,lv_color_hex(0x0d1117),0);
+    lv_obj_set_style_bg_opa(g_stop_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(g_stop_ov,C_AMBER,0);
+    lv_obj_set_style_border_width(g_stop_ov,3,0);
+    lv_obj_set_style_radius(g_stop_ov,14,0);
+    lv_obj_clear_flag(g_stop_ov,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t*t=lv_label_create(g_stop_ov);lv_label_set_text(t,"Landing detected");
+    lv_obj_set_style_text_color(t,C_AMBER,0);
+    lv_obj_set_style_text_font(t,&lv_font_montserrat_20,0);
+    lv_obj_align(t,LV_ALIGN_TOP_MID,0,22);
+    g_stop_lbl=lv_label_create(g_stop_ov);lv_label_set_text(g_stop_lbl,"Stopping flight in 5s");
+    lv_obj_set_style_text_color(g_stop_lbl,lv_color_hex(0xffffff),0);
+    lv_obj_set_style_text_font(g_stop_lbl,&lv_font_montserrat_16,0);
+    lv_obj_align(g_stop_lbl,LV_ALIGN_TOP_MID,0,74);
+    lv_obj_t*b=lv_btn_create(g_stop_ov);
+    lv_obj_set_size(b,240,54);lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-22);
+    lv_obj_set_style_bg_color(b,C_GREEN,0);lv_obj_set_style_radius(b,27,0);
+    lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(b,_continueflight_cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t*bl=lv_label_create(b);lv_label_set_text(bl,"Cancel - keep flying");
+    lv_obj_set_style_text_color(bl,lv_color_hex(0xffffff),0);
+    lv_obj_set_style_text_font(bl,&lv_font_montserrat_16,0);lv_obj_center(bl);
+    g_stop_seen_ms=millis();
+}
+static void stopHide(){ if(g_stop_ov){lv_obj_del(g_stop_ov);g_stop_ov=nullptr;g_stop_lbl=nullptr;} }
+
+// Met à jour bannière/chip/overlay selon g_status.flt_st (reçu par BLE STATUS).
+void updFlightState(){
+    if(!g_status.valid){ fbHide();chipHide();stopHide();g_prev_flt_st=0xFF;return; }
+    uint8_t st=g_status.flt_st, ph=g_status.flt_phase;
+
+    if(g_prev_flt_st==0 && st==1) fbShow();           // décollage → bannière
+    if(g_fb_ov && millis()-g_fb_t0>4000) fbHide();    // auto-dismiss 4s
+
+    if(st==2){                                        // arrêt imminent → overlay + countdown
+        if(!g_stop_ov) stopShow();
+        if(g_stop_lbl){
+            int left=5-(int)((millis()-g_stop_seen_ms)/1000); if(left<0)left=0;
+            char b[32];snprintf(b,sizeof(b),"Stopping flight in %ds",left);
+            lv_label_set_text(g_stop_lbl,b);
+        }
+    } else if(g_stop_ov) stopHide();
+
+    // Chip "Start flight" : connecté, au sol, pas démarré, vue radar, aucun overlay ouvert
+    bool clear = g_connected && st==0 && ph==0 && g_page==0
+              && !g_up_ov && !g_stop_ov && !g_fb_ov && !g_maint_ov && !g_vols_ov
+              && !g_pair_ov && !g_auth_ov;
+    if(clear) chipShow(); else chipHide();
+
+    g_prev_flt_st=st;
+}
+
 void updateAllPages(){
     char b[32];
     // Tâche F : overlay upload progress (full-screen modal post-vol)
     updUploadOverlay();
+    updFlightState();   // bannière FLIGHT STARTED / chip Start flight / overlay arrêt
     // Refresh live de la ligne diagnostique DB sur page #02 (si auth en cours)
     if(g_auth_ov && g_auth_diag){
         char dbg[48];
