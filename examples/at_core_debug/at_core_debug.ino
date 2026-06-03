@@ -2726,19 +2726,31 @@ static lv_obj_t* g_vols_list=nullptr;
 static lv_obj_t* g_vols_load=nullptr;   // label "Chargement..."
 static lv_obj_t* g_vols_xfer=nullptr;   // label du bouton Transferer (N)
 static bool     g_vols_loading=false, g_vols_del_armed=false;
-static uint32_t g_vols_t0=0;
+static bool     g_vols_xfer_pending=false, g_vols_xfer_seen3=false;  // suivi transfert sur la page
+static uint32_t g_vols_t0=0, g_vols_xfer_t0=0;
 
 static void volsClose(){
     if(!g_vols_ov)return;
     lv_obj_del(g_vols_ov);
     g_vols_ov=nullptr;g_vols_list=nullptr;g_vols_load=nullptr;g_vols_xfer=nullptr;
-    g_vols_loading=false;g_vols_del_armed=false;g_vols_n=0;}
+    g_vols_loading=false;g_vols_del_armed=false;g_vols_xfer_pending=false;g_vols_n=0;}
 static void _vols_close_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED)volsClose(); }
 
 static void volsUpdXfer(){
     if(!g_vols_xfer)return;
     int n=0; for(int i=0;i<g_vols_n;i++) if(g_vols[i].sel)n++;
     char b[24]; snprintf(b,sizeof(b),"Transferer (%d)",n); lv_label_set_text(g_vols_xfer,b);}
+
+// Remplace la liste par un message d'état (transfert/suppression en cours, on reste
+// sur la page). g_vols_load réutilisé comme label, g_vols_n=0 (plus de lignes).
+static void volsShowStatus(const char* msg, lv_color_t col){
+    if(!g_vols_list)return;
+    lv_obj_clean(g_vols_list); g_vols_n=0;
+    g_vols_load=lv_label_create(g_vols_list);
+    lv_label_set_text(g_vols_load,msg);
+    lv_obj_set_style_text_color(g_vols_load,col,0);
+    lv_obj_set_style_text_font(g_vols_load,&lv_font_montserrat_16,0);
+    volsUpdXfer();}
 
 static void _vols_row_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
@@ -2761,7 +2773,11 @@ static void _vols_xfer_cb(lv_event_t*e){
         if(w+n>178)break; w+=n; cnt++;
     }
     w+=snprintf(p+w,sizeof(p)-w,"]}");
-    if(cnt){ g_chrCtl->writeValue((uint8_t*)p,strlen(p),false); volsClose(); }  // overlay progress up_pct prend le relais
+    if(cnt){
+        g_chrCtl->writeValue((uint8_t*)p,strlen(p),false);
+        volsShowStatus("Transfert en cours...",C_AMBER);   // on RESTE sur la page (overlay up_pct par-dessus)
+        g_vols_xfer_pending=true; g_vols_xfer_seen3=false; g_vols_xfer_t0=millis();
+    }
 }
 // Suppression des .up (transférés) — double-tap de confirmation.
 static void _vols_del_cb(lv_event_t*e){
@@ -2774,7 +2790,10 @@ static void _vols_del_cb(lv_event_t*e){
         return;
     }
     sendCtl("delflights");   // AT-CORE efface les .up puis re-scanne
-    volsClose();}
+    g_vols_del_armed=false;
+    volsShowStatus("Suppression...",C_AMBER);   // reste sur la page + recharge à la fin
+    g_status.flt_rdy=0; g_vols_loading=true; g_vols_t0=millis();   // attend le re-scan AT-CORE puis volsBuildList
+}
 
 // Lit CHR_FLIGHTS, parse le JSON, construit les lignes.
 static void volsBuildList(){
@@ -3597,8 +3616,22 @@ void loop(){
     if(g_vols_loading&&g_vols_ov){
         if(g_connected&&g_status.flt_rdy==1&&millis()-g_vols_t0>1500){
             g_vols_loading=false;volsBuildList();   // lecture BLE seulement si connecté + liste fraîche
-        }else if(millis()-g_vols_t0>9000){
+        }else if(millis()-g_vols_t0>12000){
             g_vols_loading=false;if(g_vols_load)lv_label_set_text(g_vols_load,"Timeout - reessaie");
+        }
+    }
+    // WP8 — suivi transfert : on RESTE sur la page Vols jusqu'à flt_phase 4 (OK) / 5 (fail).
+    // seen3 : attendre d'avoir vu UPLOADING (3) avant d'accepter 4/5 (évite un 4 périmé d'un
+    // upload précédent). Sur succès → recharge la liste (greys à jour).
+    if(g_vols_xfer_pending&&g_vols_ov){
+        uint8_t ph=g_status.flt_phase;
+        if(ph==3)g_vols_xfer_seen3=true;
+        if(g_vols_xfer_seen3&&(ph==4||ph==5)){
+            g_vols_xfer_pending=false;
+            if(g_vols_load)lv_label_set_text(g_vols_load,ph==4?"Transfert reussi":"Echec transfert");
+            if(ph==4){ sendCtl("flights"); g_status.flt_rdy=0; g_vols_loading=true; g_vols_t0=millis(); }
+        }else if(millis()-g_vols_xfer_t0>90000){
+            g_vols_xfer_pending=false;if(g_vols_load)lv_label_set_text(g_vols_load,"Timeout transfert");
         }
     }
     lv_timer_handler();delay(5);}
