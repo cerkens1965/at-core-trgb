@@ -78,6 +78,9 @@ struct StatusData {
     char    wip[16];     // dernière IP WiFi (proof de connexion)
     uint8_t ota;         // OTA : 0 idle 1 check 2 download 3 OK(reboot) 4 échec 5 à jour
     uint8_t opct;        // OTA download %
+    uint8_t fwv;         // version firmware AT-CORE
+    char    fwd[14];     // date de build AT-CORE (__DATE__)
+    uint8_t oav;         // MAJ dispo : version cloud si > fwv, sinon 0
     };
 struct FlightData  { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
@@ -193,6 +196,7 @@ static lv_obj_t *r_p0_bat=nullptr;      // "Battery AT-CORE : XX%"
 #define RAD_CY 240
 #define RAD_R  175
 static lv_obj_t *r_radar_hdg, *r_radar_scale_lbl, *r_radar_gs;
+static lv_obj_t *r_radar_ver=nullptr;   // version firmware + date (bas de la page radar)
 static lv_obj_t *r_card[4];
 static lv_obj_t *r_radar_cs[MAX_TRF],*r_radar_alt[MAX_TRF];
 static lv_obj_t *r_trf_img[MAX_TRF],*r_trf_vect[MAX_TRF];
@@ -501,6 +505,7 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.flt_phase=d["flt_ph"]|0;g_status.upload_pct=d["up_pct"]|0;g_status.flt_rdy=d["flt_rdy"]|0;g_status.flt_st=d["flt_st"]|0;
     g_status.wst=d["wst"]|0; strlcpy(g_status.wip,d["wip"]|"",sizeof(g_status.wip));
     g_status.ota=d["ota"]|0; g_status.opct=d["opct"]|0;
+    g_status.fwv=d["fwv"]|0; strlcpy(g_status.fwd,d["fwd"]|"",sizeof(g_status.fwd)); g_status.oav=d["oav"]|0;
     g_status.valid=true;g_dataUpdated=true;}
 void parseFlight(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_flight.gforce_z=d["gf"]|1.0f;g_flight.co_ppm=d["co"]|0;
@@ -2326,7 +2331,13 @@ void buildRadarPage(){
     r_radar_gs=lv_label_create(p);lv_label_set_text(r_radar_gs,"GS ---");
     lv_obj_set_style_text_color(r_radar_gs,TFG(),0);
     lv_obj_set_style_text_font(r_radar_gs,&lv_font_montserrat_14,0);
-    lv_obj_align(r_radar_gs,LV_ALIGN_BOTTOM_MID,0,-15);
+    lv_obj_align(r_radar_gs,LV_ALIGN_BOTTOM_MID,0,-33);   // remonté pour loger la ligne version
+
+    // Version firmware AT-CORE + date de build (+ "UPD vN!" si MAJ dispo) — bas de page.
+    r_radar_ver=lv_label_create(p);lv_label_set_text(r_radar_ver,"");
+    lv_obj_set_style_text_color(r_radar_ver,TGREY(),0);
+    lv_obj_set_style_text_font(r_radar_ver,&lv_font_montserrat_10,0);
+    lv_obj_align(r_radar_ver,LV_ALIGN_BOTTOM_MID,0,-13);
 
     // Tab pills 52×32 — outer edge is AT the display circle boundary (8-12px behind bezel).
     // The circular LCD naturally clips the outer rounded corner → flat outer edge = "D" shape.
@@ -2396,7 +2407,7 @@ void buildRadarPage(){
 
     // Scale label — entre le S de la rose et la GS (ordre : S → 4nm → GS XXkt)
     char scl[12];snprintf(scl,12,"%dnm",g_cfg.scale_nm);
-    r_radar_scale_lbl=mkLbl(p,scl,TGREY(),&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-35);
+    r_radar_scale_lbl=mkLbl(p,scl,TGREY(),&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-53);
 
     // Zoom +/- buttons — flanquent le label scale, mêmes ids que Settings (0=-, 1=+)
     // → reuse cbSetBtn → cfgSave() + updSetPage() (rafraichit aussi r_radar_scale_lbl)
@@ -3278,7 +3289,7 @@ static void chipShow(uint8_t kind){   // 1=Start flight 2=End flight
     g_chip_kind=kind;
     g_startchip=lv_btn_create(lv_layer_top());
     lv_obj_set_size(g_startchip,170,48);
-    lv_obj_align(g_startchip,LV_ALIGN_BOTTOM_MID,0,-24);
+    lv_obj_align(g_startchip,LV_ALIGN_TOP_MID,0,62);   // au-dessus de la mire radar
     lv_obj_set_style_bg_color(g_startchip,kind==2?C_RED:C_BRAND,0);lv_obj_set_style_radius(g_startchip,24,0);
     lv_obj_set_style_border_width(g_startchip,0,0);lv_obj_set_style_shadow_opa(g_startchip,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(g_startchip,kind==2?_endflight_cb:_startflight_cb,LV_EVENT_CLICKED,NULL);
@@ -3337,7 +3348,7 @@ void updFlightState(){
 
     // Chip Start flight (au sol) / End flight (en vol) : vue radar, aucun overlay ouvert.
     // "End flight" force l'arrêt immédiat (stop_flight) — fin de vol quoiqu'il arrive.
-    bool base = g_connected && ph==0 && g_page==0
+    bool base = g_connected && ph==0 && g_page==1   // page radar
               && !g_up_ov && !g_stop_ov && !g_fb_ov && !g_maint_ov && !g_vols_ov
               && !g_pair_ov && !g_auth_ov;
     if(base && st==0) chipShow(1);
@@ -3401,6 +3412,16 @@ void updateAllPages(){
     updFlightState();   // bannière FLIGHT STARTED / chip Start flight / overlay arrêt
     updOtaOverlay();    // overlay MAJ firmware (OTA cloud)
     if(g_vols_ov) volsUpdWifi();   // ligne état WiFi hotspot dans la page Flights
+    // Version firmware AT-CORE + date (+ "UPD vN!" ambre si MAJ dispo) — bas page radar
+    if(r_radar_ver){
+        char vb[52];
+        if(g_status.valid && g_status.fwv){
+            if(g_status.oav>g_status.fwv) snprintf(vb,sizeof(vb),"CORE v%d %s  UPD v%d!",g_status.fwv,g_status.fwd,g_status.oav);
+            else snprintf(vb,sizeof(vb),"CORE v%d  %s",g_status.fwv,g_status.fwd);
+        } else strcpy(vb,"CORE --");
+        lv_label_set_text(r_radar_ver,vb);
+        lv_obj_set_style_text_color(r_radar_ver,(g_status.valid&&g_status.oav>g_status.fwv)?C_AMBER:TGREY(),0);
+    }
     // Refresh live de la ligne diagnostique DB sur page #02 (si auth en cours)
     if(g_auth_ov && g_auth_diag){
         char dbg[48];
