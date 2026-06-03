@@ -2783,7 +2783,7 @@ static lv_obj_t* g_vols_list=nullptr;
 static lv_obj_t* g_vols_load=nullptr;   // label "Loading..."
 static lv_obj_t* g_vols_xfer=nullptr;   // label du bouton Transferer (N)
 static lv_obj_t* g_vols_wifi=nullptr;   // ligne état WiFi hotspot (SSID + connexion/IP)
-static bool     g_vols_loading=false, g_vols_del_armed=false;
+static bool     g_vols_loading=false, g_vols_del_armed=false, g_vols_clean_armed=false;
 static bool     g_vols_xfer_pending=false, g_vols_xfer_seen3=false;  // suivi transfert sur la page
 static uint32_t g_vols_t0=0, g_vols_xfer_t0=0;
 
@@ -2791,7 +2791,7 @@ static void volsClose(){
     if(!g_vols_ov)return;
     lv_obj_del(g_vols_ov);
     g_vols_ov=nullptr;g_vols_list=nullptr;g_vols_load=nullptr;g_vols_xfer=nullptr;g_vols_wifi=nullptr;
-    g_vols_loading=false;g_vols_del_armed=false;g_vols_xfer_pending=false;g_vols_n=0;}
+    g_vols_loading=false;g_vols_del_armed=false;g_vols_clean_armed=false;g_vols_xfer_pending=false;g_vols_n=0;}
 
 // Ligne d'état WiFi hotspot (page Flights) : SSID configuré + état de connexion + IP.
 // Appelée à chaque STATUS quand la page est ouverte → l'utilisateur voit si le box est
@@ -2873,6 +2873,21 @@ static void _vols_del_cb(lv_event_t*e){
     volsShowStatus("Deleting...",C_AMBER);   // reste sur la page + recharge à la fin
     g_status.flt_rdy=0; g_vols_loading=true; g_vols_t0=millis();   // attend le re-scan AT-CORE puis volsBuildList
 }
+// Clean empty : efface les CSV header-seul (0 donnée). Confirm en 2 taps, comme Delete sent.
+static void _vols_clean_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
+    if(!g_vols_clean_armed){
+        g_vols_clean_armed=true;
+        if(l)lv_label_set_text(l,"Confirm?");
+        lv_obj_set_style_bg_color(b,C_RED,0);
+        return;
+    }
+    sendCtl("cleanempty");   // AT-CORE efface les CSV vides puis re-scanne
+    g_vols_clean_armed=false;
+    volsShowStatus("Cleaning...",C_AMBER);
+    g_status.flt_rdy=0; g_vols_loading=true; g_vols_t0=millis();
+}
 
 // Lit CHR_FLIGHTS, parse le JSON, construit les lignes.
 static void volsBuildList(){
@@ -2940,11 +2955,20 @@ void mkVolsOverlay(){
     lv_obj_set_style_text_color(g_vols_xfer,lv_color_hex(0xffffff),0);
     lv_obj_set_style_text_font(g_vols_xfer,&lv_font_montserrat_14,0);lv_obj_center(g_vols_xfer);
 
-    lv_obj_t*bd=lv_btn_create(g_vols_ov);lv_obj_set_size(bd,210,30);lv_obj_align(bd,LV_ALIGN_TOP_MID,0,342);
+    // Ligne cleanup : Delete sent (efface les .up transférés) | Clean empty (efface les CSV vides)
+    lv_obj_t*bd=lv_btn_create(g_vols_ov);lv_obj_set_size(bd,103,30);lv_obj_align(bd,LV_ALIGN_TOP_MID,-54,342);
     lv_obj_set_style_bg_color(bd,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bd,8,0);
     lv_obj_set_style_border_width(bd,0,0);lv_obj_set_style_shadow_opa(bd,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bd,_vols_del_cb,LV_EVENT_CLICKED,NULL);
     {lv_obj_t*l=lv_label_create(bd);lv_label_set_text(l,"Delete sent");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+
+    lv_obj_t*bcl=lv_btn_create(g_vols_ov);lv_obj_set_size(bcl,103,30);lv_obj_align(bcl,LV_ALIGN_TOP_MID,54,342);
+    lv_obj_set_style_bg_color(bcl,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bcl,8,0);
+    lv_obj_set_style_border_width(bcl,0,0);lv_obj_set_style_shadow_opa(bcl,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bcl,_vols_clean_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bcl);lv_label_set_text(l,"Clean empty");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
