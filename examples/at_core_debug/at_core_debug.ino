@@ -26,6 +26,10 @@
 #include "img_flarm.h"
 #include "img_logos.h"
 
+// Version AT-VIEW + date de build (auto via __DATE__) — bumper VIEW_VERSION à chaque release.
+#define VIEW_VERSION  "1"
+#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v1  Jun  3 2026"
+
 LilyGo_RGBPanel panel;
 
 #define BLE_SVC_UUID    "4FAFC201-1FB5-459E-8FCC-C5C9C331914B"
@@ -1041,7 +1045,7 @@ void buildStatusPage(){
 
     // ── Batterie AT-CORE + version
     r_p0_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,418);
-    mkLbl(p,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
+    mkLbl(p,VIEW_VER_STR,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
 }
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
@@ -1403,7 +1407,7 @@ static void showWelcome(const char* pilotName, const char* instrName){
     else
         snprintf(bbuf,sizeof(bbuf),"%s : ---%%",g_peer_name[0]?g_peer_name:"AT-CORE");
     mkLbl(g_welcome_ov,bbuf,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,418);
-    mkLbl(g_welcome_ov,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
+    mkLbl(g_welcome_ov,VIEW_VER_STR,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
 
     lv_timer_create(_welcomeClose,3000,nullptr);}
 
@@ -1733,7 +1737,7 @@ void mkAuthOverlay(){
     else
         snprintf(bbuf,sizeof(bbuf),"%s : ---%%",g_peer_name[0]?g_peer_name:"AT-CORE");
     mkLbl(g_auth_ov,bbuf,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,418);
-    mkLbl(g_auth_ov,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
+    mkLbl(g_auth_ov,VIEW_VER_STR,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
 
     // Étape initiale = PICK : montre filtre + liste + clavier alpha, cache PIN
     pickerRefreshList();
@@ -3156,7 +3160,7 @@ void buildSettingsPage(){
     lv_obj_add_flag(lVw,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(lVw,_cbForgetPair,LV_EVENT_LONG_PRESSED,NULL);
     r_p2_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,448);
-    lv_obj_t*ver=mkLbl(p,"v0.7  --  2026-05-14",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,464);
+    lv_obj_t*ver=mkLbl(p,VIEW_VER_STR,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,464);
     lv_obj_add_flag(ver,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(ver,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(ver,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);}
