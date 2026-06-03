@@ -81,6 +81,7 @@ struct StatusData {
     uint8_t fwv;         // version firmware AT-CORE
     char    fwd[14];     // date de build AT-CORE (__DATE__)
     uint8_t oav;         // MAJ dispo : version cloud si > fwv, sinon 0
+    char    club[24];    // clubId courant (pour pré-remplir Box config)
     };
 struct FlightData  { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
@@ -506,6 +507,7 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.wst=d["wst"]|0; strlcpy(g_status.wip,d["wip"]|"",sizeof(g_status.wip));
     g_status.ota=d["ota"]|0; g_status.opct=d["opct"]|0;
     g_status.fwv=d["fwv"]|0; strlcpy(g_status.fwd,d["fwd"]|"",sizeof(g_status.fwd)); g_status.oav=d["oav"]|0;
+    strlcpy(g_status.club,d["club"]|"",sizeof(g_status.club));
     g_status.valid=true;g_dataUpdated=true;}
 void parseFlight(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_flight.gforce_z=d["gf"]|1.0f;g_flight.co_ppm=d["co"]|0;
@@ -2969,6 +2971,73 @@ static void _maint_ota_cb(lv_event_t*e){
     sendCtl("otaupdate");   // AT-CORE : connecte hotspot → check version → download → flash
 }
 
+// ── Box config (nom BLE + clubId, sans bouton BOOT) ───────────────────────────
+static lv_obj_t* g_box_ov=nullptr,*g_box_name_ta=nullptr,*g_box_club_ta=nullptr,*g_box_kb=nullptr;
+static void _box_close(){
+    if(!g_box_ov)return;
+    lv_obj_del(g_box_ov);g_box_ov=nullptr;g_box_name_ta=nullptr;g_box_club_ta=nullptr;g_box_kb=nullptr;}
+static void _box_close_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED)_box_close(); }
+static void _box_save_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED||!g_chrCtl||!g_chrCtl->canWrite())return;
+    const char* club=lv_textarea_get_text(g_box_club_ta);
+    if(club&&*club){ char p[64]; int w=snprintf(p,sizeof(p),"{\"cmd\":\"setclub\",\"c\":\"%s\"}",club);
+        g_chrCtl->writeValue((uint8_t*)p,w,false); }
+    const char* name=lv_textarea_get_text(g_box_name_ta);
+    if(name&&*name){ char p[80]; int w=snprintf(p,sizeof(p),"{\"cmd\":\"setname\",\"n\":\"%s\"}",name);
+        delay(150); g_chrCtl->writeValue((uint8_t*)p,w,false); }  // setname → l'AT-CORE reboot
+    _box_close();
+}
+static void _box_ta_cb(lv_event_t*e){
+    lv_event_code_t c=lv_event_get_code(e);lv_obj_t*ta=lv_event_get_target(e);
+    if(!g_box_kb)return;
+    if(c==LV_EVENT_FOCUSED){ lv_keyboard_set_textarea(g_box_kb,ta); lv_obj_clear_flag(g_box_kb,LV_OBJ_FLAG_HIDDEN); }
+    else if(c==LV_EVENT_DEFOCUSED||c==LV_EVENT_READY||c==LV_EVENT_CANCEL){ lv_obj_add_flag(g_box_kb,LV_OBJ_FLAG_HIDDEN); }
+}
+void mkBoxConfigOverlay(){
+    if(g_box_ov)return;
+    g_box_ov=lv_obj_create(lv_scr_act());
+    lv_obj_set_size(g_box_ov,480,480);lv_obj_set_pos(g_box_ov,0,0);
+    lv_obj_set_style_bg_color(g_box_ov,TBG(),0);lv_obj_set_style_bg_opa(g_box_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(g_box_ov,0,0);lv_obj_set_style_radius(g_box_ov,0,0);
+    lv_obj_clear_flag(g_box_ov,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t*tl=lv_label_create(g_box_ov);lv_label_set_text(tl,"BOX CONFIG");
+    lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_20,0);
+    lv_obj_align(tl,LV_ALIGN_TOP_MID,0,40);
+
+    mkLbl(g_box_ov,"BLE name (reboots AT-CORE)",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,88);
+    g_box_name_ta=lv_textarea_create(g_box_ov);lv_textarea_set_one_line(g_box_name_ta,true);
+    lv_textarea_set_placeholder_text(g_box_name_ta,"ATCORE-EBBY1-01");
+    lv_textarea_set_max_length(g_box_name_ta,24);
+    lv_obj_set_size(g_box_name_ta,300,38);lv_obj_align(g_box_name_ta,LV_ALIGN_TOP_MID,0,106);
+    lv_obj_add_event_cb(g_box_name_ta,_box_ta_cb,LV_EVENT_ALL,NULL);
+
+    mkLbl(g_box_ov,"Club ID",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,152);
+    g_box_club_ta=lv_textarea_create(g_box_ov);lv_textarea_set_one_line(g_box_club_ta,true);
+    lv_textarea_set_text(g_box_club_ta,g_status.club);   // pré-rempli
+    lv_textarea_set_placeholder_text(g_box_club_ta,"EBBY-01");
+    lv_textarea_set_max_length(g_box_club_ta,20);
+    lv_obj_set_size(g_box_club_ta,300,38);lv_obj_align(g_box_club_ta,LV_ALIGN_TOP_MID,0,170);
+    lv_obj_add_event_cb(g_box_club_ta,_box_ta_cb,LV_EVENT_ALL,NULL);
+
+    lv_obj_t*bs=lv_btn_create(g_box_ov);lv_obj_set_size(bs,150,40);lv_obj_align(bs,LV_ALIGN_TOP_MID,-82,222);
+    lv_obj_set_style_bg_color(bs,C_GREEN,0);lv_obj_set_style_radius(bs,8,0);
+    lv_obj_set_style_border_width(bs,0,0);lv_obj_set_style_shadow_opa(bs,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bs,_box_save_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bs);lv_label_set_text(l,"Save");lv_obj_center(l);
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_16,0);}
+    lv_obj_t*bc=lv_btn_create(g_box_ov);lv_obj_set_size(bc,150,40);lv_obj_align(bc,LV_ALIGN_TOP_MID,82,222);
+    lv_obj_set_style_bg_color(bc,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bc,8,0);
+    lv_obj_set_style_border_width(bc,0,0);lv_obj_set_style_shadow_opa(bc,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bc,_box_close_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bc);lv_label_set_text(l,"Close");lv_obj_center(l);
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_16,0);}
+
+    g_box_kb=lv_keyboard_create(g_box_ov);lv_obj_set_size(g_box_kb,320,175);
+    lv_obj_align(g_box_kb,LV_ALIGN_TOP_MID,0,275);
+    lv_keyboard_set_textarea(g_box_kb,g_box_name_ta);lv_obj_add_flag(g_box_kb,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(g_box_kb,[](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_READY||lv_event_get_code(e)==LV_EVENT_CANCEL) lv_obj_add_flag(g_box_kb,LV_OBJ_FLAG_HIDDEN); },LV_EVENT_ALL,NULL);
+}
+
 void mkMaintenanceOverlay(){
     if(g_maint_ov)return;
     g_maint_ov=lv_obj_create(lv_scr_act());
@@ -3070,6 +3139,16 @@ void mkMaintenanceOverlay(){
     lv_obj_set_style_text_font(g_maint_upd,&lv_font_montserrat_12,0);
     lv_obj_align(g_maint_upd,LV_ALIGN_TOP_MID,0,292);
     maintUpdAnnounce();   // (fallback AP-OTA par BOUTON BOOT retiré : boîtier scellé, BOOT inaccessible)
+
+    // Bouton "Box config" → overlay nom BLE + clubId (config 100% sans bouton BOOT).
+    lv_obj_t*bbx=lv_btn_create(g_maint_ov);lv_obj_set_size(bbx,300,30);
+    lv_obj_align(bbx,LV_ALIGN_TOP_MID,0,316);
+    lv_obj_set_style_bg_color(bbx,lv_color_hex(0x1f4068),0);lv_obj_set_style_radius(bbx,8,0);
+    lv_obj_set_style_border_width(bbx,0,0);lv_obj_set_style_shadow_opa(bbx,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bbx,[](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) mkBoxConfigOverlay(); },LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bbx);lv_label_set_text(l,"Box config (name / club)");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);lv_obj_center(l);}
 
     // Clavier LVGL — TAILLÉ POUR LE CERCLE : 320x175 centré (les coins restent
     // dans le disque 480, contrairement au plein-largeur dont la rangée du bas
