@@ -3746,16 +3746,18 @@ void loop(){
         }
     }
     // WP8 — suivi transfert : on RESTE sur la page Vols jusqu'à flt_phase 4 (OK) / 5 (fail).
-    // seen3 : attendre d'avoir vu UPLOADING (3) avant d'accepter 4/5 (évite un 4 périmé d'un
-    // upload précédent). Sur succès → recharge la liste (greys à jour).
+    // On accepte 4/5 si on a vu UPLOADING (3) OU après 8s (l'AT-CORE a forcément consommé
+    // g_upl_req via TaskMonitor ~5s et écrit la phase 3 puis le résultat → plus de 4/5 périmé).
+    // Ça évite un "timeout" 90s quand l'échec est rapide (ex. hotspot hors de portée).
     if(g_vols_xfer_pending&&g_vols_ov){
         uint8_t ph=g_status.flt_phase;
+        uint32_t el=millis()-g_vols_xfer_t0;
         if(ph==3)g_vols_xfer_seen3=true;
-        if(g_vols_xfer_seen3&&(ph==4||ph==5)){
+        if((g_vols_xfer_seen3||el>8000)&&(ph==4||ph==5)){
             g_vols_xfer_pending=false;
             if(g_vols_load)lv_label_set_text(g_vols_load,ph==4?"Transfer OK":"Transfer failed");
             if(ph==4){ sendCtl("flights"); g_status.flt_rdy=0; g_vols_loading=true; g_vols_t0=millis(); }
-        }else if(millis()-g_vols_xfer_t0>90000){
+        }else if(el>90000){
             g_vols_xfer_pending=false;if(g_vols_load)lv_label_set_text(g_vols_load,"Transfer timeout");
         }
     }
