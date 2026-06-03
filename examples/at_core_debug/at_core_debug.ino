@@ -1805,12 +1805,12 @@ void updUploadOverlay(){
     // Texte selon phase
     const char* msg = "...";
     switch(ph){
-        case 1: msg="Vol termine — fermeture CSV"; break;
-        case 2: msg="CSV ferme — attente upload"; break;
-        case 3: msg="Upload Firebase en cours..."; break;
-        case 4: msg="Transfert reussi ✓";
+        case 1: msg="Flight ended — closing CSV"; break;
+        case 2: msg="CSV closed — waiting upload"; break;
+        case 3: msg="Uploading to Firebase..."; break;
+        case 4: msg="Transfer OK";
                 if(g_up_done_ms==0) g_up_done_ms=millis(); break;
-        case 5: msg="Echec — nouvelle tentative...";
+        case 5: msg="Failed — retrying...";
                 g_up_done_ms=0; break;
     }
     if(g_up_status) lv_label_set_text(g_up_status,msg);
@@ -2639,15 +2639,15 @@ static void _maint_save_cb(lv_event_t*e){
     if(!s||!s[0])return;                 // SSID obligatoire
     unitSaveHotspot(s,p);                // NVS local (toujours)
     sendWifiCreds(s,p);                  // push BLE vers AT-CORE (si connecté)
-    // Feedback honnête : "Envoye" si poussé en BLE, sinon juste sauvé localement.
+    // Feedback honnête : "Sent" si poussé en BLE, sinon juste sauvé localement.
     bool pushed=g_connected&&g_chrCtl&&g_chrCtl->canWrite();
     lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
-    if(l)lv_label_set_text(l,pushed?"Envoye":"Sauve (hors ligne)");}
+    if(l)lv_label_set_text(l,pushed?"Sent":"Saved (offline)");}
 static void _maint_test_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
     sendCtl("wifitest");   // AT-CORE connecte le hotspot, logue [WIFI] IP=.../FAIL en série
     lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
-    if(l)lv_label_set_text(l,g_connected?"Test envoye (voir log)":"Hors ligne");}
+    if(l)lv_label_set_text(l,g_connected?"Test sent (see log)":"Offline");}
 // Clavier : suit le textarea focalisé, caché tant qu'on ne tape pas. On gère
 // FOCUSED (1re entrée) ET CLICKED (re-tap d'un champ déjà focalisé, sinon LVGL
 // ne renvoie pas FOCUSED et le clavier ne reviendrait pas après l'avoir fermé).
@@ -2682,7 +2682,7 @@ static void _maint_scan_cb(lv_event_t*e){
     lv_obj_set_style_border_color(g_maint_scanlist,C_BRAND,0);lv_obj_set_style_border_width(g_maint_scanlist,1,0);
     lv_obj_set_style_radius(g_maint_scanlist,8,0);
     lv_obj_set_flex_flow(g_maint_scanlist,LV_FLEX_FLOW_COLUMN);
-    lv_obj_t*tt=lv_label_create(g_maint_scanlist);lv_label_set_text(tt,"Scan WiFi 2.4GHz...");
+    lv_obj_t*tt=lv_label_create(g_maint_scanlist);lv_label_set_text(tt,"Scanning 2.4GHz WiFi...");
     lv_obj_set_style_text_color(tt,TGREY(),0);lv_obj_set_style_text_font(tt,&lv_font_montserrat_14,0);
     // Bouton Fermer (idx=-1 → _maint_scanpick_cb ne set pas le SSID, ferme juste) :
     // indispensable si aucun réseau n'est trouvé, sinon le panneau resterait bloqué.
@@ -2690,12 +2690,12 @@ static void _maint_scan_cb(lv_event_t*e){
      lv_obj_set_style_bg_color(xb,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(xb,6,0);
      lv_obj_set_style_shadow_opa(xb,LV_OPA_TRANSP,0);
      lv_obj_add_event_cb(xb,_maint_scanpick_cb,LV_EVENT_CLICKED,(void*)(intptr_t)(-1));
-     lv_obj_t*l=lv_label_create(xb);lv_label_set_text(l,"Fermer");
+     lv_obj_t*l=lv_label_create(xb);lv_label_set_text(l,"Close");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);lv_obj_center(l);}
     // Si l'AP (Settings WIFI) tourne, NE PAS scanner : passer en STA tuerait l'AP +
     // le WebServer (g_wifi_active resterait incohérent). On refuse proprement.
-    if(g_wifi_active){lv_label_set_text(tt,"Desactive WIFI (Settings) d'abord");return;}
+    if(g_wifi_active){lv_label_set_text(tt,"Disable WIFI (Settings) first");return;}
     lv_refr_now(NULL);   // dessine "Scan..." + Fermer AVANT le scan bloquant (~2-4 s)
     WiFi.mode(WIFI_STA);
     int n=WiFi.scanNetworks();
@@ -2715,7 +2715,7 @@ static void _maint_scan_cb(lv_event_t*e){
     }
     WiFi.scanDelete();
     WiFi.mode(WIFI_OFF);   // restaure l'état dormant (BLE-only) → wifiStart() repartira proprement OFF→AP
-    lv_label_set_text(tt,g_scan_n?"Choisis ton hotspot (2.4GHz):":"Aucun reseau 2.4GHz (5GHz?)");}
+    lv_label_set_text(tt,g_scan_n?"Pick hotspot (2.4GHz):":"No 2.4GHz network (5GHz?)");}
 
 // ── Écran VOLS (WP8) — liste multi-select, transfert, suppression ─────────────
 struct VolItem { char fid[20]; char d[12]; char s[6]; char e[6]; uint8_t up; bool sel; lv_obj_t* lbl; lv_obj_t* row; };
@@ -2723,7 +2723,7 @@ static VolItem  g_vols[16];
 static int      g_vols_n=0;
 static lv_obj_t* g_vols_ov=nullptr;
 static lv_obj_t* g_vols_list=nullptr;
-static lv_obj_t* g_vols_load=nullptr;   // label "Chargement..."
+static lv_obj_t* g_vols_load=nullptr;   // label "Loading..."
 static lv_obj_t* g_vols_xfer=nullptr;   // label du bouton Transferer (N)
 static bool     g_vols_loading=false, g_vols_del_armed=false;
 static bool     g_vols_xfer_pending=false, g_vols_xfer_seen3=false;  // suivi transfert sur la page
@@ -2739,7 +2739,7 @@ static void _vols_close_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLIC
 static void volsUpdXfer(){
     if(!g_vols_xfer)return;
     int n=0; for(int i=0;i<g_vols_n;i++) if(g_vols[i].sel)n++;
-    char b[24]; snprintf(b,sizeof(b),"Transferer (%d)",n); lv_label_set_text(g_vols_xfer,b);}
+    char b[24]; snprintf(b,sizeof(b),"Transfer (%d)",n); lv_label_set_text(g_vols_xfer,b);}
 
 // Remplace la liste par un message d'état (transfert/suppression en cours, on reste
 // sur la page). g_vols_load réutilisé comme label, g_vols_n=0 (plus de lignes).
@@ -2775,7 +2775,7 @@ static void _vols_xfer_cb(lv_event_t*e){
     w+=snprintf(p+w,sizeof(p)-w,"]}");
     if(cnt){
         g_chrCtl->writeValue((uint8_t*)p,strlen(p),false);
-        volsShowStatus("Transfert en cours...",C_AMBER);   // on RESTE sur la page (overlay up_pct par-dessus)
+        volsShowStatus("Transferring...",C_AMBER);   // on RESTE sur la page (overlay up_pct par-dessus)
         g_vols_xfer_pending=true; g_vols_xfer_seen3=false; g_vols_xfer_t0=millis();
     }
 }
@@ -2785,13 +2785,13 @@ static void _vols_del_cb(lv_event_t*e){
     lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
     if(!g_vols_del_armed){
         g_vols_del_armed=true;
-        if(l)lv_label_set_text(l,"Confirmer ?");
+        if(l)lv_label_set_text(l,"Confirm?");
         lv_obj_set_style_bg_color(b,C_RED,0);
         return;
     }
     sendCtl("delflights");   // AT-CORE efface les .up puis re-scanne
     g_vols_del_armed=false;
-    volsShowStatus("Suppression...",C_AMBER);   // reste sur la page + recharge à la fin
+    volsShowStatus("Deleting...",C_AMBER);   // reste sur la page + recharge à la fin
     g_status.flt_rdy=0; g_vols_loading=true; g_vols_t0=millis();   // attend le re-scan AT-CORE puis volsBuildList
 }
 
@@ -2816,7 +2816,7 @@ static void volsBuildList(){
         lv_obj_set_style_bg_color(b,it.up?lv_color_hex(0x161b22):lv_color_hex(0x21262d),0);
         const char* md=strlen(it.d)>=10?it.d+5:it.d;
         char r[52];
-        if(it.up) snprintf(r,sizeof(r),"%s %s>%s  envoye",md,it.s,it.e);
+        if(it.up) snprintf(r,sizeof(r),"%s %s>%s  sent",md,it.s,it.e);
         else      snprintf(r,sizeof(r),"[ ] %s %s>%s",md,it.s,it.e);
         lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,r);
         lv_obj_set_style_text_color(l,it.up?lv_color_hex(0x6b7280):lv_color_hex(0xe6edf3),0);
@@ -2826,7 +2826,7 @@ static void volsBuildList(){
         g_vols_n++;
     }
     if(g_vols_n==0){
-        lv_obj_t*l=lv_label_create(g_vols_list);lv_label_set_text(l,"Aucun vol sur la SD");
+        lv_obj_t*l=lv_label_create(g_vols_list);lv_label_set_text(l,"No flights on SD");
         lv_obj_set_style_text_color(l,TGREY(),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);
     }
     volsUpdXfer();}
@@ -2839,7 +2839,7 @@ void mkVolsOverlay(){
     lv_obj_set_style_border_width(g_vols_ov,0,0);lv_obj_set_style_radius(g_vols_ov,0,0);
     lv_obj_set_style_pad_all(g_vols_ov,0,0);lv_obj_clear_flag(g_vols_ov,LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t*tl=lv_label_create(g_vols_ov);lv_label_set_text(tl,"VOLS (UTC)");
+    lv_obj_t*tl=lv_label_create(g_vols_ov);lv_label_set_text(tl,"FLIGHTS (UTC)");
     lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_20,0);
     lv_obj_align(tl,LV_ALIGN_TOP_MID,0,26);
 
@@ -2849,7 +2849,7 @@ void mkVolsOverlay(){
     lv_obj_set_style_bg_color(g_vols_list,lv_color_hex(0x0d1117),0);
     lv_obj_set_style_border_width(g_vols_list,0,0);lv_obj_set_style_pad_all(g_vols_list,4,0);
     lv_obj_set_flex_flow(g_vols_list,LV_FLEX_FLOW_COLUMN);
-    g_vols_load=lv_label_create(g_vols_list);lv_label_set_text(g_vols_load,"Chargement...");
+    g_vols_load=lv_label_create(g_vols_list);lv_label_set_text(g_vols_load,"Loading...");
     lv_obj_set_style_text_color(g_vols_load,TGREY(),0);lv_obj_set_style_text_font(g_vols_load,&lv_font_montserrat_14,0);
 
     // Boutons
@@ -2857,7 +2857,7 @@ void mkVolsOverlay(){
     lv_obj_set_style_bg_color(bx,C_GREEN,0);lv_obj_set_style_radius(bx,8,0);
     lv_obj_set_style_border_width(bx,0,0);lv_obj_set_style_shadow_opa(bx,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bx,_vols_xfer_cb,LV_EVENT_CLICKED,NULL);
-    g_vols_xfer=lv_label_create(bx);lv_label_set_text(g_vols_xfer,"Transferer (0)");
+    g_vols_xfer=lv_label_create(bx);lv_label_set_text(g_vols_xfer,"Transfer (0)");
     lv_obj_set_style_text_color(g_vols_xfer,lv_color_hex(0xffffff),0);
     lv_obj_set_style_text_font(g_vols_xfer,&lv_font_montserrat_14,0);lv_obj_center(g_vols_xfer);
 
@@ -2865,7 +2865,7 @@ void mkVolsOverlay(){
     lv_obj_set_style_bg_color(bd,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bd,8,0);
     lv_obj_set_style_border_width(bd,0,0);lv_obj_set_style_shadow_opa(bd,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bd,_vols_del_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(bd);lv_label_set_text(l,"Suppr. transferes");
+    {lv_obj_t*l=lv_label_create(bd);lv_label_set_text(l,"Delete sent");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
@@ -2873,7 +2873,7 @@ void mkVolsOverlay(){
     lv_obj_set_style_bg_color(bc,lv_color_hex(0x30363d),0);lv_obj_set_style_radius(bc,8,0);
     lv_obj_set_style_border_width(bc,0,0);lv_obj_set_style_shadow_opa(bc,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bc,_vols_close_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(bc);lv_label_set_text(l,"Fermer");
+    {lv_obj_t*l=lv_label_create(bc);lv_label_set_text(l,"Close");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
@@ -2900,13 +2900,13 @@ void mkMaintenanceOverlay(){
     lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_20,0);
     lv_obj_align(tl,LV_ALIGN_TOP_MID,0,34);
 
-    // Ligne transfert : "Dernier vol" (rapide) + "Liste des vols" (multi-select, WP8)
+    // Ligne transfert : "Last flight" (rapide) + "Flights" (multi-select, WP8)
     lv_obj_t*bu=lv_btn_create(g_maint_ov);lv_obj_set_size(bu,145,36);
     lv_obj_align(bu,LV_ALIGN_TOP_MID,-78,56);
     lv_obj_set_style_bg_color(bu,C_BRAND,0);lv_obj_set_style_radius(bu,8,0);
     lv_obj_set_style_border_width(bu,0,0);lv_obj_set_style_shadow_opa(bu,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bu,_maint_upload_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(bu);lv_label_set_text(l,"Dernier vol");
+    {lv_obj_t*l=lv_label_create(bu);lv_label_set_text(l,"Last flight");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
     lv_obj_t*bv=lv_btn_create(g_maint_ov);lv_obj_set_size(bv,145,36);
@@ -2914,14 +2914,14 @@ void mkMaintenanceOverlay(){
     lv_obj_set_style_bg_color(bv,lv_color_hex(0x1f4068),0);lv_obj_set_style_radius(bv,8,0);
     lv_obj_set_style_border_width(bv,0,0);lv_obj_set_style_shadow_opa(bv,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bv,_open_vols_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(bv);lv_label_set_text(l,"Liste des vols");
+    {lv_obj_t*l=lv_label_create(bv);lv_label_set_text(l,"Flights");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
     // Champ SSID (gauche) + bouton Scan (droite)
     g_maint_ssid_ta=lv_textarea_create(g_maint_ov);
     lv_textarea_set_one_line(g_maint_ssid_ta,true);
-    lv_textarea_set_placeholder_text(g_maint_ssid_ta,"SSID hotspot");
+    lv_textarea_set_placeholder_text(g_maint_ssid_ta,"Hotspot SSID");
     lv_textarea_set_text(g_maint_ssid_ta,g_hs_ssid);
     lv_textarea_set_max_length(g_maint_ssid_ta,32);
     lv_obj_set_size(g_maint_ssid_ta,228,36);lv_obj_align(g_maint_ssid_ta,LV_ALIGN_TOP_MID,-56,100);
@@ -2939,7 +2939,7 @@ void mkMaintenanceOverlay(){
     g_maint_pass_ta=lv_textarea_create(g_maint_ov);
     lv_textarea_set_one_line(g_maint_pass_ta,true);
     lv_textarea_set_password_mode(g_maint_pass_ta,true);
-    lv_textarea_set_placeholder_text(g_maint_pass_ta,"Mot de passe");
+    lv_textarea_set_placeholder_text(g_maint_pass_ta,"Password");
     lv_textarea_set_text(g_maint_pass_ta,g_hs_pass);
     lv_textarea_set_max_length(g_maint_pass_ta,63);
     lv_obj_set_size(g_maint_pass_ta,340,36);lv_obj_align(g_maint_pass_ta,LV_ALIGN_TOP_MID,0,142);
@@ -2951,7 +2951,7 @@ void mkMaintenanceOverlay(){
     lv_obj_set_style_bg_color(bt,C_CYAN,0);lv_obj_set_style_radius(bt,8,0);
     lv_obj_set_style_border_width(bt,0,0);lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bt,_maint_test_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(bt);lv_label_set_text(l,"Tester le hotspot");
+    {lv_obj_t*l=lv_label_create(bt);lv_label_set_text(l,"Test hotspot");
      lv_obj_set_style_text_color(l,lv_color_hex(0x0d1117),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
@@ -2961,7 +2961,7 @@ void mkMaintenanceOverlay(){
     lv_obj_set_style_bg_color(bs,C_GREEN,0);lv_obj_set_style_radius(bs,8,0);
     lv_obj_set_style_border_width(bs,0,0);lv_obj_set_style_shadow_opa(bs,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bs,_maint_save_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(bs);lv_label_set_text(l,"Enregistrer");
+    {lv_obj_t*l=lv_label_create(bs);lv_label_set_text(l,"Save");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
@@ -2970,13 +2970,13 @@ void mkMaintenanceOverlay(){
     lv_obj_set_style_bg_color(bc,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bc,8,0);
     lv_obj_set_style_border_width(bc,0,0);lv_obj_set_style_shadow_opa(bc,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bc,_maint_close_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(bc);lv_label_set_text(l,"Fermer");
+    {lv_obj_t*l=lv_label_create(bc);lv_label_set_text(l,"Close");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
     // Aide OTA (non pilotable en BLE : flux AP du portail AT-CORE)
-    mkLbl(g_maint_ov,"MAJ AT-CORE: BOOT 6s -> ATCORE-SETUP",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,258);
-    mkLbl(g_maint_ov,"MAJ AT-VIEW: WIFI ON -> 192.168.4.1",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,274);
+    mkLbl(g_maint_ov,"AT-CORE update: BOOT 6s -> ATCORE-SETUP",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,258);
+    mkLbl(g_maint_ov,"AT-VIEW update: WIFI ON -> 192.168.4.1",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,274);
 
     // Clavier LVGL — TAILLÉ POUR LE CERCLE : 320x175 centré (les coins restent
     // dans le disque 480, contrairement au plein-largeur dont la rangée du bas
@@ -3617,7 +3617,7 @@ void loop(){
         if(g_connected&&g_status.flt_rdy==1&&millis()-g_vols_t0>1500){
             g_vols_loading=false;volsBuildList();   // lecture BLE seulement si connecté + liste fraîche
         }else if(millis()-g_vols_t0>12000){
-            g_vols_loading=false;if(g_vols_load)lv_label_set_text(g_vols_load,"Timeout - reessaie");
+            g_vols_loading=false;if(g_vols_load)lv_label_set_text(g_vols_load,"Timeout - retry");
         }
     }
     // WP8 — suivi transfert : on RESTE sur la page Vols jusqu'à flt_phase 4 (OK) / 5 (fail).
@@ -3628,10 +3628,10 @@ void loop(){
         if(ph==3)g_vols_xfer_seen3=true;
         if(g_vols_xfer_seen3&&(ph==4||ph==5)){
             g_vols_xfer_pending=false;
-            if(g_vols_load)lv_label_set_text(g_vols_load,ph==4?"Transfert reussi":"Echec transfert");
+            if(g_vols_load)lv_label_set_text(g_vols_load,ph==4?"Transfer OK":"Transfer failed");
             if(ph==4){ sendCtl("flights"); g_status.flt_rdy=0; g_vols_loading=true; g_vols_t0=millis(); }
         }else if(millis()-g_vols_xfer_t0>90000){
-            g_vols_xfer_pending=false;if(g_vols_load)lv_label_set_text(g_vols_load,"Timeout transfert");
+            g_vols_xfer_pending=false;if(g_vols_load)lv_label_set_text(g_vols_load,"Transfer timeout");
         }
     }
     lv_timer_handler();delay(5);}

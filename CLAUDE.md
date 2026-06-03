@@ -66,6 +66,10 @@ Navigation : swipe gauche/droite entre pages (bloqué tant que #02 est ouverte).
 
 ### Identité visuelle
 
+- **🌐 LANGUE UI = ANGLAIS** : tout le texte affiché à l'utilisateur (labels, boutons,
+  messages) est en **anglais** (préférence utilisateur 2026-06-03). Les commentaires de
+  code et cette doc restent en français. Écrans Maintenance + Flights déjà traduits ;
+  auth/radar/settings à migrer.
 - Couleur brand AeroTrace : **#7393B4** (provisoire — peut évoluer)
 - Logos bicolores : A bleu #7393B4 + reste noir (sources `public/logo/*.png` → converter `tools/png2lvgl_logos.py`)
 - Pages #01/#02/#03 forcent fond blanc (lisibilité logo noir)
