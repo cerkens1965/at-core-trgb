@@ -202,6 +202,7 @@ static lv_obj_t *r_p0_bat=nullptr;      // "Battery AT-CORE : XX%"
 #define RAD_R  175
 static lv_obj_t *r_radar_hdg, *r_radar_scale_lbl, *r_radar_gs;
 static lv_obj_t *r_radar_ver=nullptr;   // version firmware + date (bas de la page radar)
+static lv_obj_t *r_flt_stop=nullptr;    // panneau STOP (fin de vol) — emplacement ex-ADS-B, visible en vol
 static lv_obj_t *r_card[4];
 static lv_obj_t *r_radar_cs[MAX_TRF],*r_radar_alt[MAX_TRF];
 static lv_obj_t *r_trf_img[MAX_TRF],*r_trf_vect[MAX_TRF];
@@ -2354,6 +2355,17 @@ void buildRadarPage(){
     r_hdr_bat  = mkTabPill(p, LV_SYMBOL_CHARGE,       40, 80);
     r_hdr_sky  = mkImgPill(p, &img_safesky,           17, 118);
     // Pastilles FLARM et ADS-B retirées du radar (non poussées pour l'instant).
+    // À l'emplacement ex-ADS-B (arc gauche) : panneau STOP rouge = fin de vol manuelle,
+    // pressable EN VOL (visible seulement quand flt_st==1). Discret, ne masque pas la mire.
+    r_flt_stop=lv_btn_create(p);lv_obj_set_size(r_flt_stop,48,40);lv_obj_set_pos(r_flt_stop,8,186);
+    lv_obj_set_style_bg_color(r_flt_stop,C_RED,0);lv_obj_set_style_radius(r_flt_stop,10,0);
+    lv_obj_set_style_border_color(r_flt_stop,lv_color_hex(0xffffff),0);lv_obj_set_style_border_width(r_flt_stop,2,0);
+    lv_obj_set_style_shadow_opa(r_flt_stop,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(r_flt_stop,[](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("stop_flight"); },LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(r_flt_stop);lv_label_set_text(l,"STOP");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);lv_obj_center(l);}
+    lv_obj_add_flag(r_flt_stop,LV_OBJ_FLAG_HIDDEN);   // caché par défaut (montré en vol)
     r_hdr_flrm = nullptr; r_hdr_adsb = nullptr;
     r_hdr_gps  = mkTabPill(p, LV_SYMBOL_GPS,         388, 80);
     r_hdr_lte  = mkLTEPill(p, 411, 118);
@@ -3372,8 +3384,12 @@ void updFlightState(){
     bool base = g_connected && ph==0 && g_page==1   // page radar
               && !g_up_ov && !g_stop_ov && !g_fb_ov && !g_maint_ov && !g_vols_ov
               && !g_pair_ov && !g_auth_ov;
-    if(base && st==0) chipShow(1);
-    else if(base && st==1) chipShow(2);
+    // Au sol : bouton "Start flight" (radar vide). En vol : petit panneau STOP discret
+    // (emplacement ex-ADS-B) — plus de gros bouton "End flight" au milieu de la mire.
+    bool showStop = (g_connected && st==1 && ph==0 && g_page==1);
+    if(r_flt_stop){ if(showStop) lv_obj_clear_flag(r_flt_stop,LV_OBJ_FLAG_HIDDEN);
+                    else          lv_obj_add_flag(r_flt_stop,LV_OBJ_FLAG_HIDDEN); }
+    if(base && st==0) chipShow(1);   // Start flight (au sol)
     else chipHide();
 
     g_prev_flt_st=st;
