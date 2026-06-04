@@ -34,15 +34,29 @@ def png_to_lvgl(path: str, target_w: int) -> tuple[list[int], int, int]:
     return data, target_w, target_h
 
 
+def swap565(data: list[int]) -> list[int]:
+    """Inverse les 2 octets couleur de chaque pixel [lo,hi,a] → [hi,lo,a].
+    Requis quand LV_COLOR_16_SWAP=1 (écrans QSPI, ex. T4-S3 AMOLED)."""
+    out = data.copy()
+    for i in range(0, len(out), 3):
+        out[i], out[i + 1] = out[i + 1], out[i]
+    return out
+
+
 def format_c_array(name: str, data: list[int], w: int, h: int) -> str:
-    rows = []
-    for i in range(0, len(data), 16):
-        chunk = data[i:i+16]
-        rows.append("    " + ", ".join(f"0x{b:02X}" for b in chunk) + ",")
-    body = "\n".join(rows)
+    def rows(d: list[int]) -> str:
+        lines = []
+        for i in range(0, len(d), 16):
+            chunk = d[i:i+16]
+            lines.append("    " + ", ".join(f"0x{b:02X}" for b in chunk) + ",")
+        return "\n".join(lines)
     return (
         f"static const uint8_t {name}_map[] = {{\n"
-        f"{body}\n"
+        f"#if LV_COLOR_16_SWAP\n"
+        f"{rows(swap565(data))}\n"
+        f"#else\n"
+        f"{rows(data)}\n"
+        f"#endif\n"
         f"}};\n\n"
         f"const lv_img_dsc_t {name} = {{\n"
         f"    .header.cf          = LV_IMG_CF_TRUE_COLOR_ALPHA,\n"
