@@ -2706,6 +2706,7 @@ static lv_obj_t* mkSetSliderRow(lv_obj_t*p,const char*k,int y,uint8_t val){
 // ── Maintenance overlay (Modèle 1 : hotspot + transfert vol) ──────────────────
 static lv_obj_t* g_maint_scanlist;   // fwd : annulé ici aussi (enfant de l'overlay)
 static lv_obj_t* g_maint_upd=nullptr;   // annonce de MAJ firmware (au-dessus du bouton Update)
+static lv_obj_t* g_maint_wst=nullptr;   // état WiFi live (wst/wip du STATUS AT-CORE)
 // Met à jour l'annonce de MAJ dans Maintenance (appelée à chaque STATUS quand l'écran est ouvert).
 static void maintUpdAnnounce(){
     if(!g_maint_upd)return;
@@ -2718,11 +2719,31 @@ static void maintUpdAnnounce(){
         lv_obj_set_style_text_color(g_maint_upd,TGREY(),0);
     }
 }
+// Ligne d'état WiFi sous "Test hotspot" — wst AT-CORE : 0 idle 1 connexion
+// 2 OK 3 SSID absent 4 échec. wst est sticky côté AT-CORE (dernier résultat) →
+// "WiFi connected" reste affiché après un test/upload réussi.
+static void maintWifiStatus(){
+    if(!g_maint_wst)return;
+    char b[48]; lv_color_t c;
+    if(!g_status.valid){ strcpy(b,""); c=TGREY(); }
+    else switch(g_status.wst){
+        case 1: strcpy(b,"WiFi connecting...");                       c=C_AMBER; break;
+        case 2: snprintf(b,sizeof(b),"WiFi connected (%s)",
+                         g_status.wip[0]?g_status.wip:"?");           c=C_GREEN; break;
+        case 3: strcpy(b,"WiFi: network not found");                  c=C_RED;   break;
+        case 4: strcpy(b,"WiFi: connect failed");                     c=C_RED;   break;
+        default: snprintf(b,sizeof(b),"%s",
+                          g_hs_ssid[0]?"WiFi idle (not tested)":"No hotspot configured");
+                 c=TGREY(); break;
+    }
+    lv_label_set_text(g_maint_wst,b);
+    lv_obj_set_style_text_color(g_maint_wst,c,0);
+}
 static void _maint_close(){
     if(!g_maint_ov)return;
     lv_obj_del(g_maint_ov);   // supprime aussi le panneau scan (enfant)
     g_maint_ov=nullptr;g_maint_ssid_ta=nullptr;g_maint_pass_ta=nullptr;g_maint_kb=nullptr;
-    g_maint_scanlist=nullptr;g_maint_upd=nullptr;}
+    g_maint_scanlist=nullptr;g_maint_upd=nullptr;g_maint_wst=nullptr;}
 static void _maint_close_cb(lv_event_t*e){
     if(lv_event_get_code(e)==LV_EVENT_CLICKED)_maint_close();}
 static void _maint_upload_cb(lv_event_t*e){
@@ -3155,6 +3176,12 @@ void mkMaintenanceOverlay(){
     lv_obj_set_style_text_font(g_maint_upd,&lv_font_montserrat_12,0);
     lv_obj_align(g_maint_upd,LV_ALIGN_TOP_MID,0,292);
     maintUpdAnnounce();   // (fallback AP-OTA par BOUTON BOOT retiré : boîtier scellé, BOOT inaccessible)
+    // État WiFi live (vert "WiFi connected (ip)" / ambre connexion / rouge échec) —
+    // rafraîchi à chaque STATUS tant que l'écran est ouvert (cf maintWifiStatus).
+    g_maint_wst=lv_label_create(g_maint_ov);
+    lv_obj_set_style_text_font(g_maint_wst,&lv_font_montserrat_12,0);
+    lv_obj_align(g_maint_wst,LV_ALIGN_TOP_MID,0,310);
+    maintWifiStatus();
 
 
     // Clavier LVGL — TAILLÉ POUR LE CERCLE : 320x175 centré (les coins restent
@@ -3521,8 +3548,8 @@ void updateAllPages(){
         else strcpy(vb,"CORE --");
         lv_label_set_text(r_radar_ver,vb);
     }
-    // Annonce de MAJ firmware → page Maintenance (près du bouton Update firmware)
-    if(g_maint_ov) maintUpdAnnounce();
+    // Annonce de MAJ firmware + état WiFi → page Maintenance (live tant qu'ouverte)
+    if(g_maint_ov){ maintUpdAnnounce(); maintWifiStatus(); }
     // Refresh live de la ligne diagnostique DB sur page #02 (si auth en cours)
     if(g_auth_ov && g_auth_diag){
         char dbg[48];
