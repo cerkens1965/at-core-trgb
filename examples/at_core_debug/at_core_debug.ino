@@ -1782,6 +1782,9 @@ static uint32_t  g_up_p12_t0   = 0;   // début phase 1/2 (auto-dismiss si pas d
 // Init à true → un ph=4 résiduel reçu au boot (état post-upload AT-CORE figé) est ignoré.
 // Reset à false dès que ph repasse à 0 (nouveau vol), pour que le prochain cycle 1→2→3→4 affiche bien l'overlay.
 static bool      g_up_acked    = true;
+// Tap sur l'overlay = fermeture manuelle. Mémorisé pour ne pas réapparaître pendant les
+// retries (5→3→5...) ; ré-armé quand ph revient à 0 (nouveau vol) ou 4 (succès à montrer).
+static bool      g_up_dismissed= false;
 
 void mkUploadOverlay(){
     if(g_up_ov) return;
@@ -1806,6 +1809,13 @@ void mkUploadOverlay(){
     lv_obj_set_style_bg_color(g_up_bar,C_AMBER,LV_PART_INDICATOR);
 
     g_up_pct_lbl=mkLblP(g_up_ov,"0%%",lv_color_hex(0xffffff),&lv_font_montserrat_16,178,160);
+    mkLblP(g_up_ov,"tap to close",TGREY(),&lv_font_montserrat_12,160,228);
+
+    // Tap n'importe où sur l'overlay → fermeture manuelle (indispensable en phase 5
+    // UPLOAD_FAIL qui persiste tant que l'AT-CORE retente l'upload)
+    lv_obj_add_event_cb(g_up_ov,[](lv_event_t*e){
+        if(lv_event_get_code(e)==LV_EVENT_CLICKED){hideUploadOverlay();g_up_dismissed=true;}
+    },LV_EVENT_CLICKED,NULL);
 }
 
 void hideUploadOverlay(){
@@ -1824,6 +1834,14 @@ void updUploadOverlay(){
     if(!g_status.valid || ph == 0){
         if(g_up_ov) hideUploadOverlay();
         g_up_acked = false;
+        g_up_dismissed = false;
+        return;
+    }
+
+    // Fermé manuellement (tap) → reste caché pendant les retries ; le succès (ph=4)
+    // ré-affiche quand même (bonne nouvelle à montrer)
+    if(g_up_dismissed && ph != 4){
+        if(g_up_ov) hideUploadOverlay();
         return;
     }
 
@@ -1859,7 +1877,7 @@ void updUploadOverlay(){
         case 3: msg="Uploading to Firebase..."; break;
         case 4: msg="Transfer OK";
                 if(g_up_done_ms==0) g_up_done_ms=millis(); break;
-        case 5: msg="Failed - retrying...";
+        case 5: msg="Upload failed - tap to close";
                 g_up_done_ms=0; break;
     }
     if(g_up_status) lv_label_set_text(g_up_status,msg);
