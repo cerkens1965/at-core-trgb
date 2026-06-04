@@ -218,11 +218,55 @@ static lv_obj_t *r_chk_ico[N_CHK]={};   // ✓ blanc (visible si actif)
 static lv_obj_t *r_chk_lbl[N_CHK]={};   // texte
 static bool      g_chk_latched[N_CHK]={};  // une fois actif, V reste (reset au disconnect)
 static lv_obj_t *r_p0_bat=nullptr;      // "Battery AT-CORE : XX%"
+static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE live, page #01)
 
 // ── Widget refs — Radar (page 1) ──────────────────────────────────────────────
+#ifdef BOARD_T4S3
+// ── Layout radar spécifique T4-S3 (écran 600×450 paysage) ────────────────────
+// La page radar est PLEIN ÉCRAN (600×450 à (0,0)) → coords radar = coords écran.
+// Radar maximisé à droite, annotations agrandies en colonne gauche.
+#define RAD_CX 375          // centre radar écran
+#define RAD_CY 225
+#define RAD_R  220          // Ø440 — maximisé (marge 5 px haut/bas)
+#define RLC_X  10           // x colonne annotations gauche
+#define RB_DX  (-225)       // cluster scale/GS/zoom/version : BOTTOM_MID(300) → x≈75
+#define RB_DY  0
+#define HDG_DX 75           // pill heading + chips centrés sur le radar (pas la page)
+#define CO_SZ  520          // arc CO : Ø extérieur (rayon mi-arc 252 = RAD_R+32)
+#define CO_MIR (-1.0f)      // arc CO en bas-GAUCHE (miroir horizontal du bas-droite)
+#define PILL_W 64           // pills annotations agrandies
+#define PILL_H 40
+#define PILL_FONT lv_font_montserrat_20
+#define HDG_W  92           // pill heading agrandie
+#define HDG_H  36
+#define HDG_FONT lv_font_montserrat_20
+#define ZOOM_SZ 46          // boutons zoom +/- agrandis
+#define CHIP_W 200          // chip Start/End flight agrandi
+#define CHIP_H 56
+#define CHIP_FONT lv_font_montserrat_20
+#define RAD_FONT lv_font_montserrat_20   // scale / GS / cardinales
+#else
 #define RAD_CX 240
 #define RAD_CY 240
 #define RAD_R  175
+#define RLC_X  0            // (non utilisés sur T-RGB — layout d'origine)
+#define RB_DX  0
+#define RB_DY  0
+#define HDG_DX 0
+#define CO_SZ  440
+#define CO_MIR (1.0f)
+#define PILL_W 52
+#define PILL_H 32
+#define PILL_FONT lv_font_montserrat_16
+#define HDG_W  72
+#define HDG_H  28
+#define HDG_FONT lv_font_montserrat_16
+#define ZOOM_SZ 34
+#define CHIP_W 170
+#define CHIP_H 48
+#define CHIP_FONT lv_font_montserrat_16
+#define RAD_FONT lv_font_montserrat_14
+#endif
 static lv_obj_t *r_radar_hdg, *r_radar_scale_lbl, *r_radar_gs;
 static lv_obj_t *r_radar_ver=nullptr;   // version firmware + date (bas de la page radar)
 static lv_obj_t *r_flt_stop=nullptr;    // panneau STOP (fin de vol) — emplacement ex-ADS-B, visible en vol
@@ -446,17 +490,17 @@ lv_obj_t* mkPage(){
     lv_obj_clear_flag(p,LV_OBJ_FLAG_SCROLLABLE);return p;}
 // Tab pill: 52×32 invisible hit-zone, icon floats freely. Returns inner label ref.
 lv_obj_t* mkTabPill(lv_obj_t*p,const char*t,int x,int y){
-    lv_obj_t*b=lv_obj_create(p);lv_obj_set_size(b,52,32);lv_obj_set_pos(b,x,y);
+    lv_obj_t*b=lv_obj_create(p);lv_obj_set_size(b,PILL_W,PILL_H);lv_obj_set_pos(b,x,y);
     lv_obj_set_style_bg_opa(b,LV_OPA_TRANSP,0);
     lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
     lv_obj_set_style_pad_all(b,0,0);
     lv_obj_clear_flag(b,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,t);
-    lv_obj_set_style_text_color(l,PILL_IC_OFF(),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_16,0);
+    lv_obj_set_style_text_color(l,PILL_IC_OFF(),0);lv_obj_set_style_text_font(l,&PILL_FONT,0);
     lv_obj_center(l);return l;}
 // LTE pill: 4 drawn signal bars (bottom-aligned), returns dummy label ref for parent lookups
 lv_obj_t* mkLTEPill(lv_obj_t*p,int x,int y){
-    lv_obj_t*b=lv_obj_create(p);lv_obj_set_size(b,52,32);lv_obj_set_pos(b,x,y);
+    lv_obj_t*b=lv_obj_create(p);lv_obj_set_size(b,PILL_W,PILL_H);lv_obj_set_pos(b,x,y);
     lv_obj_set_style_bg_opa(b,LV_OPA_TRANSP,0);
     lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
     lv_obj_set_style_pad_all(b,0,0);
@@ -465,7 +509,7 @@ lv_obj_t* mkLTEPill(lv_obj_t*p,int x,int y){
     static const int8_t bh[4]={5,8,12,16};
     for(int i=0;i<4;i++){
         r_hdr_lte_b[i]=lv_obj_create(b);lv_obj_set_size(r_hdr_lte_b[i],3,bh[i]);
-        lv_obj_set_pos(r_hdr_lte_b[i],17+i*5,27-bh[i]);
+        lv_obj_set_pos(r_hdr_lte_b[i],(PILL_W-18)/2+i*5,(PILL_H-5)-bh[i]);   // centré qq soit la taille pill
         lv_obj_set_style_radius(r_hdr_lte_b[i],1,0);
         lv_obj_set_style_bg_color(r_hdr_lte_b[i],PILL_IC_OFF(),0);lv_obj_set_style_bg_opa(r_hdr_lte_b[i],LV_OPA_COVER,0);
         lv_obj_set_style_border_width(r_hdr_lte_b[i],0,0);lv_obj_set_style_shadow_opa(r_hdr_lte_b[i],LV_OPA_TRANSP,0);
@@ -476,7 +520,7 @@ lv_obj_t* mkLTEPill(lv_obj_t*p,int x,int y){
     lv_obj_set_style_opa(l,LV_OPA_TRANSP,0);lv_obj_center(l);return l;}
 // Image pill — transparent hit-zone, image floats freely, recolorable
 lv_obj_t* mkImgPill(lv_obj_t*p,const lv_img_dsc_t*src,int x,int y){
-    lv_obj_t*b=lv_obj_create(p);lv_obj_set_size(b,52,32);lv_obj_set_pos(b,x,y);
+    lv_obj_t*b=lv_obj_create(p);lv_obj_set_size(b,PILL_W,PILL_H);lv_obj_set_pos(b,x,y);
     lv_obj_set_style_bg_opa(b,LV_OPA_TRANSP,0);
     lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
     lv_obj_set_style_pad_all(b,0,0);
@@ -1068,8 +1112,9 @@ void buildStatusPage(){
     // ADS-B / ADS-L et OGN / FLARM retirés (non poussés pour l'instant).
 
     // ── Batterie AT-CORE + version
-    r_p0_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,418);
-    mkLbl(p,VIEW_VER_STR,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);
+    r_p0_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,414);
+    mkLbl(p,VIEW_VER_STR,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,432);
+    r_p0_atc=mkLbl(p,"ATC --",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,450);
 }
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
@@ -2318,9 +2363,14 @@ static void aipDrawCb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_DRAW_MAIN_END)return;
     if(!g_cfg.aip_en||!g_aip_loaded||!g_status.valid||!g_status.gps_fix)return;
     lv_draw_ctx_t*ctx=lv_event_get_draw_ctx(e);
+    // Les coords RAD_* sont en coords PAGE ; le draw ctx est en coords ABSOLUES écran.
+    // Offset = origine absolue de la page (0,0 sur T-RGB → no-op ; (60,-15) sur T4-S3).
+    lv_area_t pco;lv_obj_get_coords(lv_obj_get_parent(lv_event_get_target(e)),&pco);
+    const lv_coord_t ox=pco.x1,oy=pco.y1;
     // Clip all AIP drawing to the radar circle
     lv_draw_mask_radius_param_t cmask;
-    lv_area_t carea={RAD_CX-RAD_R,RAD_CY-RAD_R,RAD_CX+RAD_R-1,RAD_CY+RAD_R-1};
+    lv_area_t carea={(lv_coord_t)(RAD_CX-RAD_R+ox),(lv_coord_t)(RAD_CY-RAD_R+oy),
+                     (lv_coord_t)(RAD_CX+RAD_R-1+ox),(lv_coord_t)(RAD_CY+RAD_R-1+oy)};
     lv_draw_mask_radius_init(&cmask,&carea,LV_RADIUS_CIRCLE,false);
     int16_t mid=lv_draw_mask_add(&cmask,NULL);
     float own_lat=g_status.lat,own_lon=g_status.lon;
@@ -2340,8 +2390,8 @@ static void aipDrawCb(lv_event_t*e){
             int sx,sy;
             bool ok=latlon_to_screen(g_aip_lat[pi],g_aip_lon[pi],
                                      own_lat,own_lon,cos_lat,hdg,scale_m,sx,sy);
-            if(ok&&pok){lv_point_t p1={(lv_coord_t)psx,(lv_coord_t)psy},
-                                    p2={(lv_coord_t)sx,(lv_coord_t)sy};
+            if(ok&&pok){lv_point_t p1={(lv_coord_t)(psx+ox),(lv_coord_t)(psy+oy)},
+                                    p2={(lv_coord_t)(sx+ox),(lv_coord_t)(sy+oy)};
                 lv_draw_line(ctx,&dsc,&p1,&p2);}
             psx=sx;psy=sy;pok=ok;}}
     // Aerodromes — small amber dot
@@ -2355,8 +2405,8 @@ static void aipDrawCb(lv_event_t*e){
         int sx,sy;
         if(latlon_to_screen(g_aip_ads[a].lat_e6,g_aip_ads[a].lon_e6,
                             own_lat,own_lon,cos_lat,hdg,scale_m,sx,sy)){
-            lv_area_t ar={(lv_coord_t)(sx-2),(lv_coord_t)(sy-2),
-                          (lv_coord_t)(sx+2),(lv_coord_t)(sy+2)};
+            lv_area_t ar={(lv_coord_t)(sx-2+ox),(lv_coord_t)(sy-2+oy),
+                          (lv_coord_t)(sx+2+ox),(lv_coord_t)(sy+2+oy)};
             lv_draw_rect(ctx,&ad_d,&ar);}}
     lv_draw_mask_free_param(&cmask);
     lv_draw_mask_remove_id(mid);}
@@ -2364,41 +2414,57 @@ static void aipDrawCb(lv_event_t*e){
 // ── Page 1 — Radar ────────────────────────────────────────────────────────────
 void buildRadarPage(){
     lv_obj_t*p=g_pages[1];
+#ifdef BOARD_T4S3
+    // Page radar PLEIN ÉCRAN : coords radar = coords écran, et la page masquée
+    // invalide tout l'écran (pas de résidus dans les bandes lors des swipes)
+    lv_obj_set_size(p,600,450);lv_obj_set_pos(p,0,0);
+#endif
 
-    // Heading pill (top centre)
-    lv_obj_t*hb=lv_obj_create(p);lv_obj_set_size(hb,72,28);
-    lv_obj_align(hb,LV_ALIGN_TOP_MID,0,28);
+    // Heading pill (top centre du radar)
+    lv_obj_t*hb=lv_obj_create(p);lv_obj_set_size(hb,HDG_W,HDG_H);
+    lv_obj_align(hb,LV_ALIGN_TOP_MID,HDG_DX,28);
     lv_obj_set_style_bg_color(hb,THDG(),0);lv_obj_set_style_bg_opa(hb,LV_OPA_COVER,0);
     lv_obj_set_style_border_color(hb,TFG(),0);lv_obj_set_style_border_width(hb,1,0);
     lv_obj_set_style_radius(hb,14,0);lv_obj_set_style_shadow_opa(hb,LV_OPA_TRANSP,0);
     lv_obj_set_style_pad_all(hb,0,0);lv_obj_clear_flag(hb,LV_OBJ_FLAG_SCROLLABLE);
     r_radar_hdg=lv_label_create(hb);lv_label_set_text(r_radar_hdg,"---°");
     lv_obj_set_style_text_color(r_radar_hdg,TFG(),0);
-    lv_obj_set_style_text_font(r_radar_hdg,&lv_font_montserrat_16,0);lv_obj_center(r_radar_hdg);
+    lv_obj_set_style_text_font(r_radar_hdg,&HDG_FONT,0);lv_obj_center(r_radar_hdg);
 
     // GS deplacee en bas, sous la taille du radar (voir _radar_scale_lbl)
     r_radar_gs=lv_label_create(p);lv_label_set_text(r_radar_gs,"GS ---");
     lv_obj_set_style_text_color(r_radar_gs,TFG(),0);
-    lv_obj_set_style_text_font(r_radar_gs,&lv_font_montserrat_14,0);
-    lv_obj_align(r_radar_gs,LV_ALIGN_BOTTOM_MID,0,-33);   // remonté pour loger la ligne version
+    lv_obj_set_style_text_font(r_radar_gs,&RAD_FONT,0);
+    lv_obj_align(r_radar_gs,LV_ALIGN_BOTTOM_MID,RB_DX,-33+RB_DY);   // remonté pour loger la ligne version
 
     // Version firmware AT-CORE + date de build (+ "UPD vN!" si MAJ dispo) — bas de page.
     r_radar_ver=lv_label_create(p);lv_label_set_text(r_radar_ver,"");
     lv_obj_set_style_text_color(r_radar_ver,TGREY(),0);
     lv_obj_set_style_text_font(r_radar_ver,&lv_font_montserrat_10,0);
-    lv_obj_align(r_radar_ver,LV_ALIGN_BOTTOM_MID,0,-13);
+    lv_obj_align(r_radar_ver,LV_ALIGN_BOTTOM_MID,RB_DX,-13+RB_DY);
 
     // Tab pills 52×32 — outer edge is AT the display circle boundary (8-12px behind bezel).
     // The circular LCD naturally clips the outer rounded corner → flat outer edge = "D" shape.
     // Only the inner rounded end (radius=16 half-circle) is fully visible.
     // Left:  Battery  y_c=96  x=40   SafeSky y_c=134 x=17   FLARM y_c=172 x=2   ADS-B y_c=210 x=-6
     // Right: GPS      y_c=96  x=388  LTE     y_c=134 x=411  WiFi  y_c=172 x=426  BLE   y_c=210 x=434
+#ifdef BOARD_T4S3
+    // T4-S3 : annotations en colonne verticale à gauche du radar (haut → bas)
+    r_hdr_bat  = mkTabPill(p, LV_SYMBOL_CHARGE,    RLC_X, 12);
+    r_hdr_sky  = mkImgPill(p, &img_safesky,        RLC_X, 60);
+#else
     r_hdr_bat  = mkTabPill(p, LV_SYMBOL_CHARGE,       40, 80);
     r_hdr_sky  = mkImgPill(p, &img_safesky,           17, 118);
+#endif
     // Pastilles FLARM et ADS-B retirées du radar (non poussées pour l'instant).
     // À l'emplacement ex-ADS-B (arc gauche) : panneau STOP rouge = fin de vol manuelle,
     // pressable EN VOL (visible seulement quand flt_st==1). Discret, ne masque pas la mire.
-    r_flt_stop=lv_btn_create(p);lv_obj_set_size(r_flt_stop,48,40);lv_obj_set_pos(r_flt_stop,8,186);
+    r_flt_stop=lv_btn_create(p);lv_obj_set_size(r_flt_stop,48,40);
+#ifdef BOARD_T4S3
+    lv_obj_set_pos(r_flt_stop,RLC_X,300);
+#else
+    lv_obj_set_pos(r_flt_stop,8,186);
+#endif
     lv_obj_set_style_bg_color(r_flt_stop,C_RED,0);lv_obj_set_style_radius(r_flt_stop,10,0);
     lv_obj_set_style_border_color(r_flt_stop,lv_color_hex(0xffffff),0);lv_obj_set_style_border_width(r_flt_stop,2,0);
     lv_obj_set_style_shadow_opa(r_flt_stop,LV_OPA_TRANSP,0);
@@ -2408,10 +2474,17 @@ void buildRadarPage(){
      lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);lv_obj_center(l);}
     lv_obj_add_flag(r_flt_stop,LV_OBJ_FLAG_HIDDEN);   // caché par défaut (montré en vol)
     r_hdr_flrm = nullptr; r_hdr_adsb = nullptr;
+#ifdef BOARD_T4S3
+    r_hdr_gps  = mkTabPill(p, LV_SYMBOL_GPS,       RLC_X, 108);
+    r_hdr_lte  = mkLTEPill(p, RLC_X, 156);
+    r_hdr_wifi = mkTabPill(p, LV_SYMBOL_WIFI,      RLC_X, 204);
+    r_hdr_ble  = mkTabPill(p, LV_SYMBOL_BLUETOOTH, RLC_X, 252);
+#else
     r_hdr_gps  = mkTabPill(p, LV_SYMBOL_GPS,         388, 80);
     r_hdr_lte  = mkLTEPill(p, 411, 118);
     r_hdr_wifi = mkTabPill(p, LV_SYMBOL_WIFI,        426, 156);
     r_hdr_ble  = mkTabPill(p, LV_SYMBOL_BLUETOOTH,   434, 194);
+#endif
 
     // Outer ring
     lv_obj_t*ro=lv_obj_create(p);lv_obj_set_size(ro,RAD_R*2,RAD_R*2);
@@ -2458,20 +2531,20 @@ void buildRadarPage(){
     for(int ci=0;ci<4;ci++){
         r_card[ci]=lv_label_create(p);
         lv_label_set_text(r_card[ci],cnames[ci]);
-        lv_obj_set_style_text_font(r_card[ci],&lv_font_montserrat_14,0);
+        lv_obj_set_style_text_font(r_card[ci],&RAD_FONT,0);
         lv_obj_set_style_text_color(r_card[ci],TFG(),0);
         lv_obj_set_pos(r_card[ci],RAD_CX-5,RAD_CY-(RAD_R-24)-8);}
 
     // Scale label — entre le S de la rose et la GS (ordre : S → 4nm → GS XXkt)
     char scl[12];snprintf(scl,12,"%dnm",g_cfg.scale_nm);
-    r_radar_scale_lbl=mkLbl(p,scl,TGREY(),&lv_font_montserrat_14,LV_ALIGN_BOTTOM_MID,0,-53);
+    r_radar_scale_lbl=mkLbl(p,scl,TGREY(),&RAD_FONT,LV_ALIGN_BOTTOM_MID,RB_DX,-53+RB_DY);
 
     // Zoom +/- buttons — flanquent le label scale, mêmes ids que Settings (0=-, 1=+)
     // → reuse cbSetBtn → cfgSave() + updSetPage() (rafraichit aussi r_radar_scale_lbl)
     auto mkZoomBtn = [&](const char* sym, int dx, intptr_t id){
         lv_obj_t* b=lv_obj_create(p);
-        lv_obj_set_size(b,34,34);
-        lv_obj_align(b,LV_ALIGN_BOTTOM_MID,dx,-28);
+        lv_obj_set_size(b,ZOOM_SZ,ZOOM_SZ);
+        lv_obj_align(b,LV_ALIGN_BOTTOM_MID,RB_DX+dx,-28+RB_DY);
         lv_obj_set_style_radius(b,LV_RADIUS_CIRCLE,0);
         lv_obj_set_style_bg_color(b,THDG(),0);lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
         lv_obj_set_style_border_color(b,TFG(),0);lv_obj_set_style_border_width(b,1,0);
@@ -2490,7 +2563,11 @@ void buildRadarPage(){
 
     // AIP overlay — transparent layer between grid and traffic icons
     r_aip_layer=lv_obj_create(p);
+#ifdef BOARD_T4S3
+    lv_obj_set_size(r_aip_layer,600,450);lv_obj_set_pos(r_aip_layer,0,0);   // page plein écran
+#else
     lv_obj_set_size(r_aip_layer,480,480);lv_obj_set_pos(r_aip_layer,0,0);
+#endif
     lv_obj_set_style_bg_opa(r_aip_layer,LV_OPA_TRANSP,0);
     lv_obj_set_style_border_width(r_aip_layer,0,0);lv_obj_set_style_pad_all(r_aip_layer,0,0);
     lv_obj_set_style_shadow_opa(r_aip_layer,LV_OPA_TRANSP,0);
@@ -2502,10 +2579,15 @@ void buildRadarPage(){
     // Each band 10°: green(30-40°) caution(40-50°) danger(50-60°)
     {
         struct Band{int s,e;lv_color_t c;};
+#ifdef BOARD_T4S3
+        // Miroir horizontal : quadrant bas-GAUCHE (LVGL 120-150°), vert en haut
+        Band bs[]={{140,150,C_GREEN},{130,140,C_ORANGE},{120,130,C_RED}};
+#else
         Band bs[]={{30,40,C_GREEN},{40,50,C_ORANGE},{50,60,C_RED}};
+#endif
         for(auto&b:bs){
             lv_obj_t*ba=lv_arc_create(p);
-            lv_obj_set_size(ba,440,440);lv_obj_set_pos(ba,20,20);
+            lv_obj_set_size(ba,CO_SZ,CO_SZ);lv_obj_set_pos(ba,RAD_CX-CO_SZ/2,RAD_CY-CO_SZ/2);
             lv_arc_set_bg_start_angle(ba,b.s);lv_arc_set_bg_end_angle(ba,b.e);
             lv_arc_set_range(ba,0,1);lv_arc_set_value(ba,0);
             lv_obj_set_style_arc_color(ba,b.c,LV_PART_MAIN);
@@ -2525,14 +2607,19 @@ void buildRadarPage(){
     lv_obj_set_style_border_color(r_co_ball,TFG(),0);lv_obj_set_style_border_width(r_co_ball,2,0);
     lv_obj_set_style_shadow_opa(r_co_ball,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(r_co_ball,0,0);
     lv_obj_clear_flag(r_co_ball,LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_pos(r_co_ball,(int)(240+212*0.866f)-6,(int)(240+212*0.5f)-6);
+    lv_obj_set_pos(r_co_ball,(int)(RAD_CX+(CO_SZ/2-8)*0.866f*CO_MIR)-6,(int)(RAD_CY+(CO_SZ/2-8)*0.5f)-6);
     // CO text + ppm — OUTSIDE radar ring (r=175), at arc midpoint (LVGL 45°, r≈190)
     // x=240+190*cos45°=374, y=374 → label anchored just outside the ring
     r_co_text=lv_label_create(p);lv_label_set_text(r_co_text,"CO");
     lv_obj_set_style_text_color(r_co_text,lv_color_hex(0x000000),0);
-    lv_obj_set_style_text_font(r_co_text,&lv_font_montserrat_12,0);lv_obj_set_pos(r_co_text,366,364);
+    lv_obj_set_style_text_font(r_co_text,&lv_font_montserrat_12,0);
     r_co_val=lv_label_create(p);lv_label_set_text(r_co_val,"");
-    lv_obj_set_style_text_font(r_co_val,&lv_font_montserrat_12,0);lv_obj_set_pos(r_co_val,360,380);
+    lv_obj_set_style_text_font(r_co_val,&lv_font_montserrat_12,0);
+#ifdef BOARD_T4S3
+    lv_obj_set_pos(r_co_text,160,386);lv_obj_set_pos(r_co_val,154,406);
+#else
+    lv_obj_set_pos(r_co_text,366,364);lv_obj_set_pos(r_co_val,360,380);
+#endif
 
     // Traffic VL3 icons (bitmap rotated) + speed vector + callsign + alt
     for(int i=0;i<MAX_TRF;i++){
@@ -3189,7 +3276,12 @@ void mkMaintenanceOverlay(){
     // sortait du cercle). Caché par défaut, suit le textarea focalisé ; les
     // champs (y114/y160) restent visibles au-dessus quand il s'affiche.
     g_maint_kb=lv_keyboard_create(g_maint_ov);
+#ifdef BOARD_T4S3
+    // Écran rectangulaire : clavier nettement plus grand (480×240 vs 320×175 du cercle)
+    lv_obj_set_size(g_maint_kb,480,240);lv_obj_align(g_maint_kb,LV_ALIGN_TOP_MID,0,215);
+#else
     lv_obj_set_size(g_maint_kb,320,175);lv_obj_align(g_maint_kb,LV_ALIGN_TOP_MID,0,224);
+#endif
     lv_keyboard_set_textarea(g_maint_kb,g_maint_ssid_ta);
     lv_obj_add_flag(g_maint_kb,LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_event_cb(g_maint_kb,_maint_kb_cb,LV_EVENT_ALL,NULL);}
@@ -3393,7 +3485,7 @@ static void _continueflight_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_
 static void fbShow(){
     if(g_fb_ov)return;
     g_fb_ov=lv_obj_create(lv_layer_top());
-    lv_obj_set_size(g_fb_ov,360,120);lv_obj_center(g_fb_ov);
+    lv_obj_set_size(g_fb_ov,360,120);lv_obj_align(g_fb_ov,LV_ALIGN_CENTER,HDG_DX,0);   // centré sur le radar
     lv_obj_set_style_bg_color(g_fb_ov,lv_color_hex(0x0d1117),0);
     lv_obj_set_style_bg_opa(g_fb_ov,LV_OPA_COVER,0);
     lv_obj_set_style_border_color(g_fb_ov,C_GREEN,0);
@@ -3413,14 +3505,14 @@ static void chipShow(uint8_t kind){   // 1=Start flight 2=End flight
     if(g_startchip){ lv_obj_del(g_startchip); g_startchip=nullptr; }
     g_chip_kind=kind;
     g_startchip=lv_btn_create(lv_layer_top());
-    lv_obj_set_size(g_startchip,170,48);
-    lv_obj_align(g_startchip,LV_ALIGN_TOP_MID,0,62);   // au-dessus de la mire radar
+    lv_obj_set_size(g_startchip,CHIP_W,CHIP_H);
+    lv_obj_align(g_startchip,LV_ALIGN_TOP_MID,HDG_DX,62);   // au-dessus de la mire radar
     lv_obj_set_style_bg_color(g_startchip,kind==2?C_RED:C_BRAND,0);lv_obj_set_style_radius(g_startchip,24,0);
     lv_obj_set_style_border_width(g_startchip,0,0);lv_obj_set_style_shadow_opa(g_startchip,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(g_startchip,kind==2?_endflight_cb:_startflight_cb,LV_EVENT_CLICKED,NULL);
     lv_obj_t*l=lv_label_create(g_startchip);lv_label_set_text(l,kind==2?"End flight":"Start flight");
     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
-    lv_obj_set_style_text_font(l,&lv_font_montserrat_16,0);lv_obj_center(l);
+    lv_obj_set_style_text_font(l,&CHIP_FONT,0);lv_obj_center(l);
 }
 static void chipHide(){ if(g_startchip){lv_obj_del(g_startchip);g_startchip=nullptr;g_chip_kind=0;} }
 
@@ -3542,11 +3634,18 @@ void updateAllPages(){
     updOtaOverlay();    // overlay MAJ firmware (OTA cloud)
     if(g_vols_ov) volsUpdWifi();   // ligne état WiFi hotspot dans la page Flights
     // Version firmware AT-CORE + date de build — bas page radar (l'annonce de MAJ est dans Maintenance)
-    if(r_radar_ver){
+    if(r_radar_ver||r_p0_atc){
         char vb[40];
         if(g_status.valid && g_status.fwv) snprintf(vb,sizeof(vb),"CORE v%d  %s",g_status.fwv,g_status.fwd);
         else strcpy(vb,"CORE --");
-        lv_label_set_text(r_radar_ver,vb);
+        if(r_radar_ver) lv_label_set_text(r_radar_ver,vb);
+        // Même info en page #01, format "ATC vN  date" (sous la ligne ATV)
+        if(r_p0_atc){
+            char ab[40];
+            if(g_status.valid&&g_status.fwv) snprintf(ab,sizeof(ab),"ATC v%d  %s",g_status.fwv,g_status.fwd);
+            else strcpy(ab,"ATC --");
+            lv_label_set_text(r_p0_atc,ab);
+        }
     }
     // Annonce de MAJ firmware + état WiFi → page Maintenance (live tant qu'ouverte)
     if(g_maint_ov){ maintUpdAnnounce(); maintWifiStatus(); }
@@ -3705,7 +3804,8 @@ void updateAllPages(){
     if(g_flight.valid){
         int co=g_flight.co_ppm;
         float co_a=(30.0f+fminf((float)co,150.0f)/150.0f*30.0f)*(float)M_PI/180.0f;
-        lv_obj_set_pos(r_co_ball,(int)(240.0f+212.0f*cosf(co_a))-6,(int)(240.0f+212.0f*sinf(co_a))-6);
+        lv_obj_set_pos(r_co_ball,(int)((float)RAD_CX+(float)(CO_SZ/2-8)*cosf(co_a)*CO_MIR)-6,
+                       (int)((float)RAD_CY+(float)(CO_SZ/2-8)*sinf(co_a))-6);
         lv_obj_set_style_text_color(r_co_text,lv_color_hex(0x000000),0);
         lv_label_set_text(r_co_val,"");}
     // Alert overlay
