@@ -6,8 +6,15 @@
  * Christophe — 2026-05-04
  */
 
+#ifdef BOARD_T4S3            // ── Port test LilyGo T4-S3 AMOLED 2.41" (600×450 rect) ──
+#include <LilyGo_AMOLED.h>   // lib LilyGo-AMOLED-Series : RM690B0 QSPI + touch CST226SE
+#include <LV_Helper.h>       // LV_Helper fourni par la lib AMOLED (même pattern beginLvglHelper)
+#include <SD.h>              // SD en SPI sur T4-S3 (pas de slot SD_MMC)
+#define SD_MMC SD            // quick&dirty : SDFS et SDMMCFS partagent l'API fs::FS
+#else                        // ── Cible nominale : LilyGo T-RGB circulaire 480×480 ──
 #include <LilyGo_RGBPanel.h>
 #include <LV_Helper.h>
+#endif
 #include <BLEDevice.h>
 #include <BLEClient.h>
 #include <BLEScan.h>
@@ -30,7 +37,17 @@
 #define VIEW_VERSION  "1"
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v1  Jun  3 2026"
 
+#ifdef BOARD_T4S3
+LilyGo_Class amoled;
+#define panel amoled         // les call-sites panel.* (begin via setup dédié) pointent sur l'AMOLED
+// Brightness : T-RGB = 16 niveaux hardware, AMOLED = 0-255 → mapping ×17 ici
+static inline void panelBright(uint8_t v){ amoled.setBrightness(v>=16?255:v*17); }
+// montserrat_10 absente du lv_conf de la lib AMOLED → fallback sur la 12 (texte un poil plus gros)
+#define lv_font_montserrat_10 lv_font_montserrat_12
+#else
 LilyGo_RGBPanel panel;
+static inline void panelBright(uint8_t v){ panel.setBrightness(v); }
+#endif
 
 #define BLE_SVC_UUID    "4FAFC201-1FB5-459E-8FCC-C5C9C331914B"
 #define BLE_CHR_STATUS  "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"
@@ -2547,7 +2564,7 @@ void updSetPage(){
     if(s_aip_v)lv_label_set_text(s_aip_v,!g_aip_loaded?"NO DATA":g_cfg.aip_en?"ON":"OFF");
     if(s_heli_v)lv_label_set_text(s_heli_v,g_cfg.ad_heli?"ON":"OFF");
     snprintf(b,12,"%dnm",g_cfg.scale_nm); lv_label_set_text(r_radar_scale_lbl,b);
-    panel.setBrightness(g_cfg.brightness);}
+    panelBright(g_cfg.brightness);}
 
 static void cbSetBtn(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
@@ -2638,7 +2655,7 @@ static void cbBrightSlider(lv_event_t*e){
     lv_obj_t*sl=lv_event_get_target(e);
     int v=lv_slider_get_value(sl); if(v<0)v=0; if(v>16)v=16;
     g_cfg.brightness=(uint8_t)v;
-    panel.setBrightness(g_cfg.brightness);
+    panelBright(g_cfg.brightness);
     if(s_bright_v){char b[8];snprintf(b,8,"%d/16",v);lv_label_set_text(s_bright_v,b);}
 }
 
@@ -3813,6 +3830,13 @@ void wifiStop(){
 // ── Setup ─────────────────────────────────────────────────────────────────────
 void setup(){
     Serial.begin(115200);
+#ifdef BOARD_T4S3
+    // T4-S3 : init AMOLED explicite (pas d'auto-détect), SD différée pour passer par installSD()
+    if(!amoled.beginAMOLED_241(true)){while(1){Serial.println("Panel FAIL");delay(1000);}}
+    Serial.println("Touch: CST226SE (T4-S3)");
+    delay(50); // card power-on stabilization
+    g_sd_ok=amoled.installSD();   // SD en SPI (MISO 4 / MOSI 2 / SCK 3 / CS 1)
+#else
     if(!panel.begin()){while(1){Serial.println("Panel FAIL");delay(1000);}}
     Serial.printf("Touch: %s\n",panel.getTouchModelName());
     // SD card — before beginLvglHelper (factory example order).
@@ -3824,6 +3848,7 @@ void setup(){
         SD_MMC.setPins(39,40,38);
         g_sd_ok=SD_MMC.begin("/sdcard",true,false,SDMMC_FREQ_DEFAULT);
     }
+#endif
     if(g_sd_ok){
         g_sd_gb=(uint32_t)(SD_MMC.totalBytes()/(1024ULL*1024*1024));
         if(!SD_MMC.exists("/aip"))SD_MMC.mkdir("/aip");
@@ -3833,7 +3858,7 @@ void setup(){
     cfgLoad();acLoad();unitLoad();if(g_sd_ok)aipLoad();
     g_dark_theme=g_cfg.dark;
     lv_obj_set_style_bg_color(lv_scr_act(),TBG(),0);
-    panel.setBrightness(g_cfg.brightness);
+    panelBright(g_cfg.brightness);
 
     // Create all page containers
     for(int i=0;i<NUM_PAGES;i++){g_pages[i]=mkPage();lv_obj_add_flag(g_pages[i],LV_OBJ_FLAG_HIDDEN);}
