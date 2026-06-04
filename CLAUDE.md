@@ -51,6 +51,34 @@ Le `platformio.ini` à la racine pointe sur `src_dir = examples/at_core_debug`.
 Plateforme pinnée `espressif32@6.9.0` (reproductibilité CI/local). Pas de `secrets.h`
 requis côté AT-VIEW. Couvre aussi `arduino_ci.yml`.
 
+## Variante T4-S3 AMOLED (2026-06-04)
+
+Second hardware supporté : **LilyGo T4-S3 AMOLED 2.41"** (600×450 paysage, RM690B0
+QSPI, touch CST226SE, PMU SY6970, SD en SPI). Même firmware, env PlatformIO dédié :
+
+```bash
+pio run -e T4-S3            # build (flag -DBOARD_T4S3 active les shims)
+```
+
+- **Lib** : LilyGo-AMOLED-Series (git) — son `LV_Helper`/`lv_conf` (`LV_COLOR_16_SWAP=1`),
+  PAS le `src/` T-RGB local (clash). `boards/T-Display-AMOLED.json` copié du repo LilyGo.
+- **Shims** (`#ifdef BOARD_T4S3` dans le .ino) : `LilyGo_Class amoled` + `#define panel`,
+  `SD_MMC`→`SD`, `panelBright()` (0-16 → 0-255), `beginAMOLED_241()`, `montserrat_10`→12.
+- **UI dédiée** : page radar **plein écran** (radar Ø440 à droite, annotations en colonne
+  gauche agrandies, arc CO bas-gauche, cluster scale/GS/zoom bas-gauche, clavier
+  Maintenance 480×240). Tout passe par macros de variante (`RAD_*`, `PILL_*`, `HDG_*`,
+  `ZOOM_SZ`, `CHIP_*`, `RAD_FONT`, `CO_*`) — autres pages : canvas 480×480 centré
+  (`UI_OX=60, UI_OY=-15`), scroll/scrollbar écran désactivés (sinon scrollbar fantôme).
+- **Assets** : logos OK via variantes `#if LV_COLOR_16_SWAP` (png2lvgl_logos.py) ; icônes
+  radar = blanc+alpha recolorées → swap-invariantes, rien à faire.
+- **⚠ Flash** : l'upload pio échoue (USB-CDC instable) → mode download manuel (BOOT
+  maintenu + replug) puis esptool **no-stub** :
+  `esptool.py --chip esp32s3 --port /dev/cu.usbmodem* --baud 115200 --no-stub --before no_reset --after hard_reset write_flash 0x10000 /tmp/pio_build_atview/T4-S3/firmware.bin`
+  Après flash : **RST physique** (le reset RTS laisse la carte en bootloader). Vérifier la
+  MAC avant d'écrire si plusieurs cartes branchées : T4 = `64:e8:33:7a:80:68`,
+  AT-CORE 7600 S3 = `20:6e:f1:ce:27:6c` (⚠ sonder un port fige la carte → RST).
+- Page #01 affiche ATV (version locale) + ATC (version AT-CORE live BLE).
+
 ## Architecture — Pages LVGL
 
 | Page | Accès | Contenu |
