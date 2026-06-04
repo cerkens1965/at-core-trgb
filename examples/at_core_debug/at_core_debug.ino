@@ -44,9 +44,15 @@ LilyGo_Class amoled;
 static inline void panelBright(uint8_t v){ amoled.setBrightness(v>=16?255:v*17); }
 // montserrat_10 absente du lv_conf de la lib AMOLED → fallback sur la 12 (texte un poil plus gros)
 #define lv_font_montserrat_10 lv_font_montserrat_12
+// Recadrage : écran 600×450 paysage, canvas UI 480×480 centré → bandes vides
+// 60 px à gauche/droite, 15 px rognés en haut et en bas (UI circulaire : perte négligeable)
+#define UI_OX  60
+#define UI_OY  (-15)
 #else
 LilyGo_RGBPanel panel;
 static inline void panelBright(uint8_t v){ panel.setBrightness(v); }
+#define UI_OX  0
+#define UI_OY  0
 #endif
 
 #define BLE_SVC_UUID    "4FAFC201-1FB5-459E-8FCC-C5C9C331914B"
@@ -435,7 +441,7 @@ lv_obj_t* mkDbgR(lv_obj_t*p,int y,const char*k,const char*v,lv_color_t c){
     return mkLblP(p,v,c,&lv_font_montserrat_14,330,y);}
 lv_obj_t* mkPage(){
     lv_obj_t*p=lv_obj_create(lv_scr_act());lv_obj_set_size(p,480,480);
-    lv_obj_set_pos(p,0,0);lv_obj_set_style_bg_color(p,TBG(),0);
+    lv_obj_set_pos(p,UI_OX,UI_OY);lv_obj_set_style_bg_color(p,TBG(),0);
     lv_obj_set_style_border_width(p,0,0);lv_obj_set_style_pad_all(p,0,0);
     lv_obj_clear_flag(p,LV_OBJ_FLAG_SCROLLABLE);return p;}
 // Tab pill: 52×32 invisible hit-zone, icon floats freely. Returns inner label ref.
@@ -878,7 +884,7 @@ void pairOverlayHide(){
 void pairOverlayShow(){
     if(g_pair_ov)return;
     g_pair_ov=lv_obj_create(lv_layer_top());
-    lv_obj_set_size(g_pair_ov,480,480);lv_obj_set_pos(g_pair_ov,0,0);
+    lv_obj_set_size(g_pair_ov,480,480);lv_obj_set_pos(g_pair_ov,UI_OX,UI_OY);
     lv_obj_set_style_bg_color(g_pair_ov,lv_color_hex(0x000000),0);
     lv_obj_set_style_bg_opa(g_pair_ov,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(g_pair_ov,0,0);lv_obj_set_style_radius(g_pair_ov,0,0);
@@ -1365,7 +1371,7 @@ static void showWelcome(const char* pilotName, const char* instrName){
                                       : "PILOT - Renter";
 
     g_welcome_ov=lv_obj_create(lv_scr_act());
-    lv_obj_set_size(g_welcome_ov,480,480); lv_obj_set_pos(g_welcome_ov,0,0);
+    lv_obj_set_size(g_welcome_ov,480,480); lv_obj_set_pos(g_welcome_ov,UI_OX,UI_OY);
     lv_obj_set_style_bg_color(g_welcome_ov,lv_color_hex(0xffffff),0);
     lv_obj_set_style_bg_opa(g_welcome_ov,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(g_welcome_ov,0,0);
@@ -1560,7 +1566,7 @@ void mkAuthOverlay(){
     g_picker_last_cnt=0;
     // Full screen background blanc
     g_auth_ov=lv_obj_create(lv_scr_act());
-    lv_obj_set_size(g_auth_ov,480,480);lv_obj_set_pos(g_auth_ov,0,0);
+    lv_obj_set_size(g_auth_ov,480,480);lv_obj_set_pos(g_auth_ov,UI_OX,UI_OY);
     lv_obj_set_style_bg_color(g_auth_ov,lv_color_hex(0xffffff),0);
     lv_obj_set_style_bg_opa(g_auth_ov,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(g_auth_ov,0,0);lv_obj_set_style_radius(g_auth_ov,0,0);
@@ -2029,7 +2035,7 @@ void mkAircraftOverlay(){
     if(g_ac_ov)return;   // déjà ouvert → évite la fuite + l'écrasement des refs g_ac_*
     // Fullscreen overlay
     g_ac_ov=lv_obj_create(lv_scr_act());
-    lv_obj_set_size(g_ac_ov,480,480);lv_obj_set_pos(g_ac_ov,0,0);
+    lv_obj_set_size(g_ac_ov,480,480);lv_obj_set_pos(g_ac_ov,UI_OX,UI_OY);
     lv_obj_set_style_bg_color(g_ac_ov,TBG(),0);lv_obj_set_style_bg_opa(g_ac_ov,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(g_ac_ov,0,0);lv_obj_set_style_radius(g_ac_ov,0,0);
     lv_obj_set_style_shadow_opa(g_ac_ov,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(g_ac_ov,0,0);
@@ -2945,7 +2951,7 @@ static void volsBuildList(){
 void mkVolsOverlay(){
     if(g_vols_ov)return;
     g_vols_ov=lv_obj_create(lv_scr_act());
-    lv_obj_set_size(g_vols_ov,480,480);lv_obj_set_pos(g_vols_ov,0,0);
+    lv_obj_set_size(g_vols_ov,480,480);lv_obj_set_pos(g_vols_ov,UI_OX,UI_OY);
     lv_obj_set_style_bg_color(g_vols_ov,TBG(),0);lv_obj_set_style_bg_opa(g_vols_ov,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(g_vols_ov,0,0);lv_obj_set_style_radius(g_vols_ov,0,0);
     lv_obj_set_style_pad_all(g_vols_ov,0,0);lv_obj_clear_flag(g_vols_ov,LV_OBJ_FLAG_SCROLLABLE);
@@ -3033,7 +3039,7 @@ static void _maint_ota_cb(lv_event_t*e){
 void mkMaintenanceOverlay(){
     if(g_maint_ov)return;
     g_maint_ov=lv_obj_create(lv_scr_act());
-    lv_obj_set_size(g_maint_ov,480,480);lv_obj_set_pos(g_maint_ov,0,0);
+    lv_obj_set_size(g_maint_ov,480,480);lv_obj_set_pos(g_maint_ov,UI_OX,UI_OY);
     lv_obj_set_style_bg_color(g_maint_ov,TBG(),0);lv_obj_set_style_bg_opa(g_maint_ov,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(g_maint_ov,0,0);lv_obj_set_style_radius(g_maint_ov,0,0);
     lv_obj_set_style_pad_all(g_maint_ov,0,0);lv_obj_clear_flag(g_maint_ov,LV_OBJ_FLAG_SCROLLABLE);
