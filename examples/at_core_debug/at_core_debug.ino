@@ -3861,6 +3861,13 @@ void setup(){
         Serial.printf("[SD] OK %uGB\n",g_sd_gb);
     }else{Serial.println("[SD] No card");}
     beginLvglHelper(panel);
+    // Le canvas 480×480 décalé (UI_OY<0 sur T4-S3) déborde de l'écran → sans ceci,
+    // LVGL rend l'écran scrollable et dessine une scrollbar verticale grise au bord
+    // droit (pleine hauteur). Toujours OFF : l'UI ne doit jamais scroller l'écran.
+    lv_obj_clear_flag(lv_scr_act(),LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(lv_scr_act(),LV_SCROLLBAR_MODE_OFF);
+    lv_obj_clear_flag(lv_layer_top(),LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(lv_layer_top(),LV_SCROLLBAR_MODE_OFF);
     cfgLoad();acLoad();unitLoad();if(g_sd_ok)aipLoad();
     g_dark_theme=g_cfg.dark;
     lv_obj_set_style_bg_color(lv_scr_act(),TBG(),0);
