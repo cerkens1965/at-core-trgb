@@ -2463,10 +2463,13 @@ void buildRadarPage(){
     // Pastilles FLARM et ADS-B retirées du radar (non poussées pour l'instant).
     // À l'emplacement ex-ADS-B (arc gauche) : panneau STOP rouge = fin de vol manuelle,
     // pressable EN VOL (visible seulement quand flt_st==1). Discret, ne masque pas la mire.
-    r_flt_stop=lv_btn_create(p);lv_obj_set_size(r_flt_stop,48,40);
+    r_flt_stop=lv_btn_create(p);
 #ifdef BOARD_T4S3
+    // Aligné sur le chip Start (colonne gauche sous BLE, même slot) — gros format vol.
+    lv_obj_set_size(r_flt_stop,130,56);
     lv_obj_set_pos(r_flt_stop,RLC_X,300);
 #else
+    lv_obj_set_size(r_flt_stop,48,40);
     lv_obj_set_pos(r_flt_stop,8,186);
 #endif
     lv_obj_set_style_bg_color(r_flt_stop,C_RED,0);lv_obj_set_style_radius(r_flt_stop,10,0);
@@ -2475,7 +2478,12 @@ void buildRadarPage(){
     lv_obj_add_event_cb(r_flt_stop,[](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("stop_flight"); },LV_EVENT_CLICKED,NULL);
     {lv_obj_t*l=lv_label_create(r_flt_stop);lv_label_set_text(l,"STOP");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
-     lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);lv_obj_center(l);}
+#ifdef BOARD_T4S3
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_20,0);   // gros bouton colonne gauche
+#else
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_12,0);
+#endif
+     lv_obj_center(l);}
     lv_obj_add_flag(r_flt_stop,LV_OBJ_FLAG_HIDDEN);   // caché par défaut (montré en vol)
     r_hdr_flrm = nullptr; r_hdr_adsb = nullptr;
 #ifdef BOARD_T4S3
@@ -3538,8 +3546,16 @@ static void chipShow(uint8_t kind){   // 1=Start flight 2=End flight
     if(g_startchip){ lv_obj_del(g_startchip); g_startchip=nullptr; }
     g_chip_kind=kind;
     g_startchip=lv_btn_create(lv_layer_top());
+#ifdef BOARD_T4S3
+    // (2026-06-05) Start/End flight dans la COLONNE GAUCHE, sous l'icône BLE
+    // (y=252+~40) — même emplacement que le panneau STOP (mutuellement exclusifs :
+    // chip au sol, STOP en vol) → zone "action vol" unique, gros format tactile.
+    lv_obj_set_size(g_startchip,130,56);
+    lv_obj_set_pos(g_startchip,RLC_X,300);
+#else
     lv_obj_set_size(g_startchip,CHIP_W,CHIP_H);
     lv_obj_align(g_startchip,LV_ALIGN_TOP_MID,HDG_DX,62);   // au-dessus de la mire radar
+#endif
     lv_obj_set_style_bg_color(g_startchip,kind==2?C_RED:C_BRAND,0);lv_obj_set_style_radius(g_startchip,24,0);
     lv_obj_set_style_border_width(g_startchip,0,0);lv_obj_set_style_shadow_opa(g_startchip,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(g_startchip,kind==2?_endflight_cb:_startflight_cb,LV_EVENT_CLICKED,NULL);
