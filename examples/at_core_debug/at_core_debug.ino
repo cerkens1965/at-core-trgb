@@ -98,6 +98,7 @@ static inline lv_color_t PILL_IC_ON() {return g_dark_theme?lv_color_hex(0xffffff
 struct StatusData {
     int mode,gps_sat,csq,frames,alt,spd,hdg,bat; float lat,lon;
     bool gps_fix,sd_ok,flarm_ok,adsb_ok,charging,valid;
+    bool ss_ok;          // échange SafeSky UDP réussi < 15 s (preuve connexion, même sans trafic)
     uint8_t flt_phase;   // 0=fly 1=ended 2=closed 3=uploading 4=done 5=fail (tâche D)
     uint8_t upload_pct;  // 0..100 (tâche D)
     uint8_t flt_rdy;     // WP8 : 1=liste vols prête à lire (CHR_FLIGHTS)
@@ -573,6 +574,7 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.frames=d["frames"]|0;g_status.alt=d["alt"]|0;g_status.spd=d["spd"]|0;
     g_status.hdg=d["hdg"]|0;g_status.bat=d["bat"]|-1;g_status.lat=d["lat"]|0.0f;g_status.lon=d["lon"]|0.0f;
     g_status.gps_fix=d["gps_fix"]|false;g_status.sd_ok=d["sd_ok"]|false;
+    g_status.ss_ok=d["ss"]|false;
     g_status.flarm_ok=d["flarm"]|false;g_status.adsb_ok=d["adsb"]|false;
     g_status.charging=d["chg"]|false;
     g_status.flt_phase=d["flt_ph"]|0;g_status.upload_pct=d["up_pct"]|0;g_status.flt_rdy=d["flt_rdy"]|0;g_status.flt_st=d["flt_st"]|0;
@@ -3722,23 +3724,27 @@ void updateAllPages(){
      if(lte_ok&&!prev_lte)flashTab(r_hdr_lte);
      if(g_connected&&!prev_ble)flashTab(r_hdr_ble);
      prev_gps=gps_ok;prev_lte=lte_ok;prev_ble=g_connected;
+     // Code couleur vol test (2026-06-05) : OK = schéma N&B existant (icône claire),
+     // KO = ROUGE (lisible en 1 coup d'œil en vol — "tout sauf rouge" = sain).
      #define SET_PILL_TXT(lbl,act) \
-         lv_obj_set_style_text_color(lbl,(act)?PILL_IC_ON():PILL_IC_OFF(),0)
+         lv_obj_set_style_text_color(lbl,(act)?PILL_IC_ON():C_RED,0)
      #define SET_PILL_IMG(img,act) \
-         lv_obj_set_style_img_recolor(img,(act)?PILL_IC_ON():PILL_IC_OFF(),0)
+         lv_obj_set_style_img_recolor(img,(act)?PILL_IC_ON():C_RED,0)
      // GPS
      SET_PILL_TXT(r_hdr_gps, gps_ok);
-     // LTE — bars reflect signal level
+     // LTE — bars reflect signal level (0 barre = rouge : pas de signal exploitable)
      {int csq=g_status.valid?g_status.csq:0;
       int bars=csq>20?4:csq>14?3:csq>8?2:csq>3?1:0;
       for(int bb=0;bb<4;bb++)
-          lv_obj_set_style_bg_color(r_hdr_lte_b[bb],bb<bars?PILL_IC_ON():PILL_IC_OFF(),0);}
-     // WiFi — always inactive (T-RGB has no WiFi ground link)
-     SET_PILL_TXT(r_hdr_wifi, false);
+          lv_obj_set_style_bg_color(r_hdr_lte_b[bb],
+              bb<bars?PILL_IC_ON():(bars==0?C_RED:PILL_IC_OFF()),0);}
+     // WiFi — pas de lien sol permanent : neutre gris (rouge serait un faux négatif)
+     lv_obj_set_style_text_color(r_hdr_wifi,PILL_IC_OFF(),0);
      // BLE
      SET_PILL_TXT(r_hdr_ble, g_connected);
-     // SafeSky — active when AT-CORE streams live traffic
-     {bool sky_ok=g_connected&&g_traffic.valid&&g_traffic.count>0;
+     // SafeSky — preuve de connexion bout en bout : échange UDP réussi < 15 s
+     // (champ "ss" STATUS, FW ≥ v5). Fallback anciens FW : trafic reçu > 0.
+     {bool sky_ok=g_connected&&(g_status.ss_ok||(g_traffic.valid&&g_traffic.count>0));
       SET_PILL_IMG(r_hdr_sky, sky_ok);}
      // FLARM / ADS-B retirés du radar (pastilles supprimées).
      // Battery — g_status.bat (STATUS char, ~1s) prioritaire sur g_debug.bat_pct (DEBUG char).
