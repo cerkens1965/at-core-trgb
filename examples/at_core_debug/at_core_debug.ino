@@ -268,6 +268,17 @@ static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE
 #define CHIP_FONT lv_font_montserrat_16
 #define RAD_FONT lv_font_montserrat_14
 #endif
+// Débord hors mire (2026-06-05, demande vol test) : sur le T4 rectangulaire,
+// trafic + AIP se dessinent jusqu'aux BORDS de l'écran (coins ≈ 2× RAD_R du
+// centre radar) — le cercle n'est qu'une référence d'échelle. Sur T-RGB rond,
+// 1.0 : le verre clippe physiquement de toute façon.
+#ifdef BOARD_T4S3
+ #define RAD_OVERSCAN 2.1f
+ #define AIP_CULL     2.2f
+#else
+ #define RAD_OVERSCAN 1.0f
+ #define AIP_CULL     1.5f
+#endif
 static lv_obj_t *r_radar_hdg, *r_radar_scale_lbl, *r_radar_gs;
 static lv_obj_t *r_radar_ver=nullptr;   // version firmware + date (bas de la page radar)
 static lv_obj_t *r_flt_stop=nullptr;    // panneau STOP (fin de vol) — emplacement ex-ADS-B, visible en vol
@@ -1879,11 +1890,27 @@ void updUploadOverlay(){
     uint8_t ph = g_status.flt_phase;
     uint8_t pct= g_status.upload_pct;
 
+    // (2026-06-05) Anti "CSV closed" fantôme : flt_ph 1/2 est un état PERSISTANT
+    // côté boîtier (rediffusé tant que l'upload manuel n'a pas eu lieu) → à chaque
+    // (re)connexion/reset l'écran le redécouvrait et affichait l'overlay central.
+    // On ne montre les phases 1/2 que si la TRANSITION 0→1/2 a été vue en session.
+    static uint8_t s_ph_prev  = 0xFF;
+    static bool    s_p12_live = false;
+    if(g_status.valid){
+        if(ph==0) s_p12_live=false;
+        else if((ph==1||ph==2) && s_ph_prev==0) s_p12_live=true;
+        s_ph_prev = ph;
+    } else { s_ph_prev=0xFF; s_p12_live=false; }
+
     // Phase 0 (FLYING) ou status invalide → hide overlay + reset ack
     if(!g_status.valid || ph == 0){
         if(g_up_ov) hideUploadOverlay();
         g_up_acked = false;
         g_up_dismissed = false;
+        return;
+    }
+    if((ph==1||ph==2) && !s_p12_live){       // état hérité d'avant la connexion → silencieux
+        if(g_up_ov) hideUploadOverlay();
         return;
     }
 
@@ -2346,7 +2373,7 @@ static inline bool latlon_to_screen(int32_t lat_e6,int32_t lon_e6,
     float dlat_m=(lat_e6/1e6f-own_lat)*111319.0f;
     float dlon_m=(lon_e6/1e6f-own_lon)*111319.0f*cos_lat;
     float d2=dlat_m*dlat_m+dlon_m*dlon_m;
-    float sm15=scale_m*1.5f;
+    float sm15=scale_m*AIP_CULL;   // T4 : 2.2× (couvre les coins de l'écran) | T-RGB : 1.5×
     if(d2>sm15*sm15)return false;
     float dist=sqrtf(d2);
     float bear=atan2f(dlon_m,dlat_m)*180.0f/(float)M_PI;
@@ -2371,11 +2398,19 @@ static void aipDrawCb(lv_event_t*e){
     // Offset = origine absolue de la page (0,0 sur T-RGB → no-op ; (60,-15) sur T4-S3).
     lv_area_t pco;lv_obj_get_coords(lv_obj_get_parent(lv_event_get_target(e)),&pco);
     const lv_coord_t ox=pco.x1,oy=pco.y1;
-    // Clip all AIP drawing to the radar circle
+    // Clip du dessin AIP : T-RGB = cercle radar | T4 = PLEIN ÉCRAN (2026-06-05,
+    // demande vol test : les contours peuvent déborder de la mire, l'écran rect
+    // est entièrement exploitable — le cercle n'est qu'une référence d'échelle).
     lv_draw_mask_radius_param_t cmask;
+#ifdef BOARD_T4S3
+    lv_area_t carea={(lv_coord_t)(0+ox),(lv_coord_t)(0+oy),
+                     (lv_coord_t)(599+ox),(lv_coord_t)(449+oy)};
+    lv_draw_mask_radius_init(&cmask,&carea,0,false);   // rectangle = pas de masque rond
+#else
     lv_area_t carea={(lv_coord_t)(RAD_CX-RAD_R+ox),(lv_coord_t)(RAD_CY-RAD_R+oy),
                      (lv_coord_t)(RAD_CX+RAD_R-1+ox),(lv_coord_t)(RAD_CY+RAD_R-1+oy)};
     lv_draw_mask_radius_init(&cmask,&carea,LV_RADIUS_CIRCLE,false);
+#endif
     int16_t mid=lv_draw_mask_add(&cmask,NULL);
     float own_lat=g_status.lat,own_lon=g_status.lon;
     float cos_lat=cosf(own_lat*(float)M_PI/180.0f);
@@ -3435,7 +3470,7 @@ void updateRadarDR(){
             // Seuil 20 kt valable si AT-CORE fournit le champ "s" (spd_kt) dans le JSON TRAFFIC.
             // Si "s" absent, défaut = 100 kt → l'avion reste visible même filtré. Normal.
             float scale_m=(float)g_cfg.scale_nm*1852.0f;
-            if((!g_cfg.show_grnd&&e.spd_kt<20)||(e.dist_m>scale_m)){
+            if((!g_cfg.show_grnd&&e.spd_kt<20)||(e.dist_m>scale_m*RAD_OVERSCAN)){
                 lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
                 lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
             } else {
@@ -3450,11 +3485,10 @@ void updateRadarDR(){
             ny+=trf_spd_ms*dt*cosf(trf_rad)-our_dy;
             // Back to polar
             float dr_dist=sqrtf(ex*ex+ny*ny);
-            // Sorti de l'échelle après extrapolation DR → MASQUÉ (2026-06-05).
-            // Avant : icône épinglée au bord (fminf RAD_R-8) — le rond physique du
-            // T-RGB clippait le débord (icône 48px + callsign), mais sur le T4
-            // rectangulaire tout restait visible et sortait franchement de la mire.
-            if(dr_dist>scale_m){
+            // Sorti de la zone visible après extrapolation DR → MASQUÉ. La limite
+            // inclut l'overscan (T4 : jusqu'aux bords écran ≈ 2× l'échelle ; T-RGB :
+            // l'échelle = le cercle, le verre rond clippe le débord d'icône).
+            if(dr_dist>scale_m*RAD_OVERSCAN){
                 lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
                 lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
             } else {
