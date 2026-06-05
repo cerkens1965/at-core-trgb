@@ -4038,7 +4038,9 @@ void setup(){
     Serial.begin(115200);
 #ifdef BOARD_T4S3
     // T4-S3 : init AMOLED explicite (pas d'auto-détect), SD différée pour passer par installSD()
-    if(!amoled.beginAMOLED_241(true)){while(1){Serial.println("Panel FAIL");delay(1000);}}
+    // (true, true) = SD différée (installSD() ci-dessous) + LED STAT du PMU SY6970
+    // ÉTEINTE (clignotait rouge en permanence sans batterie — feedback vol 2026-06-05).
+    if(!amoled.beginAMOLED_241(true, true)){while(1){Serial.println("Panel FAIL");delay(1000);}}
     Serial.println("Touch: CST226SE (T4-S3)");
     delay(50); // card power-on stabilization
     g_sd_ok=amoled.installSD();   // SD en SPI (MISO 4 / MOSI 2 / SCK 3 / CS 1)
