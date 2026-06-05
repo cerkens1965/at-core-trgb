@@ -241,7 +241,7 @@ static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE
 #define HDG_W  92           // pill heading agrandie
 #define HDG_H  36
 #define HDG_FONT lv_font_montserrat_20
-#define ZOOM_SZ 46          // boutons zoom +/- agrandis
+#define ZOOM_SZ 64          // boutons zoom +/- ergonomie vol (2026-06-05) — coins droits opposés
 #define CHIP_W 200          // chip Start/End flight agrandi
 #define CHIP_H 56
 #define CHIP_FONT lv_font_montserrat_20
@@ -277,6 +277,8 @@ static lv_obj_t *r_trf_img[MAX_TRF],*r_trf_vect[MAX_TRF];
 static lv_point_t r_vect_pts[MAX_TRF][2];
 static int r_trf_last_type[MAX_TRF];
 static lv_obj_t *r_alert_overlay, *r_aov_text;
+// Jauge CO : capteur pas câblé → UI compilée out (remettre 1 au montage du capteur).
+#define UI_CO_EN 0
 static lv_obj_t *r_co_val, *r_co_ball, *r_co_text;
 static lv_obj_t *r_hdr_bat;
 static lv_obj_t *r_hdr_sky, *r_hdr_flrm, *r_hdr_adsb;  // left arc: SafeSky / FLARM / ADS-B
@@ -2546,7 +2548,15 @@ void buildRadarPage(){
     auto mkZoomBtn = [&](const char* sym, int dx, intptr_t id){
         lv_obj_t* b=lv_obj_create(p);
         lv_obj_set_size(b,ZOOM_SZ,ZOOM_SZ);
+#ifdef BOARD_T4S3
+        // Ergonomie vol (2026-06-05) : "+" coin HAUT-droit, "−" coin BAS-droit —
+        // 64 px + zone tactile étendue (+12 px invisible), ~360 px de séparation
+        // → impossible à confondre en turbulence. dx = coordonnée Y absolue ici.
+        lv_obj_set_pos(b,600-ZOOM_SZ-8,dx);
+        lv_obj_set_ext_click_area(b,12);
+#else
         lv_obj_align(b,LV_ALIGN_BOTTOM_MID,RB_DX+dx,-28+RB_DY);
+#endif
         lv_obj_set_style_radius(b,LV_RADIUS_CIRCLE,0);
         lv_obj_set_style_bg_color(b,THDG(),0);lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
         lv_obj_set_style_border_color(b,TFG(),0);lv_obj_set_style_border_width(b,1,0);
@@ -2560,8 +2570,13 @@ void buildRadarPage(){
     };
     // id 0 = nm-- (zoom IN), id 1 = nm++ (zoom OUT). On mappe "+" sur le zoom IN
     // (pousser + = se rapprocher) et "-" sur le zoom OUT. Settings SCALE inchangé.
+#ifdef BOARD_T4S3
+    mkZoomBtn("+", 8,             0);   // coin haut-droit (param = Y absolu)
+    mkZoomBtn("-", 450-ZOOM_SZ-8, 1);   // coin bas-droit
+#else
     mkZoomBtn("-",-55,1);
     mkZoomBtn("+", 55,0);
+#endif
 
     // AIP overlay — transparent layer between grid and traffic icons
     r_aip_layer=lv_obj_create(p);
@@ -2579,6 +2594,10 @@ void buildRadarPage(){
     // CO arc gauge — 3 fixed color bands (30° total) in bottom-right quadrant
     // LVGL arc convention: 0°=right(3h), increases CW → compass120°=LVGL30°, compass150°=LVGL60°
     // Each band 10°: green(30-40°) caution(40-50°) danger(50-60°)
+    // UI_CO_EN=0 (2026-06-05) : capteur CO pas câblé → jauge/curseur/labels masqués
+    // à la compilation. Remettre à 1 quand le capteur sera monté (l'alerte CO BLE,
+    // elle, reste active — elle vient de l'AT-CORE).
+#if UI_CO_EN
     {
         struct Band{int s,e;lv_color_t c;};
 #ifdef BOARD_T4S3
@@ -2622,6 +2641,9 @@ void buildRadarPage(){
 #else
     lv_obj_set_pos(r_co_text,366,364);lv_obj_set_pos(r_co_val,360,380);
 #endif
+#else
+    r_co_ball=nullptr;r_co_text=nullptr;r_co_val=nullptr;   // CO désactivé (UI_CO_EN=0)
+#endif  // UI_CO_EN
 
     // Traffic VL3 icons (bitmap rotated) + speed vector + callsign + alt
     for(int i=0;i<MAX_TRF;i++){
@@ -3420,12 +3442,20 @@ void updateRadarDR(){
             ny+=trf_spd_ms*dt*cosf(trf_rad)-our_dy;
             // Back to polar
             float dr_dist=sqrtf(ex*ex+ny*ny);
+            // Sorti de l'échelle après extrapolation DR → MASQUÉ (2026-06-05).
+            // Avant : icône épinglée au bord (fminf RAD_R-8) — le rond physique du
+            // T-RGB clippait le débord (icône 48px + callsign), mais sur le T4
+            // rectangulaire tout restait visible et sortait franchement de la mire.
+            if(dr_dist>scale_m){
+                lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
+                lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
+            } else {
             float dr_bear=atan2f(ex,ny)*180.0f/(float)M_PI;
             if(dr_bear<0.0f)dr_bear+=360.0f;
             // Heading-up projection on screen
             int rb=((int)dr_bear-radarEffHdg()+360)%360;
             float brd=(float)rb*(float)M_PI/180.0f;
-            float dpx=fminf(dr_dist*(float)RAD_R/scale_m,(float)(RAD_R-8));
+            float dpx=dr_dist*(float)RAD_R/scale_m;   // ≤ RAD_R par le test ci-dessus
             int sx=(int)(RAD_CX+sinf(brd)*dpx);
             int sy=(int)(RAD_CY-cosf(brd)*dpx);
             int rel_hdg=((e.hdg_deg-radarEffHdg())%360+360)%360;
@@ -3462,6 +3492,7 @@ void updateRadarDR(){
             lv_obj_set_pos(r_radar_alt[i],sx+12,sy+6);lv_label_set_text(r_radar_alt[i],b);
             lv_obj_set_style_text_color(r_radar_alt[i],col,0);
             lv_obj_clear_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
+            } // end else (dans l'échelle post-DR)
             } // end else (not grounded)
         }else{
             lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
@@ -3806,6 +3837,7 @@ void updateAllPages(){
             int cy=(int)(RAD_CY-cosf(ra)*(float)r_inner)-8;
             lv_obj_set_pos(r_card[ci],cx,cy);}}
     // Radar blips — handled by updateRadarDR() called every loop (dead reckoning)
+#if UI_CO_EN
     // CO gauge — ball position + ppm label
     if(g_flight.valid){
         int co=g_flight.co_ppm;
@@ -3814,6 +3846,7 @@ void updateAllPages(){
                        (int)((float)RAD_CY+(float)(CO_SZ/2-8)*sinf(co_a))-6);
         lv_obj_set_style_text_color(r_co_text,lv_color_hex(0x000000),0);
         lv_label_set_text(r_co_val,"");}
+#endif
     // Alert overlay
     if(g_alert.valid){
         bool any=g_alert.co||g_alert.gforce||g_alert.rpm||g_alert.traffic;
