@@ -3692,6 +3692,8 @@ void updFlightState(){
 
 // ── OTA firmware overlay (MAJ par hotspot cloud) ─────────────────────────────
 static lv_obj_t* g_ota_ov=nullptr,*g_ota_lbl=nullptr,*g_ota_bar=nullptr;
+static uint8_t   g_ota_acked=0;   // état terminal (4/5) acquitté → ne plus ré-afficher (le boîtier le rediffuse en boucle)
+static void hideOtaOverlay();     // fwd (utilisé par le tap-to-close de mkOtaOverlay)
 static uint32_t  g_ota_done_ms=0;
 static void mkOtaOverlay(){
     if(g_ota_ov)return;
@@ -3701,6 +3703,14 @@ static void mkOtaOverlay(){
     lv_obj_set_style_bg_opa(g_ota_ov,LV_OPA_COVER,0);
     lv_obj_set_style_border_color(g_ota_ov,C_BRAND,0);lv_obj_set_style_border_width(g_ota_ov,2,0);
     lv_obj_set_style_radius(g_ota_ov,12,0);lv_obj_clear_flag(g_ota_ov,LV_OBJ_FLAG_SCROLLABLE);
+    // Tap pour fermer (états terminaux) — l'overlay restait coincé sur "Already
+    // up to date" (ota=5 rediffusé en boucle par le boîtier, cf g_ota_acked).
+    lv_obj_add_flag(g_ota_ov,LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(g_ota_ov,[](lv_event_t*e){
+        if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+        if(g_status.ota>=4)g_ota_acked=g_status.ota;
+        hideOtaOverlay();
+    },LV_EVENT_CLICKED,NULL);
     lv_obj_t*t=lv_label_create(g_ota_ov);lv_label_set_text(t,"FIRMWARE UPDATE");
     lv_obj_set_style_text_color(t,C_BRAND,0);lv_obj_set_style_text_font(t,&lv_font_montserrat_20,0);
     lv_obj_align(t,LV_ALIGN_TOP_MID,0,22);
@@ -3717,8 +3727,13 @@ static void mkOtaOverlay(){
 static void hideOtaOverlay(){ if(g_ota_ov){lv_obj_del(g_ota_ov);g_ota_ov=nullptr;g_ota_lbl=nullptr;g_ota_bar=nullptr;} g_ota_done_ms=0; }
 // MAJ selon g_status.ota (0 idle/1 check/2 download/3 OK reboot/4 fail/5 à jour).
 void updOtaOverlay(){
-    if(!g_status.valid||g_status.ota==0){ if(g_ota_ov)hideOtaOverlay(); return; }
+    if(!g_status.valid||g_status.ota==0){ if(g_ota_ov)hideOtaOverlay(); g_ota_acked=0; return; }
     uint8_t s=g_status.ota;
+    if(s<4) g_ota_acked=0;                       // nouveau cycle (check/download) → ré-arme
+    if((s==4||s==5)&&g_ota_acked==s){            // terminal déjà acquitté (auto 5 s ou tap)
+        if(g_ota_ov)hideOtaOverlay();            // → silencieux tant que le boîtier rediffuse
+        return;
+    }
     if(!g_ota_ov)mkOtaOverlay();
     const char* msg="..."; lv_color_t c=C_BRAND;
     switch(s){
@@ -3734,7 +3749,10 @@ void updOtaOverlay(){
         lv_obj_set_style_text_color(g_ota_lbl,c,0);
     }
     if(g_ota_bar) lv_bar_set_value(g_ota_bar, s==2?g_status.opct:(s>=3?100:0), LV_ANIM_OFF);
-    if((s==4||s==5)&&g_ota_done_ms&&millis()-g_ota_done_ms>5000) hideOtaOverlay();
+    if((s==4||s==5)&&g_ota_done_ms&&millis()-g_ota_done_ms>5000){
+        g_ota_acked=s;          // acquitté → ne reviendra pas tant que l'état ne change pas
+        hideOtaOverlay();
+    }
 }
 
 void updateAllPages(){
