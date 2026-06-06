@@ -2391,11 +2391,20 @@ static inline bool latlon_to_screen(int32_t lat_e6,int32_t lon_e6,
     sx=(int)(RAD_CX+sinf(brd)*dpx);sy=(int)(RAD_CY-cosf(brd)*dpx);
     return true;}
 
-// Cap effectif du radar : north-up auto à l'arrêt. Sous RADAR_STILL_KMH le cap
-// GPS (course over ground) n'est pas calculable → on verrouille la rose ET les
-// icônes/AIP sur le nord (0°). En mouvement, vrai cap GPS → heading-up.
+// Cap effectif du radar — (2026-06-06, note de vol) la rose devient un
+// INDICATEUR D'ENREGISTREMENT :
+// - vol NON actif (flt_st==0) → verrouillé NORD-up, capsule "NF" (No Flight)
+// - vol ACTIF → heading-up ; à l'arrêt (cap GPS non calculable) on FIGE le
+//   dernier cap connu — on ne revient PAS au nord tant que le vol n'est pas
+//   terminé → on VOIT d'un coup d'œil que l'enregistrement tourne.
 #define RADAR_STILL_KMH 5
-static inline int radarEffHdg(){ return (g_status.spd < RADAR_STILL_KMH) ? 0 : (int)g_status.hdg; }
+static inline int radarEffHdg(){
+    static int s_hold=0;
+    bool active = g_status.valid && g_status.flt_st>=1;
+    if(!active){ s_hold=0; return 0; }                       // NF → nord verrouillé
+    if(g_status.spd >= RADAR_STILL_KMH) s_hold=(int)g_status.hdg;
+    return s_hold;                                           // arrêt en vol → cap figé
+}
 
 static void aipDrawCb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_DRAW_MAIN_END)return;
@@ -3918,8 +3927,15 @@ void updateAllPages(){
     // Évolution possible : magnétomètre côté AT-CORE pour un cap indépendant
     // de la vitesse (cap magnétique vs cap sol).
     if(g_status.valid){
-        if(g_status.spd < RADAR_STILL_KMH) lv_label_set_text(r_radar_hdg,"N " LV_SYMBOL_UP);
-        else { snprintf(b,32,"%d°",g_status.hdg);lv_label_set_text(r_radar_hdg,b); }
+        // Capsule cap = état d'enregistrement : "NF" ambre = pas de vol actif
+        // (rose au nord), sinon cap effectif (figé à l'arrêt pendant un vol).
+        if(g_status.flt_st==0){
+            lv_label_set_text(r_radar_hdg,"NF");
+            lv_obj_set_style_text_color(r_radar_hdg,C_AMBER,0);
+        } else {
+            snprintf(b,32,"%d°",radarEffHdg());lv_label_set_text(r_radar_hdg,b);
+            lv_obj_set_style_text_color(r_radar_hdg,TFG(),0);
+        }
         if(r_radar_gs){
             // g_status.spd est en km/h (AT-CORE envoie kt*1.852). Bug GS corrigé :
             //   kt   → km/h × 0.539957 ; km/h → valeur directe (avant: km/h étiqueté
