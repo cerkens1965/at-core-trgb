@@ -134,6 +134,8 @@ static Preferences g_prefs;
 static StatusData  g_status  = {};
 static FlightData  g_flight  = {};
 static TrafficData g_traffic = {};
+static uint32_t g_ss_lost_ms = 0;   // millis() de la perte signal SafeSky (0 = signal OK) — vieillissement trafic
+static lv_obj_t* r_ss_dot = nullptr; // point santé signal (T4) : vert = UDP OK <10 s, rouge = perte
 static AlertData   g_alert   = {};
 static DebugData   g_debug   = {};
 static volatile bool g_dataUpdated = false;
@@ -588,6 +590,11 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.hdg=d["hdg"]|0;g_status.bat=d["bat"]|-1;g_status.lat=d["lat"]|0.0f;g_status.lon=d["lon"]|0.0f;
     g_status.gps_fix=d["gps_fix"]|false;g_status.sd_ok=d["sd_ok"]|false;
     g_status.ss_ok=d["ss"]|false;
+    // Santé signal (2026-06-06) : mémorise l'instant de PERTE (ss passe false,
+    // = >10 s sans échange UDP côté boîtier). Sert au vieillissement du trafic :
+    // gris dès la perte, effacé à perte+20 s (= 30 s réels), cf updateRadarDR.
+    if(g_status.ss_ok) g_ss_lost_ms=0;
+    else if(g_ss_lost_ms==0) g_ss_lost_ms=millis();
     g_status.flarm_ok=d["flarm"]|false;g_status.adsb_ok=d["adsb"]|false;
     g_status.charging=d["chg"]|false;
     g_status.flt_phase=d["flt_ph"]|0;g_status.upload_pct=d["up_pct"]|0;g_status.flt_rdy=d["flt_rdy"]|0;g_status.flt_st=d["flt_st"]|0;
@@ -2526,6 +2533,16 @@ void buildRadarPage(){
     r_hdr_lte  = mkLTEPill(p, RLC_X, 156);
     r_hdr_wifi = mkTabPill(p, LV_SYMBOL_WIFI,      RLC_X, 204);
     r_hdr_ble  = mkTabPill(p, LV_SYMBOL_BLUETOOTH, RLC_X, 252);
+    // Point santé signal (2026-06-06) : en haut de la colonne, à droite de la
+    // batterie. VERT = échange SafeSky UDP < 10 s · ROUGE = perte signal —
+    // revient vert dès le retour LTE. Le trafic passe gris/disparaît en miroir.
+    r_ss_dot=lv_obj_create(p);lv_obj_set_size(r_ss_dot,18,18);
+    lv_obj_set_pos(r_ss_dot,RLC_X+PILL_W+10,23);
+    lv_obj_set_style_radius(r_ss_dot,LV_RADIUS_CIRCLE,0);
+    lv_obj_set_style_bg_color(r_ss_dot,C_RED,0);lv_obj_set_style_bg_opa(r_ss_dot,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(r_ss_dot,1,0);lv_obj_set_style_border_color(r_ss_dot,TFG(),0);
+    lv_obj_set_style_shadow_opa(r_ss_dot,LV_OPA_TRANSP,0);
+    lv_obj_clear_flag(r_ss_dot,LV_OBJ_FLAG_CLICKABLE|LV_OBJ_FLAG_SCROLLABLE);
 #else
     r_hdr_gps  = mkTabPill(p, LV_SYMBOL_GPS,         388, 80);
     r_hdr_lte  = mkLTEPill(p, 411, 118);
@@ -3457,7 +3474,15 @@ void createSwipeHandlers(){
 // Capped at 10s to avoid runaway extrapolation on BLE dropout.
 void updateRadarDR(){
     if(!g_traffic.valid||!g_status.valid)return;
-    float dt=fminf((float)(millis()-g_traffic.recv_ms)/1000.0f,10.0f);
+    // Vieillissement signal (2026-06-06) : ss=false (>10 s sans échange UDP côté
+    // boîtier) → trafic GRIS MOYEN, le dead reckoning continue de l'extrapoler
+    // sur cap/vitesse dernière connue ; à perte+20 s (= 30 s réels) sans reprise
+    // → trafic EFFACÉ. Retour ss=true → couleurs normales immédiates.
+    bool ssStale = !g_status.ss_ok;
+    bool ssDead  = ssStale && g_ss_lost_ms && (millis()-g_ss_lost_ms > 20000);
+    // Cap d'extrapolation 10→30 s : couvre la phase grise (le trafic "suit sa
+    // route" pendant la perte au lieu de se figer).
+    float dt=fminf((float)(millis()-g_traffic.recv_ms)/1000.0f,30.0f);
     float our_spd_ms=(float)g_status.spd/3.6f;   // km/h → m/s (own, pas knots)
     float our_rad=(float)radarEffHdg()*(float)M_PI/180.0f;
     float our_dx=our_spd_ms*dt*sinf(our_rad);
@@ -3470,7 +3495,7 @@ void updateRadarDR(){
             // Seuil 20 kt valable si AT-CORE fournit le champ "s" (spd_kt) dans le JSON TRAFFIC.
             // Si "s" absent, défaut = 100 kt → l'avion reste visible même filtré. Normal.
             float scale_m=(float)g_cfg.scale_nm*1852.0f;
-            if((!g_cfg.show_grnd&&e.spd_kt<20)||(e.dist_m>scale_m*RAD_OVERSCAN)){
+            if((!g_cfg.show_grnd&&e.spd_kt<20)||(e.dist_m>scale_m*RAD_OVERSCAN)||ssDead){
                 lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
                 lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
             } else {
@@ -3503,7 +3528,9 @@ void updateRadarDR(){
             int rel_hdg=((e.hdg_deg-radarEffHdg())%360+360)%360;
             float hr=(float)rel_hdg*(float)M_PI/180.0f;
             float cs=cosf(hr),sn=sinf(hr);
-            lv_color_t col=dr_dist<1000?C_RED:dr_dist<3000?C_AMBER:TFG();
+            // Perte signal → gris moyen uniforme (icône + labels), sinon code distance
+            lv_color_t col=ssStale?lv_color_hex(0x9ca3af)
+                          :(dr_dist<1000?C_RED:dr_dist<3000?C_AMBER:TFG());
             if(e.type!=r_trf_last_type[i]){
                 lv_img_set_src(r_trf_img[i],getAircraftIcon(e.type));
                 r_trf_last_type[i]=e.type;}
@@ -3528,7 +3555,8 @@ void updateRadarDR(){
             lv_line_set_points(r_trf_vect[i],r_vect_pts[i],2);
             lv_obj_clear_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
             lv_obj_set_pos(r_radar_cs[i],sx+12,sy-8);lv_label_set_text(r_radar_cs[i],e.cs);
-            lv_obj_set_style_text_color(r_radar_cs[i],e.visible?TFG():C_AMBER,0);
+            lv_obj_set_style_text_color(r_radar_cs[i],
+                ssStale?lv_color_hex(0x9ca3af):(e.visible?TFG():C_AMBER),0);
             lv_obj_clear_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
             snprintf(b,32,"%+d",e.alt_m); // already delta in hundreds of feet from AT-CORE
             lv_obj_set_pos(r_radar_alt[i],sx+12,sy+6);lv_label_set_text(r_radar_alt[i],b);
@@ -3823,10 +3851,13 @@ void updateAllPages(){
      lv_obj_set_style_text_color(r_hdr_wifi,PILL_IC_OFF(),0);
      // BLE
      SET_PILL_TXT(r_hdr_ble, g_connected);
-     // SafeSky — preuve de connexion bout en bout : échange UDP réussi < 15 s
+     // SafeSky — preuve de connexion bout en bout : échange UDP réussi < 10 s
      // (champ "ss" STATUS, FW ≥ v5). Fallback anciens FW : trafic reçu > 0.
      {bool sky_ok=g_connected&&(g_status.ss_ok||(g_traffic.valid&&g_traffic.count>0));
       SET_PILL_IMG(r_hdr_sky, sky_ok);}
+     // Point santé signal : vert = UDP OK, rouge = perte (≥10 s) — retour vert immédiat
+     if(r_ss_dot) lv_obj_set_style_bg_color(r_ss_dot,
+         (g_connected&&g_status.valid&&g_status.ss_ok)?C_GREEN:C_RED,0);
      // FLARM / ADS-B retirés du radar (pastilles supprimées).
      // Battery — g_status.bat (STATUS char, ~1s) prioritaire sur g_debug.bat_pct (DEBUG char).
      // Charging (champ "chg" JSON STATUS) détecté AT-CORE : hausse tension OU float ≥4.13V.
