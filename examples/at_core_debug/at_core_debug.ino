@@ -125,8 +125,8 @@ struct DebugData    {
 static const uint8_t kScaleOpts[]={1,2,4,8,10,20,40};
 static const char*   kSrcNames[] ={"SSKY","FLRM","ADSB","ALL"};
 static const char*   kIconSzNames[]={"S","M","L"};
-static const uint16_t kIconZoom[]={213,256,299};  // zoom for 40/48/56 px from 48px base (échelle +1 cran 2026-06-08)
-static const int8_t  kIconHalf[]={20,24,28};
+static const uint16_t kIconZoom[]={320,384,448};  // zoom for 60/72/84 px from 48px base (L=84px = 1.5× — visibilité vol 2026-06-08)
+static const int8_t  kIconHalf[]={30,36,42};
 struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd,wifi_en,aip_en,ad_heli,spd_kt; int16_t vfilt_ft; uint8_t icon_sz; };
 static CfgData     g_cfg={4,16,3,true,true,true,true,false,true,false,2000,2};
 // Segmented toggle (UI Settings T4-S3). Types + registres déclarés
@@ -2771,11 +2771,11 @@ void buildRadarPage(){
         lv_obj_set_style_line_color(r_trf_vect[i],TFG(),0);lv_obj_set_style_line_width(r_trf_vect[i],1,0);
         lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
         r_radar_cs[i]=lv_label_create(p);lv_label_set_text(r_radar_cs[i],"");
-        lv_obj_set_style_text_font(r_radar_cs[i],&lv_font_montserrat_14,0);
+        lv_obj_set_style_text_font(r_radar_cs[i],&lv_font_montserrat_16,0);   // immat un peu plus grande
         lv_obj_set_style_text_color(r_radar_cs[i],TFG(),0);
         lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
         r_radar_alt[i]=lv_label_create(p);lv_label_set_text(r_radar_alt[i],"");
-        lv_obj_set_style_text_font(r_radar_alt[i],&lv_font_montserrat_14,0);
+        lv_obj_set_style_text_font(r_radar_alt[i],&lv_font_montserrat_20,0);  // Δalt bien visible en vol (info anti-collision)
         lv_obj_set_style_text_color(r_radar_alt[i],C_CYAN,0);
         lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);}
 
@@ -3982,12 +3982,12 @@ void updateRadarDR(){
             lv_obj_set_pos(r_trf_vect[i],0,0);
             lv_line_set_points(r_trf_vect[i],r_vect_pts[i],2);
             lv_obj_clear_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_pos(r_radar_cs[i],sx+12,sy-8);lv_label_set_text(r_radar_cs[i],e.cs);
+            lv_obj_set_pos(r_radar_cs[i],sx+ih+6,sy-22);lv_label_set_text(r_radar_cs[i],e.cs);  // à droite de l'icône agrandie (ih=demi-taille)
             lv_obj_set_style_text_color(r_radar_cs[i],
                 ssStale?lv_color_hex(0x9ca3af):(e.visible?TFG():C_AMBER),0);
             lv_obj_clear_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
             snprintf(b,32,"%+d",e.alt_m); // already delta in hundreds of feet from AT-CORE
-            lv_obj_set_pos(r_radar_alt[i],sx+12,sy+6);lv_label_set_text(r_radar_alt[i],b);
+            lv_obj_set_pos(r_radar_alt[i],sx+ih+6,sy+4);lv_label_set_text(r_radar_alt[i],b);
             lv_obj_set_style_text_color(r_radar_alt[i],col,0);
             lv_obj_clear_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
             } // end else (dans l'échelle post-DR)
