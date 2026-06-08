@@ -129,9 +129,11 @@ static const uint16_t kIconZoom[]={171,213,256};  // zoom for 32/40/48 px from 4
 static const int8_t  kIconHalf[]={16,20,24};
 struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd,wifi_en,aip_en,ad_heli,spd_kt; int16_t vfilt_ft; uint8_t icon_sz; };
 static CfgData     g_cfg={4,16,3,true,true,true,true,false,true,false,2000,2};
-#ifdef BOARD_T4S3
-// Segmented toggle T4-S3 (défini ici, AVANT toute fonction, pour que le générateur
-// de prototypes Arduino voie le type SegCtl dans la signature de segApplyStyle).
+// Segmented toggle (UI Settings T4-S3). Types + registres déclarés
+// INCONDITIONNELLEMENT (2026-06-08) : les fonctions seg*/updSeg* ne sont pas
+// guardées #ifdef BOARD_T4S3 → sur T-RGB le type doit exister quand même (les
+// registres restent vides, g_seg_n=0 → boucles no-op). Défini AVANT toute
+// fonction pour que le générateur de prototypes Arduino voie le type.
 struct SegCtl {
     lv_obj_t *segA, *segB;   // les deux moitiés cliquables
     lv_obj_t *lblA, *lblB;   // labels (recoloration texte actif/inactif)
@@ -149,7 +151,6 @@ struct SegN {
 };
 static SegN g_segn[2];
 static int  g_segn_n = 0;
-#endif
 static Preferences g_prefs;
 
 static StatusData  g_status  = {};
