@@ -129,6 +129,27 @@ static const uint16_t kIconZoom[]={171,213,256};  // zoom for 32/40/48 px from 4
 static const int8_t  kIconHalf[]={16,20,24};
 struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd,wifi_en,aip_en,ad_heli,spd_kt; int16_t vfilt_ft; uint8_t icon_sz; };
 static CfgData     g_cfg={4,16,3,true,true,true,true,false,true,false,2000,2};
+#ifdef BOARD_T4S3
+// Segmented toggle T4-S3 (défini ici, AVANT toute fonction, pour que le générateur
+// de prototypes Arduino voie le type SegCtl dans la signature de segApplyStyle).
+struct SegCtl {
+    lv_obj_t *segA, *segB;   // les deux moitiés cliquables
+    lv_obj_t *lblA, *lblB;   // labels (recoloration texte actif/inactif)
+    bool     *val;           // champ config bool pointé
+    bool      aIsTrue;       // segA sélectionné ⇔ *val == aIsTrue
+};
+static SegCtl g_seg[8];   // 3 Radar (DIST/SPEED/THEME) + 3 Traffic (GROUNDED/AIP/HELI) + 1 System (WIFI)
+static int    g_seg_n = 0;
+// Segmented multi-options (SOURCE 4, ICONS SIZE 3) — même raison de placement.
+struct SegN {
+    lv_obj_t *cell[4], *lbl[4];
+    uint8_t   n;        // nombre d'options
+    uint8_t  *val;      // index courant (champ config uint8_t)
+    uint8_t   kind;     // 0=neutre · 1=ICONS (applique le zoom aux icônes trafic)
+};
+static SegN g_segn[2];
+static int  g_segn_n = 0;
+#endif
 static Preferences g_prefs;
 
 static StatusData  g_status  = {};
@@ -436,9 +457,15 @@ static lv_obj_t* g_ac_search_disp = nullptr;
 // ── Widget refs — Settings (page 2) ───────────────────────────────────────────
 static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_spd_v,*s_bright_v,*s_src_v,*s_theme_v,*s_grnd_v,*s_icon_sz_v;
 static lv_obj_t *s_ac_v,*s_wifi_v,*s_sd_v;
-static lv_obj_t *s_pg[2]  = {};
+#define S_NPG 3                        // sous-pages Settings : Radar / Traffic / System
+static lv_obj_t *s_pg[S_NPG] = {};
 static uint8_t   s_pg_idx = 0;
-static lv_obj_t *r_p2_bat = nullptr;   // "Battery AT-CORE : XX%" footer settings page
+static lv_obj_t *r_p2_bat = nullptr;   // "Battery AT-CORE : XX%" footer settings page (T-RGB)
+static lv_obj_t *s_set_title = nullptr; // titre dynamique « SETTINGS / <section> » (T4-S3)
+static lv_obj_t *s_set_uline = nullptr; // fine ligne bleue sous le titre (largeur = texte)
+static lv_obj_t *s_sys_atcver= nullptr; // page System : version AT-CORE (live BLE)
+static lv_obj_t *s_sys_atcbat= nullptr; // page System : batterie AT-CORE (live BLE)
+static const char* kSetTab[S_NPG] = {"RADAR","TRAFFIC","SYSTEM"};
 
 // ── SD card (AT-VIEW local) ───────────────────────────────────────────────────
 static bool     g_sd_ok = false;
@@ -763,6 +790,17 @@ static lv_coord_t g_swipe_sx=-1, g_swipe_lx=0, g_swipe_sy=0, g_swipe_ly=0;
 // Vrai pendant le drag du slider brightness — bloque le swipe horizontal
 // qui sinon déclencherait une navigation de page parasite.
 static bool g_bright_drag=false;
+// Titre dynamique « SETTINGS / <section> » — T4-S3 seulement (s_set_title non nul).
+static void setUpdTitle(){
+    if(!s_set_title)return;
+    char t[28]; snprintf(t,sizeof(t),"SETTINGS / %s",kSetTab[s_pg_idx<S_NPG?s_pg_idx:0]);
+    lv_label_set_text(s_set_title,t);
+    if(s_set_uline){                       // ligne soulignée recalée sur la largeur du texte
+        lv_obj_update_layout(s_set_title);
+        lv_obj_set_width(s_set_uline,lv_obj_get_width(s_set_title));
+    }
+}
+
 static void swipeCb(lv_event_t*e){
     // Bloque la navigation tant que l'auth code ou le pairing n'est pas résolu
     if(g_auth_ov||g_pair_ov)return;
@@ -780,12 +818,14 @@ static void swipeCb(lv_event_t*e){
                 if(abs(dx)>40){lv_obj_add_flag(g_dbgPage,LV_OBJ_FLAG_HIDDEN);
                     lv_obj_clear_flag(g_pages[g_page],LV_OBJ_FLAG_HIDDEN);g_inDebug=false;}
             }else if(abs(dy)>abs(dx) && abs(dy)>60 && g_page==2){
-                // Swipe vertical sur Settings → bascule sous-page (haut↔bas)
-                uint8_t np = (dy<0) ? 1 : 0;
-                if(np!=s_pg_idx && s_pg[s_pg_idx] && s_pg[np]){
+                // Swipe vertical sur Settings → bascule sous-page (haut=suivante, bas=précédente)
+                int np = (dy<0) ? (s_pg_idx+1) : ((int)s_pg_idx-1);
+                if(np<0)np=0; if(np>S_NPG-1)np=S_NPG-1;   // clamp (pas de wrap)
+                if((uint8_t)np!=s_pg_idx && s_pg[s_pg_idx] && s_pg[np]){
                     lv_obj_add_flag(s_pg[s_pg_idx],LV_OBJ_FLAG_HIDDEN);
-                    s_pg_idx=np;
-                    lv_obj_clear_flag(s_pg[s_pg_idx],LV_OBJ_FLAG_HIDDEN);}
+                    s_pg_idx=(uint8_t)np;
+                    lv_obj_clear_flag(s_pg[s_pg_idx],LV_OBJ_FLAG_HIDDEN);
+                    setUpdTitle();}
             }else{
                 if(dx>60){g_navPage=(g_page==0)?NUM_PAGES-1:g_page-1;g_navPending=true;}
                 else if(dx<-60){g_navPage=(g_page+1)%NUM_PAGES;g_navPending=true;}}}
@@ -2749,22 +2789,39 @@ void buildRadarPage(){
     lv_obj_add_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);
     r_aov_text=lv_label_create(r_alert_overlay);lv_label_set_text(r_aov_text,"");
     lv_obj_set_style_text_color(r_aov_text,lv_color_hex(0xFFFFFF),0);
-    lv_obj_set_style_text_font(r_aov_text,&lv_font_montserrat_16,0);lv_obj_center(r_aov_text);}
+    lv_obj_set_style_text_font(r_aov_text,&lv_font_montserrat_16,0);lv_obj_center(r_aov_text);
+#ifdef BOARD_T4S3
+    // Swipe robuste (T4) : les enfants cliquables du radar (arcs de la mire, boutons
+    // zoom des coins droits, chips) capteraient l'appui SANS le transmettre → le swipe
+    // horizontal radar→Settings se perdait selon le point de départ. On les fait
+    // « bubbler » vers la page → swipeCb voit l'appui où qu'il commence.
+    for(uint32_t i=0;i<lv_obj_get_child_cnt(p);i++)
+        lv_obj_add_flag(lv_obj_get_child(p,i),LV_OBJ_FLAG_EVENT_BUBBLE);
+#endif
+}
 
 // ── Page 2 — Settings ─────────────────────────────────────────────────────────
+#ifdef BOARD_T4S3
+static void updSegs();    // fwd : segmented toggles 2-options T4-S3 (défini plus bas)
+static void updSegNs();   // fwd : segmented multi-options T4-S3 (défini plus bas)
+#endif
 void updSetPage(){
     char b[16];
-    snprintf(b,16,"%dnm",g_cfg.scale_nm); lv_label_set_text(s_scale_v,b);
-    snprintf(b,16,"%dft",g_cfg.vfilt_ft); lv_label_set_text(s_vfilt_v,b);
-    lv_label_set_text(s_dist_v, g_cfg.dist_nm?"NM":"km");
-    lv_label_set_text(s_alt_v,  g_cfg.alt_ft?"ft":"m");
-    if(s_spd_v)lv_label_set_text(s_spd_v, g_cfg.spd_kt?"kt":"km/h");
-    snprintf(b,16,"%d/16",g_cfg.brightness); lv_label_set_text(s_bright_v,b);
-    lv_label_set_text(s_src_v,  kSrcNames[g_cfg.trf_src&3]);
-    lv_label_set_text(s_grnd_v, g_cfg.show_grnd?"ON":"OFF");
-    lv_label_set_text(s_theme_v,g_cfg.dark?"DARK":"LIGHT");
-    lv_label_set_text(s_icon_sz_v,kIconSzNames[g_cfg.icon_sz]);
-    lv_label_set_text(s_wifi_v,g_wifi_active?"192.168.4.1":g_cfg.wifi_en?"ON":"OFF");
+    // Rows nullables (supprimées/remplacées par des segmented sur T4-S3) → toutes gardées.
+    if(s_scale_v){snprintf(b,16,"%dnm",g_cfg.scale_nm); lv_label_set_text(s_scale_v,b);}
+    if(s_vfilt_v){snprintf(b,16,"%dft",g_cfg.vfilt_ft); lv_label_set_text(s_vfilt_v,b);}
+    if(s_dist_v) lv_label_set_text(s_dist_v, g_cfg.dist_nm?"NM":"km");
+    if(s_alt_v)  lv_label_set_text(s_alt_v,  g_cfg.alt_ft?"ft":"m");
+    if(s_spd_v)  lv_label_set_text(s_spd_v, g_cfg.spd_kt?"kt":"km/h");
+    if(s_bright_v){snprintf(b,16,"%d/16",g_cfg.brightness); lv_label_set_text(s_bright_v,b);}
+    if(s_src_v)  lv_label_set_text(s_src_v,  kSrcNames[g_cfg.trf_src&3]);
+    if(s_grnd_v) lv_label_set_text(s_grnd_v, g_cfg.show_grnd?"ON":"OFF");
+    if(s_theme_v)lv_label_set_text(s_theme_v,g_cfg.dark?"DARK":"LIGHT");
+#ifdef BOARD_T4S3
+    updSegs(); updSegNs();   // refresh des segmented (toggles + multi-options)
+#endif
+    if(s_icon_sz_v)lv_label_set_text(s_icon_sz_v,kIconSzNames[g_cfg.icon_sz]);
+    if(s_wifi_v)lv_label_set_text(s_wifi_v,g_wifi_active?"192.168.4.1":g_cfg.wifi_en?"ON":"OFF");
     if(s_aip_v)lv_label_set_text(s_aip_v,!g_aip_loaded?"NO DATA":g_cfg.aip_en?"ON":"OFF");
     if(s_heli_v)lv_label_set_text(s_heli_v,g_cfg.ad_heli?"ON":"OFF");
     snprintf(b,12,"%dnm",g_cfg.scale_nm); lv_label_set_text(r_radar_scale_lbl,b);
@@ -2882,6 +2939,178 @@ static lv_obj_t* mkSetSliderRow(lv_obj_t*p,const char*k,int y,uint8_t val){
     lv_obj_add_event_cb(sl,cbBrightSlider,LV_EVENT_ALL,NULL);
     return vl;
 }
+
+#ifdef BOARD_T4S3
+// ════════════════════════════════════════════════════════════════════════════
+// SETTINGS T4-S3 — contrôles tactiles agrandis (page 1 « fondamentaux »)
+// Demande Christophe 2026-06-07 : réglages exploitables AU DOIGT sur l'AMOLED.
+//  • segmented control style iOS (2 options, l'active en bleu plein) → DIST / SPEED / THEME
+//  • gros stepper V-FILTER (boutons 58×52, réutilise cbSetBtn ids 2/3)
+//  • slider brightness épais (gros knob)
+// Réservé T4-S3 ; le T-RGB rond garde les rows compactes mkSetRow.
+// ════════════════════════════════════════════════════════════════════════════
+
+// Registre g_seg[]/g_seg_n + struct SegCtl déclarés en tête de fichier (zone types).
+static void segApplyStyle(SegCtl &s){
+    bool aSel = (*s.val == s.aIsTrue);
+    lv_obj_t *on  = aSel? s.segA : s.segB,  *off = aSel? s.segB : s.segA;
+    lv_obj_t *onL = aSel? s.lblA : s.lblB,  *offL= aSel? s.lblB : s.lblA;
+    lv_obj_set_style_bg_color(on,C_BRAND,0); lv_obj_set_style_bg_opa(on,LV_OPA_COVER,0);
+    lv_obj_set_style_text_color(onL,lv_color_hex(0xffffff),0);
+    lv_obj_set_style_bg_opa(off,LV_OPA_TRANSP,0);
+    lv_obj_set_style_text_color(offL,lv_color_hex(0x4b5563),0);
+}
+static void updSegs(){ for(int i=0;i<g_seg_n;i++) segApplyStyle(g_seg[i]); }
+
+// tap sur une moitié : data = (segIndex<<1)|side  (side 0=A, 1=B)
+static void cbSeg(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    int d=(int)(intptr_t)lv_event_get_user_data(e);
+    int idx=d>>1, side=d&1;
+    if(idx<0||idx>=g_seg_n)return;
+    SegCtl &s=g_seg[idx];
+    if(s.val==&g_cfg.aip_en && !g_aip_loaded) return;  // AIP non togglable sans données
+    bool target = (side==0)? s.aIsTrue : !s.aIsTrue;
+    if(*s.val==target)return;
+    *s.val=target; cfgSave();
+    if(s.val==&g_cfg.dark){ g_rebuildPages=true; return; }   // thème → rebuild complet
+    // effets de bord identiques à cbSetBtn (sinon le toggle ne « prend » pas)
+    if(s.val==&g_cfg.wifi_en){ if(g_cfg.wifi_en)wifiStart(); else wifiStop(); }
+    if((s.val==&g_cfg.aip_en||s.val==&g_cfg.ad_heli) && r_aip_layer) lv_obj_invalidate(r_aip_layer);
+    segApplyStyle(s); updSetPage();
+}
+
+// Ligne label + segmented (2 options) — réservé T4-S3.
+static void mkSegRow(lv_obj_t*p,const char*k,int y,const char*a,const char*b,
+                     bool*val,bool aIsTrue){
+    if(g_seg_n>=8)return;
+    mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
+    const int TW=224,TH=52,TX=600-40-TW,HW=(TW-6)/2;   // track à droite (plein 600), 3px pad bords
+    lv_obj_t*tr=lv_obj_create(p);
+    lv_obj_set_size(tr,TW,TH);lv_obj_set_pos(tr,TX,y);
+    lv_obj_set_style_radius(tr,14,0);
+    lv_obj_set_style_bg_color(tr,lv_color_hex(0xeef2f6),0);lv_obj_set_style_bg_opa(tr,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(tr,0,0);lv_obj_set_style_pad_all(tr,0,0);
+    lv_obj_clear_flag(tr,LV_OBJ_FLAG_SCROLLABLE);
+    int idx=g_seg_n;
+    lv_obj_t*sa=lv_btn_create(tr);lv_obj_set_size(sa,HW,TH-6);lv_obj_set_pos(sa,3,3);
+    lv_obj_set_style_radius(sa,11,0);lv_obj_set_style_shadow_opa(sa,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_width(sa,0,0);lv_obj_set_style_pad_all(sa,0,0);
+    lv_obj_add_event_cb(sa,cbSeg,LV_EVENT_CLICKED,(void*)(intptr_t)((idx<<1)|0));
+    lv_obj_t*la=lv_label_create(sa);lv_label_set_text(la,a);
+    lv_obj_set_style_text_font(la,&lv_font_montserrat_20,0);lv_obj_center(la);
+    lv_obj_t*sb=lv_btn_create(tr);lv_obj_set_size(sb,HW,TH-6);lv_obj_set_pos(sb,3+HW,3);
+    lv_obj_set_style_radius(sb,11,0);lv_obj_set_style_shadow_opa(sb,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_width(sb,0,0);lv_obj_set_style_pad_all(sb,0,0);
+    lv_obj_add_event_cb(sb,cbSeg,LV_EVENT_CLICKED,(void*)(intptr_t)((idx<<1)|1));
+    lv_obj_t*lb=lv_label_create(sb);lv_label_set_text(lb,b);
+    lv_obj_set_style_text_font(lb,&lv_font_montserrat_20,0);lv_obj_center(lb);
+    g_seg[idx].segA=sa;g_seg[idx].segB=sb;g_seg[idx].lblA=la;g_seg[idx].lblB=lb;
+    g_seg[idx].val=val;g_seg[idx].aIsTrue=aIsTrue;
+    g_seg_n++; segApplyStyle(g_seg[idx]);
+}
+
+// Gros stepper : label + [−] valeur [+] (réutilise cbSetBtn ids). Renvoie le label valeur.
+static lv_obj_t* mkBigStepRow(lv_obj_t*p,const char*k,int y,const char*v,int idn,int idup){
+    mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
+    lv_color_t bg=lv_color_hex(0xeef2f6); const int BW=64,BH=52;
+    // Bande contrôle commune 336..560 (alignée aux segmented/slider du dessous).
+    lv_obj_t*bd=lv_btn_create(p);lv_obj_set_size(bd,BW,BH);lv_obj_set_pos(bd,336,y);
+    lv_obj_set_style_bg_color(bd,bg,0);lv_obj_set_style_radius(bd,12,0);
+    lv_obj_set_style_shadow_opa(bd,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(bd,0,0);lv_obj_set_style_pad_all(bd,0,0);
+    lv_obj_add_event_cb(bd,cbSetBtn,LV_EVENT_CLICKED,(void*)(intptr_t)idn);
+    lv_obj_t*ld=lv_label_create(bd);lv_label_set_text(ld,"-");
+    lv_obj_set_style_text_color(ld,lv_color_hex(0x0f172a),0);lv_obj_set_style_text_font(ld,&lv_font_montserrat_24,0);lv_obj_center(ld);
+    lv_obj_t*vl=mkLblP(p,v,C_BRAND,&lv_font_montserrat_20,400,y+15);
+    lv_obj_set_width(vl,96);lv_obj_set_style_text_align(vl,LV_TEXT_ALIGN_CENTER,0);
+    lv_obj_t*bu=lv_btn_create(p);lv_obj_set_size(bu,BW,BH);lv_obj_set_pos(bu,496,y);
+    lv_obj_set_style_bg_color(bu,bg,0);lv_obj_set_style_radius(bu,12,0);
+    lv_obj_set_style_shadow_opa(bu,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(bu,0,0);lv_obj_set_style_pad_all(bu,0,0);
+    lv_obj_add_event_cb(bu,cbSetBtn,LV_EVENT_CLICKED,(void*)(intptr_t)idup);
+    lv_obj_t*lu=lv_label_create(bu);lv_label_set_text(lu,"+");
+    lv_obj_set_style_text_color(lu,lv_color_hex(0x0f172a),0);lv_obj_set_style_text_font(lu,&lv_font_montserrat_24,0);lv_obj_center(lu);
+    return vl;
+}
+
+// Slider brightness épais (gros knob) — réservé T4-S3.
+static void mkBigBrightRow(lv_obj_t*p,const char*k,int y,uint8_t val){
+    mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
+    lv_obj_t*sl=lv_slider_create(p);
+    lv_obj_set_size(sl,224,14);lv_obj_set_pos(sl,336,y+19);   // bande 336..560 (alignée seg/stepper)
+    lv_slider_set_range(sl,0,16);lv_slider_set_value(sl,val,LV_ANIM_OFF);
+    lv_obj_set_style_bg_color(sl,lv_color_hex(0xe5e7eb),LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(sl,LV_OPA_COVER,LV_PART_MAIN);lv_obj_set_style_radius(sl,7,LV_PART_MAIN);
+    lv_obj_set_style_bg_color(sl,C_BRAND,LV_PART_INDICATOR);lv_obj_set_style_bg_opa(sl,LV_OPA_COVER,LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(sl,C_BRAND,LV_PART_KNOB);
+    lv_obj_set_style_pad_all(sl,16,LV_PART_KNOB);     // knob ≈ 46 px → cible doigt
+    lv_obj_add_event_cb(sl,cbBrightSlider,LV_EVENT_ALL,NULL);
+}
+
+// ── Segmented MULTI-options (SOURCE 4, ICONS SIZE 3) ─────────────────────────
+static void segNApply(SegN &s){
+    for(int i=0;i<s.n;i++){
+        bool on=(*s.val==i);
+        lv_obj_set_style_bg_color(s.cell[i],C_BRAND,0);
+        lv_obj_set_style_bg_opa(s.cell[i],on?LV_OPA_COVER:LV_OPA_TRANSP,0);
+        lv_obj_set_style_text_color(s.lbl[i],on?lv_color_hex(0xffffff):lv_color_hex(0x4b5563),0);
+    }
+}
+static void updSegNs(){ for(int i=0;i<g_segn_n;i++) segNApply(g_segn[i]); }
+
+// tap sur une cellule : data = (segIndex<<3)|cell
+static void cbSegN(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    int d=(int)(intptr_t)lv_event_get_user_data(e);
+    int idx=d>>3, cell=d&7;
+    if(idx<0||idx>=g_segn_n)return;
+    SegN &s=g_segn[idx];
+    if(cell>=s.n || *s.val==cell)return;
+    *s.val=(uint8_t)cell; cfgSave();
+    if(s.kind==1){ for(int i=0;i<MAX_TRF;i++) lv_img_set_zoom(r_trf_img[i],kIconZoom[g_cfg.icon_sz]); } // ICONS
+    segNApply(s); updSetPage();
+}
+
+// Ligne label + segmented N options (cellules égales dans la bande 336..560).
+static void mkSegRowN(lv_obj_t*p,const char*k,int y,const char*const*opts,int n,uint8_t*val,uint8_t kind){
+    if(g_segn_n>=2||n>4)return;
+    mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
+    const int TW=224,TH=52,TX=600-40-TW,pad=3,cw=(TW-2*pad)/n;
+    lv_obj_t*tr=lv_obj_create(p);
+    lv_obj_set_size(tr,TW,TH);lv_obj_set_pos(tr,TX,y);
+    lv_obj_set_style_radius(tr,14,0);
+    lv_obj_set_style_bg_color(tr,lv_color_hex(0xeef2f6),0);lv_obj_set_style_bg_opa(tr,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(tr,0,0);lv_obj_set_style_pad_all(tr,0,0);
+    lv_obj_clear_flag(tr,LV_OBJ_FLAG_SCROLLABLE);
+    int idx=g_segn_n;
+    for(int i=0;i<n;i++){
+        lv_obj_t*c=lv_btn_create(tr);lv_obj_set_size(c,cw,TH-6);lv_obj_set_pos(c,pad+i*cw,3);
+        lv_obj_set_style_radius(c,11,0);lv_obj_set_style_shadow_opa(c,LV_OPA_TRANSP,0);
+        lv_obj_set_style_border_width(c,0,0);lv_obj_set_style_pad_all(c,0,0);
+        lv_obj_add_event_cb(c,cbSegN,LV_EVENT_CLICKED,(void*)(intptr_t)((idx<<3)|i));
+        lv_obj_t*l=lv_label_create(c);lv_label_set_text(l,opts[i]);
+        lv_obj_set_style_text_font(l,&lv_font_montserrat_16,0);lv_obj_center(l);
+        g_segn[idx].cell[i]=c; g_segn[idx].lbl[i]=l;
+    }
+    g_segn[idx].n=(uint8_t)n; g_segn[idx].val=val; g_segn[idx].kind=kind;
+    g_segn_n++; segNApply(g_segn[idx]);
+}
+
+// Ligne label + (valeur optionnelle) + gros bouton d'action (AIRCRAFT / MAINTENANCE).
+static lv_obj_t* mkBigBtnRow(lv_obj_t*p,const char*k,int y,const char*v,const char*btxt,lv_event_cb_t cb){
+    mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
+    lv_obj_t*vl=nullptr;
+    if(v&&v[0]){ vl=mkLblP(p,v,lv_color_hex(0x0f172a),&lv_font_montserrat_20,200,y+15);
+                 lv_obj_set_width(vl,150); }
+    const int BW=150,BH=52,BX=600-40-BW;
+    lv_obj_t*b=lv_btn_create(p);lv_obj_set_size(b,BW,BH);lv_obj_set_pos(b,BX,y);
+    lv_obj_set_style_bg_color(b,C_BRAND,0);lv_obj_set_style_radius(b,12,0);
+    lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_pad_all(b,0,0);
+    lv_obj_add_event_cb(b,cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,btxt);
+    lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_20,0);lv_obj_center(l);
+    return vl;
+}
+#endif // BOARD_T4S3
 
 // ── Maintenance overlay (Modèle 1 : hotspot + transfert vol) ──────────────────
 static lv_obj_t* g_maint_scanlist;   // fwd : annulé ici aussi (enfant de l'overlay)
@@ -3258,11 +3487,80 @@ static void _maint_ota_cb(lv_event_t*e){
 void mkMaintenanceOverlay(){
     if(g_maint_ov)return;
     g_maint_ov=lv_obj_create(lv_scr_act());
+#ifdef BOARD_T4S3
+    lv_obj_set_size(g_maint_ov,600,480);lv_obj_set_pos(g_maint_ov,0,UI_OY);   // plein écran T4
+#else
     lv_obj_set_size(g_maint_ov,480,480);lv_obj_set_pos(g_maint_ov,UI_OX,UI_OY);
+#endif
     lv_obj_set_style_bg_color(g_maint_ov,TBG(),0);lv_obj_set_style_bg_opa(g_maint_ov,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(g_maint_ov,0,0);lv_obj_set_style_radius(g_maint_ov,0,0);
     lv_obj_set_style_pad_all(g_maint_ov,0,0);lv_obj_clear_flag(g_maint_ov,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(g_maint_ov,LV_SCROLLBAR_MODE_OFF);
 
+#ifdef BOARD_T4S3
+    // ════ T4-S3 : Maintenance ré-architecturée — 3 groupes logiques, plein 600, tactile ════
+    //   HOTSPOT (SSID/Scan/Password/Test/Save)  ·  FLIGHTS (Last/Flights)  ·  FIRMWARE (Update)
+    auto mkMBtn=[&](const char*txt,int x,int y,int w,int h,lv_color_t col,lv_color_t tc,lv_event_cb_t cb)->lv_obj_t*{
+        lv_obj_t*b=lv_btn_create(g_maint_ov);lv_obj_set_size(b,w,h);lv_obj_set_pos(b,x,y);
+        lv_obj_set_style_bg_color(b,col,0);lv_obj_set_style_radius(b,10,0);
+        lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(b,0,0);
+        lv_obj_add_event_cb(b,cb,LV_EVENT_CLICKED,NULL);
+        lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,txt);
+        lv_obj_set_style_text_color(l,tc,0);lv_obj_set_style_text_font(l,&lv_font_montserrat_18,0);lv_obj_center(l);
+        return b;};
+    auto mkMHdr=[&](const char*txt,int y){
+        lv_obj_t*l=lv_label_create(g_maint_ov);lv_label_set_text(l,txt);
+        lv_obj_set_style_text_color(l,C_BRAND,0);lv_obj_set_style_text_font(l,&lv_font_montserrat_16,0);lv_obj_set_pos(l,30,y);
+        lv_obj_t*hl=lv_obj_create(g_maint_ov);lv_obj_set_size(hl,540,1);lv_obj_set_pos(hl,30,y+22);
+        lv_obj_set_style_bg_color(hl,C_BRAND,0);lv_obj_set_style_bg_opa(hl,LV_OPA_COVER,0);
+        lv_obj_set_style_border_width(hl,0,0);lv_obj_set_style_pad_all(hl,0,0);
+        lv_obj_clear_flag(hl,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);};
+    // Titre + Close (toujours accessible en haut à droite)
+    {lv_obj_t*tl=lv_label_create(g_maint_ov);lv_label_set_text(tl,"MAINTENANCE");
+     lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_22,0);
+     lv_obj_set_pos(tl,30,22);}
+    mkMBtn("Close",455,18,115,44,lv_color_hex(0x4b5563),lv_color_hex(0xffffff),_maint_close_cb);
+    // ── HOTSPOT ───────────────────────────────────────────────────────────────
+    mkMHdr("HOTSPOT (phone)",70);
+    g_maint_ssid_ta=lv_textarea_create(g_maint_ov);
+    lv_textarea_set_one_line(g_maint_ssid_ta,true);
+    lv_textarea_set_placeholder_text(g_maint_ssid_ta,"Hotspot SSID");
+    lv_textarea_set_text(g_maint_ssid_ta,g_hs_ssid);
+    lv_textarea_set_max_length(g_maint_ssid_ta,32);
+    lv_obj_set_size(g_maint_ssid_ta,395,46);lv_obj_set_pos(g_maint_ssid_ta,30,102);
+    lv_obj_add_event_cb(g_maint_ssid_ta,_maint_ta_cb,LV_EVENT_ALL,NULL);
+    mkMBtn("Scan",435,102,135,46,lv_color_hex(0x1f4068),lv_color_hex(0xffffff),_maint_scan_cb);
+    g_maint_pass_ta=lv_textarea_create(g_maint_ov);
+    lv_textarea_set_one_line(g_maint_pass_ta,true);
+    lv_textarea_set_password_mode(g_maint_pass_ta,true);
+    lv_textarea_set_placeholder_text(g_maint_pass_ta,"Password");
+    lv_textarea_set_text(g_maint_pass_ta,g_hs_pass);
+    lv_textarea_set_max_length(g_maint_pass_ta,63);
+    lv_obj_set_size(g_maint_pass_ta,540,46);lv_obj_set_pos(g_maint_pass_ta,30,156);
+    lv_obj_add_event_cb(g_maint_pass_ta,_maint_ta_cb,LV_EVENT_ALL,NULL);
+    mkMBtn("Test",30,210,260,46,C_CYAN,lv_color_hex(0x0d1117),_maint_test_cb);
+    mkMBtn("Save",310,210,260,46,C_GREEN,lv_color_hex(0xffffff),_maint_save_cb);
+    // ── FLIGHTS ───────────────────────────────────────────────────────────────
+    mkMHdr("FLIGHTS",268);
+    mkMBtn("Last flight",30,300,260,46,C_BRAND,lv_color_hex(0xffffff),_maint_upload_cb);
+    mkMBtn("Flights...",310,300,260,46,lv_color_hex(0x1f4068),lv_color_hex(0xffffff),_open_vols_cb);
+    // ── FIRMWARE ──────────────────────────────────────────────────────────────
+    mkMHdr("FIRMWARE",356);
+    g_maint_ota_armed=false;
+    mkMBtn("Update",30,388,260,46,C_BRAND,lv_color_hex(0xffffff),_maint_ota_cb);
+    g_maint_upd=lv_label_create(g_maint_ov);
+    lv_obj_set_style_text_font(g_maint_upd,&lv_font_montserrat_14,0);lv_obj_set_pos(g_maint_upd,310,390);
+    maintUpdAnnounce();
+    g_maint_wst=lv_label_create(g_maint_ov);
+    lv_obj_set_style_text_font(g_maint_wst,&lv_font_montserrat_14,0);lv_obj_set_pos(g_maint_wst,310,416);
+    maintWifiStatus();
+    // Clavier — bas d'écran, masqué par défaut, suit le textarea focalisé (au-dessus de lui).
+    g_maint_kb=lv_keyboard_create(g_maint_ov);
+    lv_obj_set_size(g_maint_kb,600,206);lv_obj_set_pos(g_maint_kb,0,258);
+    lv_keyboard_set_textarea(g_maint_kb,g_maint_ssid_ta);
+    lv_obj_add_flag(g_maint_kb,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_event_cb(g_maint_kb,_maint_kb_cb,LV_EVENT_ALL,NULL);
+#else
     lv_obj_t*tl=lv_label_create(g_maint_ov);lv_label_set_text(tl,"MAINTENANCE");
     lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_20,0);
     lv_obj_align(tl,LV_ALIGN_TOP_MID,0,34);
@@ -3377,7 +3675,9 @@ void mkMaintenanceOverlay(){
 #endif
     lv_keyboard_set_textarea(g_maint_kb,g_maint_ssid_ta);
     lv_obj_add_flag(g_maint_kb,LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_event_cb(g_maint_kb,_maint_kb_cb,LV_EVENT_ALL,NULL);}
+    lv_obj_add_event_cb(g_maint_kb,_maint_kb_cb,LV_EVENT_ALL,NULL);
+#endif
+}
 
 static void _open_maintenance_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
@@ -3390,17 +3690,52 @@ void buildSettingsPage(){
     // Force fond blanc (maquette AeroTrace)
     lv_obj_set_style_bg_color(p,lv_color_hex(0xffffff),0);
     lv_obj_set_style_bg_opa(p,LV_OPA_COVER,0);
+#ifdef BOARD_T4S3
+    // T4-S3 : la page Settings occupe TOUTE la largeur (600 px) au lieu du canvas
+    // 480 centré → fini les bandes noires latérales. On garde l'offset vertical -15
+    // (UI_OY) pour préserver le placement titre/footer (alignés TOP_MID → recentrés
+    // sur 600). Les autres pages/overlays restent en 480 centré (inchangés).
+    lv_obj_set_size(p,600,480);lv_obj_set_pos(p,0,UI_OY);
+    lv_obj_set_scrollbar_mode(p,LV_SCROLLBAR_MODE_OFF);
+#endif
 
-    // ── Logo A bleu + titre SETTINGS (compactés pour libérer de l'air aux rows)
+    // ── Logo A bleu + titre SETTINGS
     lv_obj_t*lA=lv_img_create(p);
     lv_img_set_src(lA,&img_logo_a);
+#ifdef BOARD_T4S3
+    // T4-S3 : en-tête sur UNE ligne, alignée à gauche (niveau V-FILTER, x=40) →
+    // logo + espace + « SETTINGS » → libère de la hauteur pour les rows tactiles.
+    lv_obj_align(lA,LV_ALIGN_TOP_LEFT,40,28);            // logo 56×56 (y=28 : compense l'offset page -15)
+    s_set_title=mkLblP(p,"SETTINGS / RADAR",lv_color_hex(0x0f172a),&lv_font_montserrat_24,40+56+16,42);
+    // Footer retiré sur T4 → le geste debug caché passe par un appui long sur le titre.
+    lv_obj_add_flag(s_set_title,LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_opa(s_set_title,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(s_set_title,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);
+    // Fine ligne bleue sous le titre (largeur ajustée au texte par setUpdTitle).
+    s_set_uline=lv_obj_create(p);
+    lv_obj_set_size(s_set_uline,120,2);lv_obj_set_pos(s_set_uline,40+56+16,74);
+    lv_obj_set_style_bg_color(s_set_uline,C_BRAND,0);lv_obj_set_style_bg_opa(s_set_uline,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(s_set_uline,0,0);lv_obj_set_style_pad_all(s_set_uline,0,0);
+    lv_obj_set_style_radius(s_set_uline,1,0);
+    lv_obj_clear_flag(s_set_uline,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+    setUpdTitle();   // recale la largeur de la ligne sur le texte courant
+#else
     lv_obj_align(lA,LV_ALIGN_TOP_MID,0,18);
     mkLbl(p,"SETTINGS",lv_color_hex(0x0f172a),&lv_font_montserrat_20,LV_ALIGN_TOP_MID,0,82);
+#endif
 
     // ── Sub-page containers (transparent, swipe vertical pour basculer)
-    for(int i=0;i<2;i++){
+    int sph=312, spy=108;
+#ifdef BOARD_T4S3
+    sph=350; spy=86;   // T4-S3 : en-tête 1 ligne → rows remontées, plus de hauteur tactile
+#endif
+    for(int i=0;i<S_NPG;i++){
         s_pg[i]=lv_obj_create(p);
-        lv_obj_set_size(s_pg[i],480,312);lv_obj_set_pos(s_pg[i],0,108);
+        int spw=480, spx=0;
+#ifdef BOARD_T4S3
+        spw=600; spx=0;   // T4-S3 : les 3 sous-pages exploitent toute la largeur (contrôles tactiles)
+#endif
+        lv_obj_set_size(s_pg[i],spw,sph);lv_obj_set_pos(s_pg[i],spx,spy);
         lv_obj_set_style_bg_opa(s_pg[i],LV_OPA_TRANSP,0);
         lv_obj_set_style_border_width(s_pg[i],0,0);lv_obj_set_style_pad_all(s_pg[i],0,0);
         lv_obj_clear_flag(s_pg[i],LV_OBJ_FLAG_SCROLLABLE);
@@ -3409,6 +3744,21 @@ void buildSettingsPage(){
         if(i!=0)lv_obj_add_flag(s_pg[i],LV_OBJ_FLAG_HIDDEN);}
 
     // ── Sub-page 0: RADAR + DISPLAY ──────────────────────────────────────────
+#ifdef BOARD_T4S3
+    // T4-S3 : page « fondamentaux » repensée pour les doigts (Christophe 2026-06-07).
+    // Supprimés : SCALE (réglé sur l'écran radar) + ALT (toujours en feet) → place gagnée.
+    // Gardés agrandis : V-FILTER (stepper), DIST/SPEED/THEME (segmented iOS), BRIGHTNESS (slider).
+    {lv_obj_t*sp=s_pg[0];
+    g_seg_n=0;                                  // reset registre segmented (rebuild safe)
+    s_scale_v=nullptr; s_dist_v=nullptr; s_alt_v=nullptr; s_spd_v=nullptr; s_theme_v=nullptr; s_bright_v=nullptr;
+    const int Y0=8, DY=72;                       // 5 rows de 52 px, pitch 72 (hauteur libérée par l'en-tête 1 ligne)
+    snprintf(b,16,"%dft",g_cfg.vfilt_ft);
+    s_vfilt_v=mkBigStepRow(sp,"V-FILTER",Y0+0*DY,b,2,3);
+    mkSegRow(sp,"DISTANCE",Y0+1*DY,"NM","KM",   &g_cfg.dist_nm,true);   // NM ⇔ dist_nm=true
+    mkSegRow(sp,"SPEED",   Y0+2*DY,"kt","km/h", &g_cfg.spd_kt, true);   // kt ⇔ spd_kt=true
+    mkBigBrightRow(sp,"BRIGHTNESS",Y0+3*DY,g_cfg.brightness);
+    mkSegRow(sp,"THEME",   Y0+4*DY,"LIGHT","DARK",&g_cfg.dark, false);} // LIGHT ⇔ dark=false
+#else
     {lv_obj_t*sp=s_pg[0];
     mkSetSection(sp,"RADAR",0);
     snprintf(b,16,"%dnm",g_cfg.scale_nm); s_scale_v =mkSetRow(sp,"SCALE",   36,b,0,1);
@@ -3419,8 +3769,21 @@ void buildSettingsPage(){
     mkSetSection(sp,"DISPLAY",172);
     s_bright_v=mkSetSliderRow(sp,"BRIGHTNESS",208,g_cfg.brightness);
     s_theme_v=mkSetRow(sp,"THEME",234,g_cfg.dark?"DARK":"LIGHT",12,13);}
+#endif
 
-    // ── Sub-page 1: TRAFFIC + SYSTEM ─────────────────────────────────────────
+    // ── Sub-page 1: TRAFFIC ──────────────────────────────────────────────────
+#ifdef BOARD_T4S3
+    // T4-S3 : tout en segmented tactile (SOURCE 4 / ICONS 3 / toggles ON-OFF).
+    {lv_obj_t*sp=s_pg[1];
+    g_segn_n=0;                 // reset registre segmented multi-options (rebuild safe)
+    s_src_v=nullptr; s_grnd_v=nullptr; s_icon_sz_v=nullptr; s_aip_v=nullptr; s_heli_v=nullptr;
+    const int Y0=8, DY=72;
+    mkSegRowN(sp,"SOURCE",   Y0+0*DY,kSrcNames,4,&g_cfg.trf_src,0);
+    mkSegRow (sp,"GROUNDED", Y0+1*DY,"OFF","ON",&g_cfg.show_grnd,false);
+    mkSegRowN(sp,"ICONS",    Y0+2*DY,kIconSzNames,3,&g_cfg.icon_sz,1);
+    mkSegRow (sp,"AIP",      Y0+3*DY,"OFF","ON",&g_cfg.aip_en,false);   // tap ignoré si NO DATA
+    mkSegRow (sp,"HELIPORT", Y0+4*DY,"OFF","ON",&g_cfg.ad_heli,false);}
+#else
     {lv_obj_t*sp=s_pg[1];
     mkSetSection(sp,"TRAFFIC",0);
     s_src_v    =mkSetRow(sp,"SOURCE",   36,kSrcNames[g_cfg.trf_src&3],10,11);
@@ -3428,18 +3791,68 @@ void buildSettingsPage(){
     s_icon_sz_v=mkSetRow(sp,"ICONS SIZE",88,kIconSzNames[g_cfg.icon_sz],16,17);
     {const char*aip_v=!g_aip_loaded?"NO DATA":g_cfg.aip_en?"ON":"OFF";
     s_aip_v=mkSetRow(sp,"AIP",114,aip_v,20,21);}
-    s_heli_v=mkSetRow(sp,"HELIPORT",140,g_cfg.ad_heli?"ON":"OFF",22,23);
-    mkSetSection(sp,"SYSTEM",172);
+    s_heli_v=mkSetRow(sp,"HELIPORT",140,g_cfg.ad_heli?"ON":"OFF",22,23);}
+#endif
+
+    // ── Sub-page 2: SYSTEM (+ ABOUT : versions & batteries, live BLE) ─────────
+#ifdef BOARD_T4S3
+    // T4-S3 : actions en gros boutons + toggle ; ABOUT = bloc info lisible (non tactile).
+    {lv_obj_t*sp=s_pg[2];
+    const lv_color_t kcol=lv_color_hex(0x4b5563);
+    s_wifi_v=nullptr;
     {char t[20];snprintf(t,20,"%s %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");
-    s_ac_v=mkSetRowBtn(sp,"AIRCRAFT",208,t,_open_aircraft_cb);}
-    s_wifi_v=mkSetRow(sp,"WIFI",234,g_cfg.wifi_en?"ON":"OFF",18,19);
+     s_ac_v=mkBigBtnRow(sp,"AIRCRAFT",4,t,"EDIT",_open_aircraft_cb);}
+    mkSegRow(sp,"WIFI AP",64,"OFF","ON",&g_cfg.wifi_en,false);
+    mkBigBtnRow(sp,"MAINTENANCE",124,"","OPEN",_open_maintenance_cb);
+    // ABOUT — info lisible (font 18), pas de contrôle tactile
+    mkLblP(sp,"ABOUT",C_BRAND,&lv_font_montserrat_16,40,186);
+    {lv_obj_t*hl=lv_obj_create(sp);lv_obj_set_size(hl,520,1);lv_obj_set_pos(hl,40,208);
+     lv_obj_set_style_bg_color(hl,C_BRAND,0);lv_obj_set_style_bg_opa(hl,LV_OPA_COVER,0);
+     lv_obj_set_style_border_width(hl,0,0);lv_obj_set_style_pad_all(hl,0,0);
+     lv_obj_clear_flag(hl,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);}
+    mkLblP(sp,"AT-VIEW",kcol,&lv_font_montserrat_18,40,216);
+    mkLblP(sp,"v" VIEW_VERSION "  " __DATE__,C_BRAND,&lv_font_montserrat_18,300,216);
+    mkLblP(sp,"AT-CORE",kcol,&lv_font_montserrat_18,40,242);
+    s_sys_atcver=mkLblP(sp,"v--",C_BRAND,&lv_font_montserrat_18,300,242);
+    mkLblP(sp,"AT-CORE BATT",kcol,&lv_font_montserrat_18,40,268);
+    s_sys_atcbat=mkLblP(sp,"---%",C_BRAND,&lv_font_montserrat_18,300,268);
+    mkLblP(sp,"AT-VIEW BATT",kcol,&lv_font_montserrat_18,40,294);
+    mkLblP(sp,"N/A (future)",TGREY(),&lv_font_montserrat_18,300,294);
     {char sd_str[12];
      if(g_sd_ok)snprintf(sd_str,12,"%u GB",g_sd_gb);else strlcpy(sd_str,"NO CARD",12);
-     mkLblP(sp,"SDCARD (AT-CORE)",lv_color_hex(0x4b5563),&lv_font_montserrat_14,55,260);
-     s_sd_v=mkLblP(sp,sd_str,g_sd_ok?C_GREEN:lv_color_hex(0x4b5563),&lv_font_montserrat_14,295,260);}
-    mkSetRowBtn(sp,"MAINTENANCE",286,"",_open_maintenance_cb);}
+     mkLblP(sp,"SD CARD",kcol,&lv_font_montserrat_18,40,320);
+     s_sd_v=mkLblP(sp,sd_str,g_sd_ok?C_GREEN:kcol,&lv_font_montserrat_18,300,320);}}
+#else
+    {lv_obj_t*sp=s_pg[2];
+    const lv_color_t kcol=lv_color_hex(0x4b5563);
+    mkSetSection(sp,"SYSTEM",0);
+    {char t[20];snprintf(t,20,"%s %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");
+    s_ac_v=mkSetRowBtn(sp,"AIRCRAFT",36,t,_open_aircraft_cb);}
+    s_wifi_v=mkSetRow(sp,"WIFI",62,g_cfg.wifi_en?"ON":"OFF",18,19);
+    mkSetRowBtn(sp,"MAINTENANCE",88,"",_open_maintenance_cb);
+    {char sd_str[12];
+     if(g_sd_ok)snprintf(sd_str,12,"%u GB",g_sd_gb);else strlcpy(sd_str,"NO CARD",12);
+     mkLblP(sp,"SDCARD (AT-CORE)",kcol,&lv_font_montserrat_14,55,114);
+     s_sd_v=mkLblP(sp,sd_str,g_sd_ok?C_GREEN:kcol,&lv_font_montserrat_14,295,114);}
+    // ABOUT : versions + batteries (ATV batterie = futur, pas de capteur aujourd'hui)
+    mkSetSection(sp,"ABOUT",150);
+    mkLblP(sp,"AT-VIEW",kcol,&lv_font_montserrat_14,55,186);
+    mkLblP(sp,"v" VIEW_VERSION "  " __DATE__,C_BRAND,&lv_font_montserrat_14,180,186);
+    mkLblP(sp,"AT-CORE",kcol,&lv_font_montserrat_14,55,212);
+    s_sys_atcver=mkLblP(sp,"v--",C_BRAND,&lv_font_montserrat_14,180,212);
+    mkLblP(sp,"AT-CORE BATT",kcol,&lv_font_montserrat_14,55,238);
+    s_sys_atcbat=mkLblP(sp,"---%",C_BRAND,&lv_font_montserrat_14,180,238);
+    mkLblP(sp,"AT-VIEW BATT",kcol,&lv_font_montserrat_14,55,264);
+    mkLblP(sp,"N/A (future)",TGREY(),&lv_font_montserrat_14,180,264);}
+#endif
 
-    // ── Footer (toujours visible) : logo AT-VIEW + battery + version
+    // ── Footer
+#ifdef BOARD_T4S3
+    // T4-S3 : pas de footer — versions & batteries vivent dans la page System,
+    // le geste debug caché passe par le titre, l'oubli de pairing par la page #01.
+    (void)0;
+#else
+    // logo AT-VIEW + battery + version
     lv_obj_t*lVw=lv_img_create(p);
     lv_img_set_src(lVw,&img_logo_atview);
     lv_obj_align(lVw,LV_ALIGN_TOP_MID,0,422);
@@ -3452,7 +3865,9 @@ void buildSettingsPage(){
     lv_obj_t*ver=mkLbl(p,VIEW_VER_STR,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,464);
     lv_obj_add_flag(ver,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(ver,LV_OPA_TRANSP,0);
-    lv_obj_add_event_cb(ver,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);}
+    lv_obj_add_event_cb(ver,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);
+#endif
+    }
 
 // ── Debug page (hidden) ───────────────────────────────────────────────────────
 void buildDebugPage(){
@@ -3475,7 +3890,10 @@ void buildDebugPage(){
 void createSwipeHandlers(){
     for(int i=0;i<NUM_PAGES;i++)
         lv_obj_add_event_cb(g_pages[i],swipeCb,LV_EVENT_ALL,NULL);
-    lv_obj_add_event_cb(g_dbgPage,swipeCb,LV_EVENT_ALL,NULL);}
+    lv_obj_add_event_cb(g_dbgPage,swipeCb,LV_EVENT_ALL,NULL);
+    // Le chip Start/End flight vit sur lv_layer_top et « bubble » ses appuis ici →
+    // un swipe démarré sur le chip navigue quand même (swipeCb garde les overlays).
+    lv_obj_add_event_cb(lv_layer_top(),swipeCb,LV_EVENT_ALL,NULL);}
 
 // ── Dead reckoning — radar blips (called every loop for smooth movement) ──────
 // Traffic e.spd_kt = knots (AT-CORE clé "s"). Own g_status.spd = km/h (AT-CORE
@@ -3630,6 +4048,7 @@ static void chipShow(uint8_t kind){   // 1=Start flight 2=End flight
     lv_obj_set_style_bg_color(g_startchip,kind==2?C_RED:C_BRAND,0);lv_obj_set_style_radius(g_startchip,24,0);
     lv_obj_set_style_border_width(g_startchip,0,0);lv_obj_set_style_shadow_opa(g_startchip,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(g_startchip,kind==2?_endflight_cb:_startflight_cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_add_flag(g_startchip,LV_OBJ_FLAG_EVENT_BUBBLE);   // swipe doit passer même en partant du chip
     lv_obj_t*l=lv_label_create(g_startchip);lv_label_set_text(l,kind==2?"End flight":"Start flight");
     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
     lv_obj_set_style_text_font(l,&CHIP_FONT,0);lv_obj_center(l);
@@ -3785,6 +4204,13 @@ void updateAllPages(){
             lv_label_set_text(r_p0_atc,ab);
         }
     }
+    // Page System (T4) : version AT-CORE live (label « AT-CORE » → valeur « vN date »)
+    if(s_sys_atcver){
+        char ab[40];
+        if(g_status.valid&&g_status.fwv) snprintf(ab,sizeof(ab),"v%d  %s",g_status.fwv,g_status.fwd);
+        else strcpy(ab,"v--");
+        lv_label_set_text(s_sys_atcver,ab);
+    }
     // Annonce de MAJ firmware + état WiFi → page Maintenance (live tant qu'ouverte)
     if(g_maint_ov){ maintUpdAnnounce(); maintWifiStatus(); }
     // Refresh live de la ligne diagnostique DB sur page #02 (si auth en cours)
@@ -3832,6 +4258,14 @@ void updateAllPages(){
         bat_txt=b;
         if(r_p0_bat){lv_label_set_text(r_p0_bat,bat_txt);lv_obj_set_style_text_color(r_p0_bat,bat_col,0);}
         if(r_p2_bat){lv_label_set_text(r_p2_bat,bat_txt);lv_obj_set_style_text_color(r_p2_bat,bat_col,0);}
+        // Page System (T4) : batterie AT-CORE en % seul (le label « AT-CORE BATT » est à côté)
+        if(s_sys_atcbat){
+            char sb[16];
+            if(g_status.valid&&g_status.bat>=0) snprintf(sb,16,"%d%%%s",g_status.bat,g_status.charging?" " LV_SYMBOL_CHARGE:"");
+            else strcpy(sb,"---%");
+            lv_label_set_text(s_sys_atcbat,sb);
+            lv_obj_set_style_text_color(s_sys_atcbat,bat_col,0);
+        }
     }
     // Pilote — trigramme ligne 1, prénom+nom ligne 2
     if(r_sess_trig&&r_sess_name){

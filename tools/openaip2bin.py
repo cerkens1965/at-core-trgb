@@ -46,6 +46,25 @@ COUNTRY_NAMES = {
     "ES": "spain",
     "IT": "italy",
     "AT": "austria",
+    # Route Islande (2026-06) + voisins
+    "DK": "denmark",
+    "NO": "norway",
+    "IE": "ireland",
+    "IS": "iceland",
+    "FO": "faroe",
+    "GG": "guernsey",
+    # Reste du set committé (sinon noms de fichiers en code-court → doublons)
+    "HR": "croatia",
+    "CZ": "czechia",
+    "FI": "finland",
+    "GR": "greece",
+    "HU": "hungary",
+    "PL": "poland",
+    "PT": "portugal",
+    "RO": "romania",
+    "SE": "sweden",
+    "SI": "slovenia",
+    "SK": "slovakia",
 }
 
 # Airspace type IDs to include
@@ -228,17 +247,18 @@ def write_ctr_bin(path: str, ctrs: list[dict]):
 
 def write_ad_bin(path: str, ads: list[dict]):
     """
-    Aerodromes binary format (little-endian):
-      [0-3]  magic "ADEP"
+    Aerodromes binary format v2 (little-endian) — DOIT matcher _aipLoadAdFile (firmware) :
+      [0-3]  magic "ADP2"
       [4-5]  count uint16
-      Per aerodrome (12 bytes fixed):
-        [0-3]  icao[4]  null-padded ASCII
-        [4-7]  lat_e6   int32
-        [8-11] lon_e6   int32
+      Per aerodrome (13 bytes fixed):
+        [0-3]   icao[4]  null-padded ASCII
+        [4-7]   lat_e6   int32
+        [8-11]  lon_e6   int32
+        [12]    type_id  uint8   (OpenAIP : 7=heliport, 10=hydrobase → masqués si ad_heli=OFF)
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "wb") as f:
-        f.write(b"ADEP")
+        f.write(b"ADP2")
         f.write(struct.pack("<H", len(ads)))
         for ad in ads:
             icao = ad["icao"].encode("ascii", errors="replace")[:4].ljust(4, b"\x00")
@@ -246,6 +266,7 @@ def write_ad_bin(path: str, ads: list[dict]):
             f.write(struct.pack("<ii",
                 round(ad["lat"] * 1_000_000),
                 round(ad["lon"] * 1_000_000)))
+            f.write(struct.pack("B", ad.get("type_id", 0) & 0xFF))
     sz = os.path.getsize(path)
     print(f"  → {os.path.basename(path)}  {len(ads)} aerodromes  {sz}B")
 
@@ -294,15 +315,12 @@ def process_aerodromes(country_codes: list, api_key: str, out_dir: str, dump_dir
         print(f"  {cc}:")
         raw = fetch_all("airports", api_key, {"country": cc}, dump_dir)
         for item in raw:
-            # Exclude heliports and hydrobases
-            if _type_id(item.get("type", {})) in EXCLUDE_AP_TYPES:
-                continue
+            # On garde TOUS les types (y compris heliport 7 / hydrobase 10) avec leur
+            # type_id : c'est le firmware qui les masque via le toggle HELIPORT (ad_heli).
+            tid = _type_id(item.get("type", {}))
             # Require standard 4-letter ICAO designator
             icao = (item.get("icaoCode") or item.get("icao") or "").strip().upper()
             if len(icao) != 4 or not icao.isalpha() or icao in seen_icao:
-                continue
-            # Name-based heliport safety net
-            if any(w in (item.get("name","")).upper() for w in HELI_WORDS):
                 continue
             # Extract coordinates from GeoJSON Point geometry
             geo  = item.get("geometry", {})
@@ -310,7 +328,8 @@ def process_aerodromes(country_codes: list, api_key: str, out_dir: str, dump_dir
             if not coords or len(coords) < 2:
                 continue
             seen_icao.add(icao)
-            all_ads.append({"icao": icao, "lat": float(coords[1]), "lon": float(coords[0])})
+            all_ads.append({"icao": icao, "lat": float(coords[1]), "lon": float(coords[0]),
+                            "type_id": tid if tid >= 0 else 0})
         time.sleep(RATE_S)
 
     write_ad_bin(os.path.join(out_dir, "aerodromes.bin"), all_ads)
@@ -343,14 +362,15 @@ def verify_ad_bin(path: str):
     """Quick sanity-read of generated aerodromes bin."""
     with open(path, "rb") as f:
         magic = f.read(4)
-        if magic != b"ADEP":
+        if magic != b"ADP2":
             print(f"  VERIFY FAIL: bad magic {magic!r}")
             return
         count = struct.unpack("<H", f.read(2))[0]
         icao  = f.read(4).decode(errors="replace").rstrip("\x00")
         lat_e6, lon_e6 = struct.unpack("<ii", f.read(8))
+        tid   = struct.unpack("B", f.read(1))[0]
         print(f"  VERIFY OK: {count} aerodromes, first={icao} "
-              f"lat={lat_e6/1e6:.4f} lon={lon_e6/1e6:.4f}")
+              f"lat={lat_e6/1e6:.4f} lon={lon_e6/1e6:.4f} type={tid}")
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
