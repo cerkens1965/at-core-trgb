@@ -43,8 +43,10 @@
 //   v3 : mouvement trafic lissé (base DR par avion → fin du surplace/recul/bond 1 Hz).
 //   v4 : easing position trafic (2ᵉ couche → recalage SafeSky invisible entre 2 fixes).
 //   v5 : glyphe zoom +/- agrandi (montserrat_40) — bien visible dans le bouton 64px.
-#define VIEW_VERSION  "5"
-#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v5  Jun  8 2026"
+//   v6 : chip "Start flight" dispo après un vol terminé (ph≠UPLOADING) — débloque le
+//        cas immobile+sans fix où ni START ni STOP n'apparaissaient (impasse multi-leg).
+#define VIEW_VERSION  "6"
+#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v6  Jun  8 2026"
 
 #ifdef BOARD_T4S3
 LilyGo_Class amoled;
@@ -4150,7 +4152,14 @@ void updFlightState(){
 
     // Chip Start flight (au sol) / End flight (en vol) : vue radar, aucun overlay ouvert.
     // "End flight" force l'arrêt immédiat (stop_flight) — fin de vol quoiqu'il arrive.
-    bool base = g_connected && ph==0 && g_page==1   // page radar
+    // (v6) Start flight dispo aussi APRÈS un vol terminé, pas seulement en FLYING :
+    // sans ça, immobile + sans fix après un leg (escale, GPS perdu sous hangar) → ni
+    // START ni STOP → impossible de relancer un vol depuis l'écran (l'auto-restart S3
+    // exige taxi >15 kt + fix). On autorise tous les états SAUF UPLOADING(3) en cours
+    // (FLYING0/ENDED1/CLOSED2/UPLOADED4/FAIL5). Le handler S3 start_flight régénère le
+    // fid + repasse FLYING depuis n'importe quel état terminal.
+    bool fltIdle = (ph != 3);
+    bool base = g_connected && fltIdle && g_page==1   // page radar
               && !g_up_ov && !g_stop_ov && !g_fb_ov && !g_maint_ov && !g_vols_ov
               && !g_pair_ov && !g_auth_ov;
     // Au sol : bouton "Start flight" (radar vide). En vol : petit panneau STOP discret
