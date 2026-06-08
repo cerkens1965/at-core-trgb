@@ -125,8 +125,8 @@ struct DebugData    {
 static const uint8_t kScaleOpts[]={1,2,4,8,10,20,40};
 static const char*   kSrcNames[] ={"SSKY","FLRM","ADSB","ALL"};
 static const char*   kIconSzNames[]={"S","M","L"};
-static const uint16_t kIconZoom[]={171,213,256};  // zoom for 32/40/48 px from 48px base
-static const int8_t  kIconHalf[]={16,20,24};
+static const uint16_t kIconZoom[]={213,256,299};  // zoom for 40/48/56 px from 48px base (échelle +1 cran 2026-06-08)
+static const int8_t  kIconHalf[]={20,24,28};
 struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd,wifi_en,aip_en,ad_heli,spd_kt; int16_t vfilt_ft; uint8_t icon_sz; };
 static CfgData     g_cfg={4,16,3,true,true,true,true,false,true,false,2000,2};
 // Segmented toggle (UI Settings T4-S3). Types + registres déclarés
