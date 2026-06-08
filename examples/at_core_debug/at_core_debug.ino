@@ -42,8 +42,9 @@
 //   v2 : icônes trafic L ×1.5 (84px) + immat/Δalt agrandis + vecteur 1-min à l'échelle.
 //   v3 : mouvement trafic lissé (base DR par avion → fin du surplace/recul/bond 1 Hz).
 //   v4 : easing position trafic (2ᵉ couche → recalage SafeSky invisible entre 2 fixes).
-#define VIEW_VERSION  "4"
-#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v4  Jun  8 2026"
+//   v5 : glyphe zoom +/- agrandi (montserrat_40) — bien visible dans le bouton 64px.
+#define VIEW_VERSION  "5"
+#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v5  Jun  8 2026"
 
 #ifdef BOARD_T4S3
 LilyGo_Class amoled;
@@ -274,6 +275,7 @@ static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE
 #define HDG_H  36
 #define HDG_FONT lv_font_montserrat_20
 #define ZOOM_SZ 64          // boutons zoom +/- ergonomie vol (2026-06-05) — coins droits opposés
+#define ZOOM_FONT lv_font_montserrat_40   // glyphe +/- bien visible dans le bouton 64px (2026-06-08)
 #define CHIP_W 200          // chip Start/End flight agrandi
 #define CHIP_H 56
 #define CHIP_FONT lv_font_montserrat_20
@@ -295,6 +297,7 @@ static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE
 #define HDG_H  28
 #define HDG_FONT lv_font_montserrat_16
 #define ZOOM_SZ 34
+#define ZOOM_FONT lv_font_montserrat_20   // T-RGB : bouton 34px → glyphe inchangé
 #define CHIP_W 170
 #define CHIP_H 48
 #define CHIP_FONT lv_font_montserrat_16
@@ -2699,7 +2702,7 @@ void buildRadarPage(){
         lv_obj_clear_flag(b,LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_t* lab=lv_label_create(b);lv_label_set_text(lab,sym);
         lv_obj_set_style_text_color(lab,TFG(),0);
-        lv_obj_set_style_text_font(lab,&lv_font_montserrat_20,0);
+        lv_obj_set_style_text_font(lab,&ZOOM_FONT,0);
         lv_obj_center(lab);
         lv_obj_add_event_cb(b,cbSetBtn,LV_EVENT_CLICKED,(void*)id);
     };
