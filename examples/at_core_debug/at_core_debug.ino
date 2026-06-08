@@ -33,9 +33,17 @@
 #include "img_flarm.h"
 #include "img_logos.h"
 
-// Version AT-VIEW + date de build (auto via __DATE__) — bumper VIEW_VERSION à chaque release.
-#define VIEW_VERSION  "1"
-#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v1  Jun  3 2026"
+// ── Version AT-VIEW (T-RGB / T4-S3) ─────────────────────────────────────────────
+// Entier incrémenté À CHAQUE flash/release (même discipline que FW_VERSION côté
+// AT-CORE). Affiché partout (Welcome, Auth, System) en "ATV v<N>  <date build>" :
+// la date (__DATE__) distingue 2 builds du même jour, le numéro suit les releases.
+// >>> RÈGLE : bumper VIEW_VERSION d'UN cran à chaque commit qu'on flashe sur l'écran. <<<
+//   v1 : socle UI radar (était figé ici malgré ~10 itérations — d'où ce versioning).
+//   v2 : icônes trafic L ×1.5 (84px) + immat/Δalt agrandis + vecteur 1-min à l'échelle.
+//   v3 : mouvement trafic lissé (base DR par avion → fin du surplace/recul/bond 1 Hz).
+//   v4 : easing position trafic (2ᵉ couche → recalage SafeSky invisible entre 2 fixes).
+#define VIEW_VERSION  "4"
+#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v4  Jun  8 2026"
 
 #ifdef BOARD_T4S3
 LilyGo_Class amoled;
@@ -113,7 +121,7 @@ struct StatusData {
     };
 struct FlightData  { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
-struct TrafficEntry { char cs[9]; int dist_m,alt_m,bear_deg,hdg_deg,spd_kt,type; bool visible; };
+struct TrafficEntry { char cs[9]; int dist_m,alt_m,bear_deg,hdg_deg,spd_kt,type; bool visible; uint32_t base_ms; float disp_ex,disp_ey; bool disp_init; };
 struct TrafficData  { TrafficEntry t[MAX_TRF]; int count; bool valid; uint32_t recv_ms; };
 struct AlertData    { bool co,gforce,rpm,traffic; char msg[64]; bool valid; };
 struct DebugData    {
@@ -635,15 +643,32 @@ void parseFlight(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_flight.rpm=d["rpm"]|0;g_flight.phase=d["phase"]|0;
     g_flight.valid=true;g_dataUpdated=true;}
 void parseTraffic(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
-    g_traffic.count=min((int)(d["count"]|0),MAX_TRF);
-    for(int i=0;i<g_traffic.count;i++){
-        strlcpy(g_traffic.t[i].cs,d["t"][i]["cs"]|"???",9);
-        g_traffic.t[i].dist_m=d["t"][i]["d"]|0;g_traffic.t[i].alt_m=d["t"][i]["a"]|0;
-        g_traffic.t[i].bear_deg=d["t"][i]["b"]|0;g_traffic.t[i].hdg_deg=d["t"][i]["c"]|0;
-        g_traffic.t[i].spd_kt=d["t"][i]["s"]|100;
-        g_traffic.t[i].visible=d["t"][i]["v"]|true;
-        g_traffic.t[i].type=d["t"][i]["tp"]|0;}
-    g_traffic.valid=true;g_traffic.recv_ms=millis();g_dataUpdated=true;}
+    // Continuité DR + lissage d'un paquet 1 Hz à l'autre (anti surplace/bond) : l'AT-CORE
+    // renvoie le MÊME beacon SafeSky à 1 Hz (~5 s entre 2 vrais fixes). On snapshote l'état
+    // AFFICHÉ courant (base_ms + position lissée disp_ex/ey) AVANT d'écraser, et on le ré-
+    // injecte par callsign : la DR ne se ré-ancre (base_ms=now) QUE si le fix a vraiment
+    // changé (dist/bear/hdg/spd différents, comparaison exacte), et la position lissée est
+    // TOUJOURS reprise → mouvement continu (matché sur cs, robuste au tri distance).
+    static TrafficEntry prev[MAX_TRF]; int prevN=g_traffic.count;
+    for(int k=0;k<prevN;k++) prev[k]=g_traffic.t[k];
+    uint32_t now=millis();
+    int n=min((int)(d["count"]|0),MAX_TRF);
+    for(int i=0;i<n;i++){
+        TrafficEntry e={};
+        strlcpy(e.cs,d["t"][i]["cs"]|"???",9);
+        e.dist_m=d["t"][i]["d"]|0;e.alt_m=d["t"][i]["a"]|0;
+        e.bear_deg=d["t"][i]["b"]|0;e.hdg_deg=d["t"][i]["c"]|0;
+        e.spd_kt=d["t"][i]["s"]|100;e.visible=d["t"][i]["v"]|true;e.type=d["t"][i]["tp"]|0;
+        e.base_ms=now;
+        for(int k=0;k<prevN;k++) if(strcmp(prev[k].cs,e.cs)==0){
+            e.disp_ex=prev[k].disp_ex;e.disp_ey=prev[k].disp_ey;e.disp_init=prev[k].disp_init; // position lissée reprise
+            if(prev[k].dist_m==e.dist_m&&prev[k].bear_deg==e.bear_deg&&
+               prev[k].hdg_deg==e.hdg_deg&&prev[k].spd_kt==e.spd_kt)
+                e.base_ms=prev[k].base_ms;     // même fix → la DR continue (pas de re-snap)
+            break;}
+        g_traffic.t[i]=e;}
+    g_traffic.count=n;
+    g_traffic.valid=true;g_traffic.recv_ms=now;g_dataUpdated=true;}
 void parseAlerts(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_alert.co=d["co"]|false;g_alert.gforce=d["gf"]|false;
     g_alert.rpm=d["rpm"]|false;g_alert.traffic=d["tfc"]|false;
@@ -3908,17 +3933,22 @@ void updateRadarDR(){
     // → trafic EFFACÉ. Retour ss=true → couleurs normales immédiates.
     bool ssStale = !g_status.ss_ok;
     bool ssDead  = ssStale && g_ss_lost_ms && (millis()-g_ss_lost_ms > 20000);
-    // Cap d'extrapolation 10→30 s : couvre la phase grise (le trafic "suit sa
-    // route" pendant la perte au lieu de se figer).
-    float dt=fminf((float)(millis()-g_traffic.recv_ms)/1000.0f,30.0f);
+    // dt + compensation du mouvement propre sont désormais PAR AVION (base_ms par
+    // entrée, posé dans parseTraffic) : la DR ne se réinitialise plus à chaque paquet
+    // BLE 1 Hz, elle court depuis le dernier VRAI fix SafeSky de chaque avion → fin du
+    // surplace/recul. Cap d'extrapolation 30 s (phase grise : le trafic suit sa route).
+    uint32_t now=millis();
     float our_spd_ms=(float)g_status.spd/3.6f;   // km/h → m/s (own, pas knots)
     float our_rad=(float)radarEffHdg()*(float)M_PI/180.0f;
-    float our_dx=our_spd_ms*dt*sinf(our_rad);
-    float our_dy=our_spd_ms*dt*cosf(our_rad);
     char b[32];
     for(int i=0;i<MAX_TRF;i++){
         if(i<g_traffic.count){
             TrafficEntry&e=g_traffic.t[i];
+            // dt PROPRE à cet avion : depuis son dernier vrai fix (base_ms), pas depuis
+            // le dernier paquet BLE → extrapolation continue, sans re-snap chaque seconde.
+            float dt=fminf((float)(now-e.base_ms)/1000.0f,30.0f);
+            float our_dx=our_spd_ms*dt*sinf(our_rad);
+            float our_dy=our_spd_ms*dt*cosf(our_rad);
             // Filtre ground : masque les aéronefs à vitesse < 20 kt (taxi/stationnement).
             // Seuil 20 kt valable si AT-CORE fournit le champ "s" (spd_kt) dans le JSON TRAFFIC.
             // Si "s" absent, défaut = 100 kt → l'avion reste visible même filtré. Normal.
@@ -3936,6 +3966,16 @@ void updateRadarDR(){
             float trf_rad=(float)e.hdg_deg*(float)M_PI/180.0f;
             ex+=trf_spd_ms*dt*sinf(trf_rad)-our_dx;
             ny+=trf_spd_ms*dt*cosf(trf_rad)-our_dy;
+            // Lissage (2ᵉ couche) : on GARDE la prédiction DR (ex,ny déjà avancés) mais on
+            // EASE le saut de recalage au ré-accrochage au lieu de le snapper → recalage
+            // invisible. Filtre exponentiel @5 Hz (200 ms) ; latence en régime stable
+            // négligeable (delta DR sub-pixel/frame). Au-delà de 1.5 km d'écart (réapparition
+            // d'un avion masqué, outlier SafeSky) on snap pour éviter un long glissement.
+            const float SM_A=0.45f;
+            float gx=ex-e.disp_ex, gy=ny-e.disp_ey;
+            if(!e.disp_init || gx*gx+gy*gy>1500.0f*1500.0f){ e.disp_ex=ex; e.disp_ey=ny; e.disp_init=true; }
+            else { e.disp_ex+=gx*SM_A; e.disp_ey+=gy*SM_A; }
+            ex=e.disp_ex; ny=e.disp_ey;
             // Back to polar
             float dr_dist=sqrtf(ex*ex+ny*ny);
             // Sorti de la zone visible après extrapolation DR → MASQUÉ. La limite
@@ -3971,12 +4011,14 @@ void updateRadarDR(){
             lv_obj_set_style_img_recolor(r_trf_img[i],col,0);
             lv_obj_clear_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);
             float px_per_nm=(float)RAD_R/(float)g_cfg.scale_nm;
-            float vect_px=fmaxf(6.f,fminf((float)e.spd_kt/60.0f*px_per_nm,35.f));
-            // Trait fin partant juste DEVANT l'avion (≈ nez = 0.5*demi-icône) pour ne
-            // pas se superposer au SVG. Bout = position dans 1 min (vect_px mesuré depuis
-            // le CENTRE → distance impérativement = 1 min). pos(0,0) = coords absolues.
             int ih=kIconHalf[g_cfg.icon_sz];
             float nose_r=(float)ih*0.5f;
+            // Vecteur "position dans 1 min" À L'ÉCHELLE du radar : kt/60 = nm/min, ×px_per_nm.
+            // (FIX 2026-06-08) plus de cap fixe 35px qui le FIGEAIT au zoom (il ne grandissait
+            // plus quand on zoomait). Borné seulement au rayon radar (ne sort pas du scope) et
+            // planchonné juste devant le nez de l'icône (sinon trait inversé en taille L).
+            float vect_px=fmaxf(nose_r+6.f,fminf((float)e.spd_kt/60.0f*px_per_nm,(float)RAD_R));
+            // Trait fin partant DEVANT l'avion (nez), bout = position dans 1 min. pos(0,0)=absolu.
             r_vect_pts[i][0]={(lv_coord_t)(sx+(int)(nose_r*sn)),(lv_coord_t)(sy-(int)(nose_r*cs))};
             r_vect_pts[i][1]={(lv_coord_t)(sx+(int)(vect_px*sn)),(lv_coord_t)(sy-(int)(vect_px*cs))};
             lv_obj_set_pos(r_trf_vect[i],0,0);
