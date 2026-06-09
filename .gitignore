@@ -56,6 +56,7 @@ build
 datas
 # Bruit Finder / iCloud + artefacts locaux
 .DS_Store
+.claude/
 screenlog.0
 
 # Dumps JSON OpenAIP (debug openaip2bin.py, ~100+ Mo) — ne jamais committer
