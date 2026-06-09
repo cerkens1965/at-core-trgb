@@ -53,8 +53,10 @@
 //        au lieu du layout 480 rond hérité du T-RGB).
 //   v10 : page FLIGHTS encore agrandie (T4) — liste plus haute (258), lignes 40px/font16,
 //         boutons 46/42px, titre font22 ; WiFi remonté sous le titre.
-#define VIEW_VERSION  "10"
-#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v10  Jun  9 2026"
+//   v11 : passe anti-clip (textes/logos plus collés en haut/bas sur T4 — auth/welcome/
+//         page0/vols/maint), + affichage du hotspot enregistré (STATUS "wss" du boîtier).
+#define VIEW_VERSION  "11"
+#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v11  Jun  9 2026"
 
 #ifdef BOARD_T4S3
 LilyGo_Class amoled;
@@ -124,6 +126,7 @@ struct StatusData {
     uint8_t flt_st;      // cycle de vol : 0=sol (pas démarré) 1=en vol 2=arrêt imminent
     uint8_t wst;         // WiFi : 0 idle 1 connexion 2 OK 3 SSID absent 4 échec
     char    wip[16];     // dernière IP WiFi (proof de connexion)
+    char    wssid[33];   // SSID hotspot enregistré côté boîtier (STATUS "wss") = dernier validé/en mémoire
     uint8_t ota;         // OTA : 0 idle 1 check 2 download 3 OK(reboot) 4 échec 5 à jour
     uint8_t opct;        // OTA download %
     uint8_t fwv;         // version firmware AT-CORE
@@ -648,6 +651,7 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.charging=d["chg"]|false;
     g_status.flt_phase=d["flt_ph"]|0;g_status.upload_pct=d["up_pct"]|0;g_status.flt_rdy=d["flt_rdy"]|0;g_status.flt_st=d["flt_st"]|0;
     g_status.wst=d["wst"]|0; strlcpy(g_status.wip,d["wip"]|"",sizeof(g_status.wip));
+    strlcpy(g_status.wssid,d["wss"]|"",sizeof(g_status.wssid));   // SSID hotspot enregistré (boîtier)
     g_status.ota=d["ota"]|0; g_status.opct=d["opct"]|0;
     g_status.fwv=d["fwv"]|0; strlcpy(g_status.fwd,d["fwd"]|"",sizeof(g_status.fwd)); g_status.oav=d["oav"]|0;
     g_status.valid=true;g_dataUpdated=true;}
@@ -1225,7 +1229,7 @@ void buildStatusPage(){
     // ── Batterie AT-CORE + version
     r_p0_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,414);
     mkLbl(p,VIEW_VER_STR,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,432);
-    r_p0_atc=mkLbl(p,"ATC --",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,450);
+    r_p0_atc=mkLbl(p,"ATC --",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);   // (clip) ne pas coller au bord bas
 }
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
@@ -1537,7 +1541,7 @@ static void showWelcome(const char* pilotName, const char* instrName){
     // Logo A en haut — lv_obj_align garantit le centrage LVGL
     lv_obj_t*lA=lv_img_create(g_welcome_ov);
     lv_img_set_src(lA,&img_logo_a);
-    lv_obj_align(lA,LV_ALIGN_TOP_MID,0,18);
+    lv_obj_align(lA,LV_ALIGN_TOP_MID,0,24);   // (clip) marge haut sur T4 (overlay à -15)
 
     // "Have a nice flight !"
     lv_obj_t*tf=lv_label_create(g_welcome_ov);
@@ -1732,7 +1736,7 @@ void mkAuthOverlay(){
     // Logo A en haut centre — lv_obj_align garantit le centrage LVGL
     lv_obj_t*lA=lv_img_create(g_auth_ov);
     lv_img_set_src(lA,&img_logo_a);
-    lv_obj_align(lA,LV_ALIGN_TOP_MID,0,12);
+    lv_obj_align(lA,LV_ALIGN_TOP_MID,0,20);   // (clip) était 12 → y écran -3 sur T4 (overlay à -15)
 
     // Prompt
     g_auth_prompt=lv_label_create(g_auth_ov);
@@ -3182,17 +3186,20 @@ static void maintUpdAnnounce(){
 // "WiFi connected" reste affiché après un test/upload réussi.
 static void maintWifiStatus(){
     if(!g_maint_wst)return;
-    char b[48]; lv_color_t c;
-    if(!g_status.valid){ strcpy(b,""); c=TGREY(); }
+    char b[80]; lv_color_t c;
+    // SSID enregistré côté BOÎTIER (STATUS "wss") = source de vérité du dernier hotspot
+    // validé/en mémoire ; fallback sur le NVS de l'écran si le boîtier n'a rien renvoyé.
+    const char* ssid = (g_status.valid && g_status.wssid[0]) ? g_status.wssid
+                     : (g_hs_ssid[0] ? g_hs_ssid : "");
+    if(!g_status.valid){ b[0]=0; c=TGREY(); }
+    else if(!ssid[0]){ strcpy(b,"No hotspot configured"); c=TGREY(); }
     else switch(g_status.wst){
-        case 1: strcpy(b,"WiFi connecting...");                       c=C_AMBER; break;
-        case 2: snprintf(b,sizeof(b),"WiFi connected (%s)",
+        case 1: snprintf(b,sizeof(b),"%s : connecting...",ssid);      c=C_AMBER; break;
+        case 2: snprintf(b,sizeof(b),"%s : connected (%s)",ssid,
                          g_status.wip[0]?g_status.wip:"?");           c=C_GREEN; break;
-        case 3: strcpy(b,"WiFi: network not found");                  c=C_RED;   break;
-        case 4: strcpy(b,"WiFi: connect failed");                     c=C_RED;   break;
-        default: snprintf(b,sizeof(b),"%s",
-                          g_hs_ssid[0]?"WiFi idle (not tested)":"No hotspot configured");
-                 c=TGREY(); break;
+        case 3: snprintf(b,sizeof(b),"%s : not found",ssid);         c=C_RED;   break;
+        case 4: snprintf(b,sizeof(b),"%s : connect failed",ssid);    c=C_RED;   break;
+        default: snprintf(b,sizeof(b),"Hotspot: %s",ssid);           c=TGREY(); break;   // dernier validé/en mémoire
     }
     lv_label_set_text(g_maint_wst,b);
     lv_obj_set_style_text_color(g_maint_wst,c,0);
@@ -3458,8 +3465,10 @@ void mkVolsOverlay(){
     // (cf volsBuildList) + boutons + polices plus gros (lisibilité/tactile cockpit), WiFi
     // remonté sous le titre pour libérer du vertical. T-RGB rond inchangé.
 #ifdef BOARD_T4S3
-    const int OVW=600, OVX=0,     LSTW=564, LSTH=258, LSTY=58, BTW=360, CLW=178, CLDX=96;
-    const int yTitle=10, yWifi=38, hX=46, yX=322, hB=42, yClean=374, yClose=420;
+    const int OVW=600, OVX=0,     LSTW=564, LSTH=234, LSTY=78, BTW=360, CLW=178, CLDX=96;
+    // (clip) verticale re-calée : titre à y écran ~9, close bas ~441, pas de chevauchement
+    // titre/WiFi (overlay à UI_OY=-15 → tout y local décalé de -15 à l'écran).
+    const int yTitle=24, yWifi=54, hX=44, yX=318, hB=40, yClean=370, yClose=416;
     const lv_font_t *FTL=&lv_font_montserrat_22, *FBT=&lv_font_montserrat_18, *FB2=&lv_font_montserrat_16;
 #else
     const int OVW=480, OVX=UI_OX, LSTW=290, LSTH=238, LSTY=56, BTW=210, CLW=103, CLDX=54;
@@ -3586,7 +3595,7 @@ void mkMaintenanceOverlay(){
     {lv_obj_t*tl=lv_label_create(g_maint_ov);lv_label_set_text(tl,"MAINTENANCE");
      lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_22,0);
      lv_obj_set_pos(tl,30,22);}
-    mkMBtn("Close",455,18,115,44,lv_color_hex(0x4b5563),lv_color_hex(0xffffff),_maint_close_cb);
+    mkMBtn("Close",455,26,115,44,lv_color_hex(0x4b5563),lv_color_hex(0xffffff),_maint_close_cb);   // (clip) marge haut
     // ── HOTSPOT ───────────────────────────────────────────────────────────────
     mkMHdr("HOTSPOT (phone)",70);
     g_maint_ssid_ta=lv_textarea_create(g_maint_ov);
