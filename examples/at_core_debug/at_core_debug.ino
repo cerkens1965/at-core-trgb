@@ -58,8 +58,12 @@
 //   v12 : page Status (T4) logos AEROTRACE/ATVIEW agrandis + bloc versions ré-espacé
 //         (fin du chevauchement batterie/ATV/ATC) ; message MAJ Maintenance explicite
 //         (3 états : MAJ dispo vN / à jour vérifié / pas encore vérifié).
-#define VIEW_VERSION  "12"
-#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v12  Jun  9 2026"
+//   v13 : page Status (T4) logos ATVIEW/AEROTRACE descendus (vwY 24→46, atY 62→86) — plus joli.
+//   v14 : page Status (T4) tous les textes +~25% (identité 14→18, checks 14→18 + dots 22→28,
+//         versions 12→16, espacements adaptés) ; champ SSID Maintenance pré-rempli avec le
+//         dernier hotspot validé (NVS écran, fallback STATUS "wss" du boîtier).
+#define VIEW_VERSION  "14"
+#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
 LilyGo_Class amoled;
@@ -613,19 +617,24 @@ void flashTab(lv_obj_t*lbl){
 // Check row "● label" — cercle brand-blue (toujours visible) + ✓ blanc si actif.
 // Layout : cercle Ø22 px à x, texte à x+30, y+4.
 void mkCheckRow(lv_obj_t*p,int idx,int x,int y,const char*txt){
+#ifdef BOARD_T4S3
+    const int DOT=28, LX=38, LY=4; const lv_font_t* RF=&lv_font_montserrat_18;   // (v14) checks +~25% (T4)
+#else
+    const int DOT=22, LX=30, LY=4; const lv_font_t* RF=&lv_font_montserrat_14;
+#endif
     lv_obj_t*dot=lv_obj_create(p);
-    lv_obj_set_size(dot,22,22);lv_obj_set_pos(dot,x,y);
-    lv_obj_set_style_radius(dot,11,0);
+    lv_obj_set_size(dot,DOT,DOT);lv_obj_set_pos(dot,x,y);
+    lv_obj_set_style_radius(dot,DOT/2,0);
     lv_obj_set_style_bg_color(dot,C_BRAND,0);lv_obj_set_style_bg_opa(dot,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(dot,0,0);
     lv_obj_set_style_shadow_opa(dot,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(dot,0,0);
     lv_obj_clear_flag(dot,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t*ico=lv_label_create(dot);lv_label_set_text(ico,"");
     lv_obj_set_style_text_color(ico,lv_color_hex(0xffffff),0);
-    lv_obj_set_style_text_font(ico,&lv_font_montserrat_14,0);
+    lv_obj_set_style_text_font(ico,RF,0);
     lv_obj_center(ico);
     r_chk_dot[idx]=dot;r_chk_ico[idx]=ico;
-    r_chk_lbl[idx]=mkLblP(p,txt,TGREY(),&lv_font_montserrat_14,x+30,y+4);
+    r_chk_lbl[idx]=mkLblP(p,txt,TGREY(),RF,x+LX,y+LY);
 }
 void updCheckRow(int idx,const char*txt,bool ok){
     if(!r_chk_dot[idx])return;
@@ -1199,9 +1208,13 @@ void buildStatusPage(){
     // bloc versions du bas (batterie/ATV/ATC) ré-espacé pour ne PAS se chevaucher ni
     // coller au bord bas (overlay à UI_OY=-15 → y écran = y local - 15). T-RGB inchangé.
 #ifdef BOARD_T4S3
-    const int vwZoom=400, vwY=24, atZoom=480, atY=62, acidY=188, batY=400, verY=424, atcY=448;
+    const int vwZoom=400, vwY=46, atZoom=480, atY=86, acidY=192, batY=388, verY=414, atcY=440;
+    const lv_font_t *FID=&lv_font_montserrat_18, *FVER=&lv_font_montserrat_16;   // (v14) textes +~25%
+    const int chkY0=224, chkDY=36;                                               // checks plus espacés (dots+police plus gros)
 #else
     const int vwZoom=320, vwY=70, atZoom=384, atY=108, acidY=190, batY=414, verY=432, atcY=450;
+    const lv_font_t *FID=&lv_font_montserrat_14, *FVER=&lv_font_montserrat_12;
+    const int chkY0=218, chkDY=30;
 #endif
 
     // ── Logos bicolores (A bleu + reste noir) — zoom LVGL pour respecter proportions maquette
@@ -1224,13 +1237,13 @@ void buildStatusPage(){
     lv_obj_align(lAt,LV_ALIGN_TOP_MID,0,atY);
 
     // ── Identité appareil transmise à SafeSky (sous le logo, centrée).
-    g_p0_acid=mkLbl(p,"",TFG(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,acidY);
+    g_p0_acid=mkLbl(p,"",TFG(),FID,LV_ALIGN_TOP_MID,0,acidY);
     p0UpdateAcId();
 
     // ── 6 check rows (cercle bleu + label) — décalées à gauche, plus d'air entre lignes
     const int X = 105;  // colonne cercle (decalee a gauche)
-    const int Y0= 218;  // 1ere ligne (sous AEROTRACE, gap ~30px)
-    const int DY= 30;   // espacement vertical (6 rows : dernier dot top y=368, bottom y=390, battery debute y=418)
+    const int Y0= chkY0;  // 1ere ligne (board-conditionnel : plus bas + plus espacé sur T4)
+    const int DY= chkDY;  // espacement vertical (board-conditionnel)
     mkCheckRow(p,CHK_CORE,X,Y0+0*DY,"AT-CORE");
     mkCheckRow(p,CHK_BT,  X,Y0+1*DY,"Bluetooth");
     mkCheckRow(p,CHK_GPS, X,Y0+2*DY,"GPS");
@@ -1238,9 +1251,9 @@ void buildStatusPage(){
     // ADS-B / ADS-L et OGN / FLARM retirés (non poussés pour l'instant).
 
     // ── Batterie AT-CORE + version
-    r_p0_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,batY);
-    mkLbl(p,VIEW_VER_STR,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,verY);
-    r_p0_atc=mkLbl(p,"ATC --",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,atcY);   // bloc ré-espacé (anti-chevauchement)
+    r_p0_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),FVER,LV_ALIGN_TOP_MID,0,batY);
+    mkLbl(p,VIEW_VER_STR,TGREY(),FVER,LV_ALIGN_TOP_MID,0,verY);
+    r_p0_atc=mkLbl(p,"ATC --",TGREY(),FVER,LV_ALIGN_TOP_MID,0,atcY);   // bloc ré-espacé (anti-chevauchement)
 }
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
@@ -3619,7 +3632,10 @@ void mkMaintenanceOverlay(){
     g_maint_ssid_ta=lv_textarea_create(g_maint_ov);
     lv_textarea_set_one_line(g_maint_ssid_ta,true);
     lv_textarea_set_placeholder_text(g_maint_ssid_ta,"Hotspot SSID");
-    lv_textarea_set_text(g_maint_ssid_ta,g_hs_ssid);
+    // Pré-remplit avec le dernier hotspot validé : NVS écran (g_hs_ssid) sinon SSID
+    // enregistré CÔTÉ BOÎTIER (STATUS "wss", exige AT-CORE v17) → on voit toujours le dernier.
+    lv_textarea_set_text(g_maint_ssid_ta,
+        g_hs_ssid[0]?g_hs_ssid:(g_status.valid?g_status.wssid:""));
     lv_textarea_set_max_length(g_maint_ssid_ta,32);
     lv_obj_set_size(g_maint_ssid_ta,395,46);lv_obj_set_pos(g_maint_ssid_ta,30,102);
     lv_obj_add_event_cb(g_maint_ssid_ta,_maint_ta_cb,LV_EVENT_ALL,NULL);
@@ -3681,7 +3697,10 @@ void mkMaintenanceOverlay(){
     g_maint_ssid_ta=lv_textarea_create(g_maint_ov);
     lv_textarea_set_one_line(g_maint_ssid_ta,true);
     lv_textarea_set_placeholder_text(g_maint_ssid_ta,"Hotspot SSID");
-    lv_textarea_set_text(g_maint_ssid_ta,g_hs_ssid);
+    // Pré-remplit avec le dernier hotspot validé : NVS écran (g_hs_ssid) sinon SSID
+    // enregistré CÔTÉ BOÎTIER (STATUS "wss", exige AT-CORE v17) → on voit toujours le dernier.
+    lv_textarea_set_text(g_maint_ssid_ta,
+        g_hs_ssid[0]?g_hs_ssid:(g_status.valid?g_status.wssid:""));
     lv_textarea_set_max_length(g_maint_ssid_ta,32);
     lv_obj_set_size(g_maint_ssid_ta,228,36);lv_obj_align(g_maint_ssid_ta,LV_ALIGN_TOP_MID,-56,100);
     lv_obj_add_event_cb(g_maint_ssid_ta,_maint_ta_cb,LV_EVENT_ALL,NULL);
