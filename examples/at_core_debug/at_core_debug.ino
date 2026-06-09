@@ -45,8 +45,10 @@
 //   v5 : glyphe zoom +/- agrandi (montserrat_40) — bien visible dans le bouton 64px.
 //   v6 : chip "Start flight" dispo après un vol terminé (ph≠UPLOADING) — débloque le
 //        cas immobile+sans fix où ni START ni STOP n'apparaissaient (impasse multi-leg).
-#define VIEW_VERSION  "6"
-#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v6  Jun  8 2026"
+//   v7 : transfert Vols anti-stall (timeout sur absence de progrès, pas délai absolu) —
+//        fin du FAUX "Transfer timeout" sur les gros CSV (gzip de plusieurs min).
+#define VIEW_VERSION  "7"
+#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v7  Jun  9 2026"
 
 #ifdef BOARD_T4S3
 LilyGo_Class amoled;
@@ -3287,7 +3289,8 @@ static lv_obj_t* g_vols_xfer=nullptr;   // label du bouton Transferer (N)
 static lv_obj_t* g_vols_wifi=nullptr;   // ligne état WiFi hotspot (SSID + connexion/IP)
 static bool     g_vols_loading=false, g_vols_del_armed=false, g_vols_clean_armed=false;
 static bool     g_vols_xfer_pending=false, g_vols_xfer_seen3=false;  // suivi transfert sur la page
-static uint32_t g_vols_t0=0, g_vols_xfer_t0=0;
+static uint32_t g_vols_t0=0, g_vols_xfer_t0=0, g_vols_xfer_prog_ms=0;
+static uint8_t  g_vols_xfer_lastpct=0, g_vols_xfer_lastph=0xFF;   // anti-stall (v7)
 
 static void volsClose(){
     if(!g_vols_ov)return;
@@ -3358,6 +3361,7 @@ static void _vols_xfer_cb(lv_event_t*e){
         g_chrCtl->writeValue((uint8_t*)p,strlen(p),false);
         volsShowStatus("Transferring...",C_AMBER);   // on RESTE sur la page (overlay up_pct par-dessus)
         g_vols_xfer_pending=true; g_vols_xfer_seen3=false; g_vols_xfer_t0=millis();
+        g_vols_xfer_prog_ms=millis(); g_vols_xfer_lastpct=0; g_vols_xfer_lastph=0xFF;
     }
 }
 // Suppression des .up (transférés) — double-tap de confirmation.
@@ -4755,8 +4759,15 @@ void loop(){
     // Ça évite un "timeout" 90s quand l'échec est rapide (ex. hotspot hors de portée).
     if(g_vols_xfer_pending&&g_vols_ov){
         uint8_t ph=g_status.flt_phase;
-        uint32_t el=millis()-g_vols_xfer_t0;
+        uint32_t now=millis(), el=now-g_vols_xfer_t0;
         if(ph==3)g_vols_xfer_seen3=true;
+        // (v7) Anti-stall : tant que la phase OU up_pct AVANCE, pas de timeout. Un gros CSV
+        // gzippe plusieurs min (up_pct grimpe 2..40, ph reste 3) → l'ancien backstop dur 180s
+        // donnait un FAUX "Transfer timeout" alors que ça progressait. On ne timeoute donc que
+        // sur une VRAIE absence de progrès (ph + up_pct figés > 2 min) → indépendant de la taille.
+        if(ph!=g_vols_xfer_lastph || g_status.upload_pct!=g_vols_xfer_lastpct){
+            g_vols_xfer_lastph=ph; g_vols_xfer_lastpct=g_status.upload_pct; g_vols_xfer_prog_ms=now;
+        }
         // Progression visible : "Transferring... N%" (up_pct par paliers, MAJ quand un STATUS
         // passe — le BLE est ralenti pendant l'upload WiFi, d'où la roue en complément).
         if(g_vols_load && ph==3){
@@ -4767,8 +4778,9 @@ void loop(){
             g_vols_xfer_pending=false;
             if(g_vols_load)lv_label_set_text(g_vols_load,ph==4?"Transfer OK":"Transfer failed");
             if(ph==4){ sendCtl("flights"); g_status.flt_rdy=0; g_vols_loading=true; g_vols_t0=millis(); }
-        }else if((ph!=3 && el>90000) || el>180000){
-            // timeout seulement si PAS en upload actif (ph!=3) à 90s, ou backstop dur 180s
+        }else if(now-g_vols_xfer_prog_ms>120000){
+            // 2 min SANS aucun progrès (ni phase ni up_pct) = vrai blocage (hotspot perdu,
+            // S3 figé). Plus de backstop absolu → un gros leg qui gzippe longtemps est OK.
             g_vols_xfer_pending=false;if(g_vols_load)lv_label_set_text(g_vols_load,"Transfer timeout");
         }
     }
