@@ -47,8 +47,12 @@
 //        cas immobile+sans fix où ni START ni STOP n'apparaissaient (impasse multi-leg).
 //   v7 : transfert Vols anti-stall (timeout sur absence de progrès, pas délai absolu) —
 //        fin du FAUX "Transfer timeout" sur les gros CSV (gzip de plusieurs min).
-#define VIEW_VERSION  "7"
-#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v7  Jun  9 2026"
+//   v8 : client BLE recréé à chaque (re)connexion → corrige le bug "écritures perdues
+//        après une reconnexion" (Bluedroid gardait un cache handles/conn_id périmé).
+//   v9 : page FLIGHTS (Vols) plein 600×450 sur T4-S3 (liste + lignes + boutons élargis,
+//        au lieu du layout 480 rond hérité du T-RGB).
+#define VIEW_VERSION  "9"
+#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v9  Jun  9 2026"
 
 #ifdef BOARD_T4S3
 LilyGo_Class amoled;
@@ -772,7 +776,17 @@ class ATCAdv:public BLEAdvertisedDeviceCallbacks{
         if(advPairable(dev))pcandUpsert(dev);}};
 void acPushBLE();  // défini plus bas — appelé ici pour auto-push à la connexion
 bool connectBLE(){
-    if(!g_client){g_client=BLEDevice::createClient();g_client->setClientCallbacks(new ATCCB());}
+    // (v8) Client BLE FRAIS à chaque (re)connexion. Réutiliser le même BLEClient Bluedroid
+    // garde un cache de services/handles lié à l'ANCIEN conn_id → après une reconnexion les
+    // notifications repassent mais les ÉCRITURES (sendCtl : start/stop/upload, acPushBLE…)
+    // partent sur le contexte mort et sont silencieusement perdues (bug write-après-reco
+    // découvert au bench). On détruit l'ancien client + on null les caractéristiques (la
+    // fenêtre de connexion voit g_chrCtl=null → sendCtl no-op sûr), puis découverte propre.
+    if(g_client){ delete g_client; g_client=nullptr; }   // destructeur libère le cache services ; gattc_if déjà désenregistré à la déconnexion
+    g_svc=nullptr;
+    g_chrS=g_chrF=g_chrT=g_chrA=g_chrD=g_chrW=g_chrP=g_chrCfg=g_chrCtl=g_chrFl=nullptr;
+    static ATCCB s_cb;   // instance unique (l'ancien new ATCCB() fuyait à chaque reconnexion)
+    g_client=BLEDevice::createClient(); g_client->setClientCallbacks(&s_cb);
     if(!g_client->connect(g_target))return false;
     // Persist paired MAC seulement hors cérémonie de pairing : pendant un bind,
     // on attend la confirmation utilisateur (LED fixe) avant de figer le MAC.
@@ -3411,7 +3425,7 @@ static void volsBuildList(){
         strlcpy(it.s,o["s"]|"?",sizeof(it.s));
         strlcpy(it.e,o["e"]|"?",sizeof(it.e));
         it.up=o["u"]|0; it.sel=false;
-        lv_obj_t*b=lv_btn_create(g_vols_list);lv_obj_set_size(b,270,30);
+        lv_obj_t*b=lv_btn_create(g_vols_list);lv_obj_set_size(b,LV_PCT(100),30);   // (v9) suit la largeur de la liste (560 T4 / 290 T-RGB)
         lv_obj_set_style_radius(b,6,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
         lv_obj_set_style_bg_color(b,it.up?lv_color_hex(0x161b22):lv_color_hex(0x21262d),0);
         const char* md=strlen(it.d)>=10?it.d+5:it.d;
@@ -3433,8 +3447,16 @@ static void volsBuildList(){
 
 void mkVolsOverlay(){
     if(g_vols_ov)return;
+    // (v9) Géométrie par carte : T4-S3 exploite toute la largeur 600 (liste + boutons
+    // élargis) au lieu du layout 480 rond hérité du T-RGB. Positions verticales communes
+    // (elles tiennent dans les deux ; le TOP_MID auto-centre dans l'overlay).
+#ifdef BOARD_T4S3
+    const int OVW=600, OVX=0,     LSTW=560, BTW=360, CLW=178, CLDX=96;
+#else
+    const int OVW=480, OVX=UI_OX, LSTW=290, BTW=210, CLW=103, CLDX=54;
+#endif
     g_vols_ov=lv_obj_create(lv_scr_act());
-    lv_obj_set_size(g_vols_ov,480,480);lv_obj_set_pos(g_vols_ov,UI_OX,UI_OY);
+    lv_obj_set_size(g_vols_ov,OVW,480);lv_obj_set_pos(g_vols_ov,OVX,UI_OY);
     lv_obj_set_style_bg_color(g_vols_ov,TBG(),0);lv_obj_set_style_bg_opa(g_vols_ov,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(g_vols_ov,0,0);lv_obj_set_style_radius(g_vols_ov,0,0);
     lv_obj_set_style_pad_all(g_vols_ov,0,0);lv_obj_clear_flag(g_vols_ov,LV_OBJ_FLAG_SCROLLABLE);
@@ -3445,7 +3467,7 @@ void mkVolsOverlay(){
 
     // Liste scrollable (taillée pour le cercle)
     g_vols_list=lv_obj_create(g_vols_ov);
-    lv_obj_set_size(g_vols_list,290,238);lv_obj_align(g_vols_list,LV_ALIGN_TOP_MID,0,56);
+    lv_obj_set_size(g_vols_list,LSTW,238);lv_obj_align(g_vols_list,LV_ALIGN_TOP_MID,0,56);
     lv_obj_set_style_bg_color(g_vols_list,lv_color_hex(0x0d1117),0);
     lv_obj_set_style_border_width(g_vols_list,0,0);lv_obj_set_style_pad_all(g_vols_list,4,0);
     lv_obj_set_flex_flow(g_vols_list,LV_FLEX_FLOW_COLUMN);
@@ -3453,7 +3475,7 @@ void mkVolsOverlay(){
     lv_obj_set_style_text_color(g_vols_load,TGREY(),0);lv_obj_set_style_text_font(g_vols_load,&lv_font_montserrat_14,0);
 
     // Boutons
-    lv_obj_t*bx=lv_btn_create(g_vols_ov);lv_obj_set_size(bx,210,34);lv_obj_align(bx,LV_ALIGN_TOP_MID,0,302);
+    lv_obj_t*bx=lv_btn_create(g_vols_ov);lv_obj_set_size(bx,BTW,34);lv_obj_align(bx,LV_ALIGN_TOP_MID,0,302);
     lv_obj_set_style_bg_color(bx,C_GREEN,0);lv_obj_set_style_radius(bx,8,0);
     lv_obj_set_style_border_width(bx,0,0);lv_obj_set_style_shadow_opa(bx,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bx,_vols_xfer_cb,LV_EVENT_CLICKED,NULL);
@@ -3462,7 +3484,7 @@ void mkVolsOverlay(){
     lv_obj_set_style_text_font(g_vols_xfer,&lv_font_montserrat_14,0);lv_obj_center(g_vols_xfer);
 
     // Ligne cleanup : Delete sent (efface les .up transférés) | Clean empty (efface les CSV vides)
-    lv_obj_t*bd=lv_btn_create(g_vols_ov);lv_obj_set_size(bd,103,30);lv_obj_align(bd,LV_ALIGN_TOP_MID,-54,342);
+    lv_obj_t*bd=lv_btn_create(g_vols_ov);lv_obj_set_size(bd,CLW,30);lv_obj_align(bd,LV_ALIGN_TOP_MID,-CLDX,342);
     lv_obj_set_style_bg_color(bd,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bd,8,0);
     lv_obj_set_style_border_width(bd,0,0);lv_obj_set_style_shadow_opa(bd,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bd,_vols_del_cb,LV_EVENT_CLICKED,NULL);
@@ -3470,7 +3492,7 @@ void mkVolsOverlay(){
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
-    lv_obj_t*bcl=lv_btn_create(g_vols_ov);lv_obj_set_size(bcl,103,30);lv_obj_align(bcl,LV_ALIGN_TOP_MID,54,342);
+    lv_obj_t*bcl=lv_btn_create(g_vols_ov);lv_obj_set_size(bcl,CLW,30);lv_obj_align(bcl,LV_ALIGN_TOP_MID,CLDX,342);
     lv_obj_set_style_bg_color(bcl,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bcl,8,0);
     lv_obj_set_style_border_width(bcl,0,0);lv_obj_set_style_shadow_opa(bcl,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bcl,_vols_clean_cb,LV_EVENT_CLICKED,NULL);
@@ -3478,7 +3500,7 @@ void mkVolsOverlay(){
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
-    lv_obj_t*bc=lv_btn_create(g_vols_ov);lv_obj_set_size(bc,210,30);lv_obj_align(bc,LV_ALIGN_TOP_MID,0,378);
+    lv_obj_t*bc=lv_btn_create(g_vols_ov);lv_obj_set_size(bc,BTW,30);lv_obj_align(bc,LV_ALIGN_TOP_MID,0,378);
     lv_obj_set_style_bg_color(bc,lv_color_hex(0x30363d),0);lv_obj_set_style_radius(bc,8,0);
     lv_obj_set_style_border_width(bc,0,0);lv_obj_set_style_shadow_opa(bc,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bc,_vols_close_cb,LV_EVENT_CLICKED,NULL);
