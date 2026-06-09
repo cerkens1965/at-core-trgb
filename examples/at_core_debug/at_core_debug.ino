@@ -51,8 +51,10 @@
 //        après une reconnexion" (Bluedroid gardait un cache handles/conn_id périmé).
 //   v9 : page FLIGHTS (Vols) plein 600×450 sur T4-S3 (liste + lignes + boutons élargis,
 //        au lieu du layout 480 rond hérité du T-RGB).
-#define VIEW_VERSION  "9"
-#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v9  Jun  9 2026"
+//   v10 : page FLIGHTS encore agrandie (T4) — liste plus haute (258), lignes 40px/font16,
+//         boutons 46/42px, titre font22 ; WiFi remonté sous le titre.
+#define VIEW_VERSION  "10"
+#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v10  Jun  9 2026"
 
 #ifdef BOARD_T4S3
 LilyGo_Class amoled;
@@ -3417,6 +3419,11 @@ static void volsBuildList(){
     JsonDocument d; if(deserializeJson(d,v.c_str()))return;
     JsonArray arr=d.as<JsonArray>();
     lv_obj_clean(g_vols_list); g_vols_n=0;
+#ifdef BOARD_T4S3
+    const int ROWH=40; const lv_font_t* RF=&lv_font_montserrat_16;   // (v10) lignes plus grandes (T4)
+#else
+    const int ROWH=30; const lv_font_t* RF=&lv_font_montserrat_14;
+#endif
     for(JsonObject o:arr){
         if(g_vols_n>=16)break;
         VolItem& it=g_vols[g_vols_n];
@@ -3425,7 +3432,7 @@ static void volsBuildList(){
         strlcpy(it.s,o["s"]|"?",sizeof(it.s));
         strlcpy(it.e,o["e"]|"?",sizeof(it.e));
         it.up=o["u"]|0; it.sel=false;
-        lv_obj_t*b=lv_btn_create(g_vols_list);lv_obj_set_size(b,LV_PCT(100),30);   // (v9) suit la largeur de la liste (560 T4 / 290 T-RGB)
+        lv_obj_t*b=lv_btn_create(g_vols_list);lv_obj_set_size(b,LV_PCT(100),ROWH);   // pleine largeur liste, hauteur board-dépendante (v9/v10)
         lv_obj_set_style_radius(b,6,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
         lv_obj_set_style_bg_color(b,it.up?lv_color_hex(0x161b22):lv_color_hex(0x21262d),0);
         const char* md=strlen(it.d)>=10?it.d+5:it.d;
@@ -3434,7 +3441,7 @@ static void volsBuildList(){
         else      snprintf(r,sizeof(r),"[ ] %s %s>%s",md,it.s,it.e);
         lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,r);
         lv_obj_set_style_text_color(l,it.up?lv_color_hex(0x6b7280):lv_color_hex(0xe6edf3),0);
-        lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);
+        lv_obj_set_style_text_font(l,RF,0);lv_obj_center(l);
         it.lbl=l; it.row=b;
         if(!it.up)lv_obj_add_event_cb(b,_vols_row_cb,LV_EVENT_CLICKED,(void*)(intptr_t)g_vols_n);
         g_vols_n++;
@@ -3447,13 +3454,17 @@ static void volsBuildList(){
 
 void mkVolsOverlay(){
     if(g_vols_ov)return;
-    // (v9) Géométrie par carte : T4-S3 exploite toute la largeur 600 (liste + boutons
-    // élargis) au lieu du layout 480 rond hérité du T-RGB. Positions verticales communes
-    // (elles tiennent dans les deux ; le TOP_MID auto-centre dans l'overlay).
+    // (v10) Géométrie par carte. T4-S3 : page Flights AGRANDIE — liste plus haute, lignes
+    // (cf volsBuildList) + boutons + polices plus gros (lisibilité/tactile cockpit), WiFi
+    // remonté sous le titre pour libérer du vertical. T-RGB rond inchangé.
 #ifdef BOARD_T4S3
-    const int OVW=600, OVX=0,     LSTW=560, BTW=360, CLW=178, CLDX=96;
+    const int OVW=600, OVX=0,     LSTW=564, LSTH=258, LSTY=58, BTW=360, CLW=178, CLDX=96;
+    const int yTitle=10, yWifi=38, hX=46, yX=322, hB=42, yClean=374, yClose=420;
+    const lv_font_t *FTL=&lv_font_montserrat_22, *FBT=&lv_font_montserrat_18, *FB2=&lv_font_montserrat_16;
 #else
-    const int OVW=480, OVX=UI_OX, LSTW=290, BTW=210, CLW=103, CLDX=54;
+    const int OVW=480, OVX=UI_OX, LSTW=290, LSTH=238, LSTY=56, BTW=210, CLW=103, CLDX=54;
+    const int yTitle=26, yWifi=414, hX=34, yX=302, hB=30, yClean=342, yClose=378;
+    const lv_font_t *FTL=&lv_font_montserrat_20, *FBT=&lv_font_montserrat_14, *FB2=&lv_font_montserrat_14;
 #endif
     g_vols_ov=lv_obj_create(lv_scr_act());
     lv_obj_set_size(g_vols_ov,OVW,480);lv_obj_set_pos(g_vols_ov,OVX,UI_OY);
@@ -3462,56 +3473,55 @@ void mkVolsOverlay(){
     lv_obj_set_style_pad_all(g_vols_ov,0,0);lv_obj_clear_flag(g_vols_ov,LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t*tl=lv_label_create(g_vols_ov);lv_label_set_text(tl,"FLIGHTS (UTC)");
-    lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_20,0);
-    lv_obj_align(tl,LV_ALIGN_TOP_MID,0,26);
+    lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,FTL,0);
+    lv_obj_align(tl,LV_ALIGN_TOP_MID,0,yTitle);
 
-    // Liste scrollable (taillée pour le cercle)
     g_vols_list=lv_obj_create(g_vols_ov);
-    lv_obj_set_size(g_vols_list,LSTW,238);lv_obj_align(g_vols_list,LV_ALIGN_TOP_MID,0,56);
+    lv_obj_set_size(g_vols_list,LSTW,LSTH);lv_obj_align(g_vols_list,LV_ALIGN_TOP_MID,0,LSTY);
     lv_obj_set_style_bg_color(g_vols_list,lv_color_hex(0x0d1117),0);
     lv_obj_set_style_border_width(g_vols_list,0,0);lv_obj_set_style_pad_all(g_vols_list,4,0);
     lv_obj_set_flex_flow(g_vols_list,LV_FLEX_FLOW_COLUMN);
     g_vols_load=lv_label_create(g_vols_list);lv_label_set_text(g_vols_load,"Loading...");
-    lv_obj_set_style_text_color(g_vols_load,TGREY(),0);lv_obj_set_style_text_font(g_vols_load,&lv_font_montserrat_14,0);
+    lv_obj_set_style_text_color(g_vols_load,TGREY(),0);lv_obj_set_style_text_font(g_vols_load,FB2,0);
 
     // Boutons
-    lv_obj_t*bx=lv_btn_create(g_vols_ov);lv_obj_set_size(bx,BTW,34);lv_obj_align(bx,LV_ALIGN_TOP_MID,0,302);
+    lv_obj_t*bx=lv_btn_create(g_vols_ov);lv_obj_set_size(bx,BTW,hX);lv_obj_align(bx,LV_ALIGN_TOP_MID,0,yX);
     lv_obj_set_style_bg_color(bx,C_GREEN,0);lv_obj_set_style_radius(bx,8,0);
     lv_obj_set_style_border_width(bx,0,0);lv_obj_set_style_shadow_opa(bx,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bx,_vols_xfer_cb,LV_EVENT_CLICKED,NULL);
     g_vols_xfer=lv_label_create(bx);lv_label_set_text(g_vols_xfer,"Transfer (0)");
     lv_obj_set_style_text_color(g_vols_xfer,lv_color_hex(0xffffff),0);
-    lv_obj_set_style_text_font(g_vols_xfer,&lv_font_montserrat_14,0);lv_obj_center(g_vols_xfer);
+    lv_obj_set_style_text_font(g_vols_xfer,FBT,0);lv_obj_center(g_vols_xfer);
 
     // Ligne cleanup : Delete sent (efface les .up transférés) | Clean empty (efface les CSV vides)
-    lv_obj_t*bd=lv_btn_create(g_vols_ov);lv_obj_set_size(bd,CLW,30);lv_obj_align(bd,LV_ALIGN_TOP_MID,-CLDX,342);
+    lv_obj_t*bd=lv_btn_create(g_vols_ov);lv_obj_set_size(bd,CLW,hB);lv_obj_align(bd,LV_ALIGN_TOP_MID,-CLDX,yClean);
     lv_obj_set_style_bg_color(bd,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bd,8,0);
     lv_obj_set_style_border_width(bd,0,0);lv_obj_set_style_shadow_opa(bd,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bd,_vols_del_cb,LV_EVENT_CLICKED,NULL);
     {lv_obj_t*l=lv_label_create(bd);lv_label_set_text(l,"Delete sent");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
-     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+     lv_obj_set_style_text_font(l,FB2,0);lv_obj_center(l);}
 
-    lv_obj_t*bcl=lv_btn_create(g_vols_ov);lv_obj_set_size(bcl,CLW,30);lv_obj_align(bcl,LV_ALIGN_TOP_MID,CLDX,342);
+    lv_obj_t*bcl=lv_btn_create(g_vols_ov);lv_obj_set_size(bcl,CLW,hB);lv_obj_align(bcl,LV_ALIGN_TOP_MID,CLDX,yClean);
     lv_obj_set_style_bg_color(bcl,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bcl,8,0);
     lv_obj_set_style_border_width(bcl,0,0);lv_obj_set_style_shadow_opa(bcl,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bcl,_vols_clean_cb,LV_EVENT_CLICKED,NULL);
     {lv_obj_t*l=lv_label_create(bcl);lv_label_set_text(l,"Clean empty");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
-     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+     lv_obj_set_style_text_font(l,FB2,0);lv_obj_center(l);}
 
-    lv_obj_t*bc=lv_btn_create(g_vols_ov);lv_obj_set_size(bc,BTW,30);lv_obj_align(bc,LV_ALIGN_TOP_MID,0,378);
+    lv_obj_t*bc=lv_btn_create(g_vols_ov);lv_obj_set_size(bc,BTW,hB);lv_obj_align(bc,LV_ALIGN_TOP_MID,0,yClose);
     lv_obj_set_style_bg_color(bc,lv_color_hex(0x30363d),0);lv_obj_set_style_radius(bc,8,0);
     lv_obj_set_style_border_width(bc,0,0);lv_obj_set_style_shadow_opa(bc,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bc,_vols_close_cb,LV_EVENT_CLICKED,NULL);
     {lv_obj_t*l=lv_label_create(bc);lv_label_set_text(l,"Close");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
-     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+     lv_obj_set_style_text_font(l,FB2,0);lv_obj_center(l);}
 
-    // Ligne d'état WiFi hotspot (bas de page) — visibilité connexion pendant le transfert.
+    // Ligne d'état WiFi hotspot — visibilité connexion pendant le transfert (sous le titre sur T4).
     g_vols_wifi=lv_label_create(g_vols_ov);
     lv_obj_set_style_text_font(g_vols_wifi,&lv_font_montserrat_14,0);
-    lv_obj_align(g_vols_wifi,LV_ALIGN_TOP_MID,0,414);
+    lv_obj_align(g_vols_wifi,LV_ALIGN_TOP_MID,0,yWifi);
     volsUpdWifi();
 
     // Demande la liste. On seed flt_rdy=0 localement : l'AT-CORE le met aussi à 0
