@@ -55,8 +55,11 @@
 //         boutons 46/42px, titre font22 ; WiFi remonté sous le titre.
 //   v11 : passe anti-clip (textes/logos plus collés en haut/bas sur T4 — auth/welcome/
 //         page0/vols/maint), + affichage du hotspot enregistré (STATUS "wss" du boîtier).
-#define VIEW_VERSION  "11"
-#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v11  Jun  9 2026"
+//   v12 : page Status (T4) logos AEROTRACE/ATVIEW agrandis + bloc versions ré-espacé
+//         (fin du chevauchement batterie/ATV/ATC) ; message MAJ Maintenance explicite
+//         (3 états : MAJ dispo vN / à jour vérifié / pas encore vérifié).
+#define VIEW_VERSION  "12"
+#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v12  Jun  9 2026"
 
 #ifdef BOARD_T4S3
 LilyGo_Class amoled;
@@ -1192,12 +1195,20 @@ void buildStatusPage(){
     lv_obj_t*p=g_pages[0];
     lv_obj_set_style_bg_color(p,lv_color_hex(0xffffff),0);
     lv_obj_set_style_bg_opa(p,LV_OPA_COVER,0);
+    // (v12) Géométrie par carte. T4-S3 : logos PLUS GROS (place dispo sur le 600×450) +
+    // bloc versions du bas (batterie/ATV/ATC) ré-espacé pour ne PAS se chevaucher ni
+    // coller au bord bas (overlay à UI_OY=-15 → y écran = y local - 15). T-RGB inchangé.
+#ifdef BOARD_T4S3
+    const int vwZoom=400, vwY=24, atZoom=480, atY=62, acidY=188, batY=400, verY=424, atcY=448;
+#else
+    const int vwZoom=320, vwY=70, atZoom=384, atY=108, acidY=190, batY=414, verY=432, atcY=450;
+#endif
 
     // ── Logos bicolores (A bleu + reste noir) — zoom LVGL pour respecter proportions maquette
     lv_obj_t*lVw=lv_img_create(p);
     lv_img_set_src(lVw,&img_logo_atview);          // 110×22 source
-    lv_img_set_zoom(lVw,320);                      // ×1.25 → ~137×27
-    lv_obj_align(lVw,LV_ALIGN_TOP_MID,0,70);
+    lv_img_set_zoom(lVw,vwZoom);
+    lv_obj_align(lVw,LV_ALIGN_TOP_MID,0,vwY);
     // Long-press 1.5s sur ce logo = oublie pair BLE + reboot. Même geste
     // qu'en page Settings (logo footer). Critique ici : c'est le SEUL moyen
     // de sortir d'un blocage "Scanning BLE…" quand la MAC stockée pointe
@@ -1209,11 +1220,11 @@ void buildStatusPage(){
 
     lv_obj_t*lAt=lv_img_create(p);
     lv_img_set_src(lAt,&img_logo_aerotrace);       // 240×50 source
-    lv_img_set_zoom(lAt,384);                      // ×1.5 → ~360×75
-    lv_obj_align(lAt,LV_ALIGN_TOP_MID,0,108);
+    lv_img_set_zoom(lAt,atZoom);                    // T4 ×1.875 (~450×94) — plus gros
+    lv_obj_align(lAt,LV_ALIGN_TOP_MID,0,atY);
 
     // ── Identité appareil transmise à SafeSky (sous le logo, centrée).
-    g_p0_acid=mkLbl(p,"",TFG(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,190);
+    g_p0_acid=mkLbl(p,"",TFG(),&lv_font_montserrat_14,LV_ALIGN_TOP_MID,0,acidY);
     p0UpdateAcId();
 
     // ── 6 check rows (cercle bleu + label) — décalées à gauche, plus d'air entre lignes
@@ -1227,9 +1238,9 @@ void buildStatusPage(){
     // ADS-B / ADS-L et OGN / FLARM retirés (non poussés pour l'instant).
 
     // ── Batterie AT-CORE + version
-    r_p0_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,414);
-    mkLbl(p,VIEW_VER_STR,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,432);
-    r_p0_atc=mkLbl(p,"ATC --",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,438);   // (clip) ne pas coller au bord bas
+    r_p0_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,batY);
+    mkLbl(p,VIEW_VER_STR,TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,verY);
+    r_p0_atc=mkLbl(p,"ATC --",TGREY(),&lv_font_montserrat_12,LV_ALIGN_TOP_MID,0,atcY);   // bloc ré-espacé (anti-chevauchement)
 }
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
@@ -3172,14 +3183,21 @@ static lv_obj_t* g_maint_wst=nullptr;   // état WiFi live (wst/wip du STATUS AT
 // Met à jour l'annonce de MAJ dans Maintenance (appelée à chaque STATUS quand l'écran est ouvert).
 static void maintUpdAnnounce(){
     if(!g_maint_upd)return;
-    if(g_status.valid && g_status.oav>g_status.fwv){
-        char b[36]; snprintf(b,sizeof(b),"Update available: v%d",g_status.oav);
-        lv_label_set_text(g_maint_upd,b);
-        lv_obj_set_style_text_color(g_maint_upd,C_AMBER,0);
+    char b[52]; lv_color_t c;
+    if(!g_status.valid){ lv_label_set_text(g_maint_upd,""); return; }
+    // 3 états distincts pour lever l'ambiguïté du "up to date" : (1) une MAJ existe,
+    // (2) check fait à l'instant et déjà à jour (ota==5), (3) pas encore vérifié → on
+    // invite à appuyer (le seul vrai check se fait via le bouton Update, qui interroge
+    // le cloud ; l'auto-check oav n'a lieu qu'en piggyback d'un transfert).
+    if(g_status.oav>g_status.fwv){
+        snprintf(b,sizeof(b),"Update to v%d (now v%d)",g_status.oav,g_status.fwv); c=C_AMBER;
+    }else if(g_status.ota==5){
+        snprintf(b,sizeof(b),"v%d - up to date",g_status.fwv); c=C_GREEN;
     }else{
-        lv_label_set_text(g_maint_upd,"Firmware up to date");
-        lv_obj_set_style_text_color(g_maint_upd,TGREY(),0);
+        snprintf(b,sizeof(b),"v%d - tap Update to check",g_status.fwv); c=TGREY();
     }
+    lv_label_set_text(g_maint_upd,b);
+    lv_obj_set_style_text_color(g_maint_upd,c,0);
 }
 // Ligne d'état WiFi sous "Test hotspot" — wst AT-CORE : 0 idle 1 connexion
 // 2 OK 3 SSID absent 4 échec. wst est sticky côté AT-CORE (dernier résultat) →
