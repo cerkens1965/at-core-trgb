@@ -70,7 +70,9 @@
 //         lentement → conscience situationnelle préservée sans taper le forfait data.
 //   v16 : (AT-CORE v22) bouton "Reboot box" (Maintenance, double-tap) → {"cmd":"reboot"}
 //         → RST logiciel du boîtier scellé/inaccessible sans accès physique.
-#define VIEW_VERSION  "16"
+//   v17 : placement — "Reboot box" à droite de "Update" (était hors cadre bas T4 450px) ;
+//         badge "GND" déplacé à droite du point santé SafeSky.
+#define VIEW_VERSION  "17"
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -2702,7 +2704,11 @@ void buildRadarPage(){
     lv_label_set_text(r_ss_gnd, "GND");
     lv_obj_set_style_text_color(r_ss_gnd, C_AMBER, 0);
     lv_obj_set_style_text_font(r_ss_gnd, &lv_font_montserrat_14, 0);
-    lv_obj_set_pos(r_ss_gnd, RLC_X + PILL_W + 8, 64);
+#ifdef BOARD_T4S3
+    lv_obj_set_pos(r_ss_gnd, RLC_X + PILL_W + 32, 24);   // à DROITE du point santé SafeSky (r_ss_dot @ +10,23)
+#else
+    lv_obj_set_pos(r_ss_gnd, RLC_X + PILL_W + 8, 64);    // T-RGB : pas de point dédié → à côté de la pill SafeSky
+#endif
     lv_obj_add_flag(r_ss_gnd, LV_OBJ_FLAG_HIDDEN);
 
     // Outer ring
@@ -3705,14 +3711,16 @@ void mkMaintenanceOverlay(){
     mkMHdr("FIRMWARE",356);
     g_maint_ota_armed=false;
     mkMBtn("Update",30,388,260,46,C_BRAND,lv_color_hex(0xffffff),_maint_ota_cb);
-    g_maint_upd=lv_label_create(g_maint_ov);
-    lv_obj_set_style_text_font(g_maint_upd,&lv_font_montserrat_14,0);lv_obj_set_pos(g_maint_upd,310,390);
-    maintUpdAnnounce();
-    // (v22-C) Reboot soft du boîtier (filet boîtier inaccessible) — sous les labels d'état.
+    // (v22-C) Reboot soft du boîtier (filet boîtier inaccessible) — à DROITE de Update,
+    // même ligne (l'écran T4 ne fait que 450 px de haut → pas de place sous Update).
     g_maint_reboot_armed=false;
-    mkMBtn("Reboot box",310,440,260,36,C_ORANGE,lv_color_hex(0xffffff),_maint_reboot_cb);
+    mkMBtn("Reboot box",310,388,260,46,C_ORANGE,lv_color_hex(0xffffff),_maint_reboot_cb);
+    // Labels d'état firmware/wifi : ligne fine sous les 2 boutons (toujours dans le cadre).
+    g_maint_upd=lv_label_create(g_maint_ov);
+    lv_obj_set_style_text_font(g_maint_upd,&lv_font_montserrat_14,0);lv_obj_set_pos(g_maint_upd,30,440);
+    maintUpdAnnounce();
     g_maint_wst=lv_label_create(g_maint_ov);
-    lv_obj_set_style_text_font(g_maint_wst,&lv_font_montserrat_14,0);lv_obj_set_pos(g_maint_wst,310,416);
+    lv_obj_set_style_text_font(g_maint_wst,&lv_font_montserrat_14,0);lv_obj_set_pos(g_maint_wst,310,440);
     maintWifiStatus();
     // Clavier — bas d'écran, masqué par défaut, suit le textarea focalisé (au-dessus de lui).
     g_maint_kb=lv_keyboard_create(g_maint_ov);
