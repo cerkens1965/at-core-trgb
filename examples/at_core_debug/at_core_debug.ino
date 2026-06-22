@@ -11,6 +11,9 @@
 #include <LV_Helper.h>       // LV_Helper fourni par la lib AMOLED (même pattern beginLvglHelper)
 #include <SD.h>              // SD en SPI sur T4-S3 (pas de slot SD_MMC)
 #define SD_MMC SD            // quick&dirty : SDFS et SDMMCFS partagent l'API fs::FS
+#elif defined(BOARD_WS216)   // ── Waveshare ESP32-S3-Touch-AMOLED-2.16 (carré 480×480) ──
+#include "ws216_shim.h"      // Arduino_GFX CO5300 + SensorLib CST9220 + beginLvglHelper maison
+#define SD_MMC SD            // SD en SPI (comme T4) — fs::FS partagé
 #else                        // ── Cible nominale : LilyGo T-RGB circulaire 480×480 ──
 #include <LilyGo_RGBPanel.h>
 #include <LV_Helper.h>
@@ -62,7 +65,10 @@
 //   v14 : page Status (T4) tous les textes +~25% (identité 14→18, checks 14→18 + dots 22→28,
 //         versions 12→16, espacements adaptés) ; champ SSID Maintenance pré-rempli avec le
 //         dernier hotspot validé (NVS écran, fallback STATUS "wss" du boîtier).
-#define VIEW_VERSION  "14"
+//   v15 : (AT-CORE v20) badge "GND" + trafic GRIS quand SafeSky passe en mode éco sol
+//         (cadence 60 s) — pastille reste VERTE (SafeSky fonctionne), trafic rafraîchi
+//         lentement → conscience situationnelle préservée sans taper le forfait data.
+#define VIEW_VERSION  "15"
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -76,6 +82,13 @@ static inline void panelBright(uint8_t v){ amoled.setBrightness(v>=16?255:v*17);
 // 60 px à gauche/droite, 15 px rognés en haut et en bas (UI circulaire : perte négligeable)
 #define UI_OX  60
 #define UI_OY  (-15)
+#elif defined(BOARD_WS216)
+WS216_Panel panel;           // shim Arduino_GFX/SensorLib (ws216_shim.h)
+// CO5300 = brightness 0-255 → mapping ×17 depuis l'échelle config 0-16 (comme AMOLED T4)
+static inline void panelBright(uint8_t v){ panel.setBrightness(v>=16?255:v*17); }
+// Écran CARRÉ 480×480 plein cadre → pas de recadrage (canvas = écran, comme T-RGB)
+#define UI_OX  0
+#define UI_OY  0
 #else
 LilyGo_RGBPanel panel;
 static inline void panelBright(uint8_t v){ panel.setBrightness(v); }
@@ -127,6 +140,7 @@ struct StatusData {
     int mode,gps_sat,csq,frames,alt,spd,hdg,bat; float lat,lon;
     bool gps_fix,sd_ok,flarm_ok,adsb_ok,charging,valid;
     bool ss_ok;          // échange SafeSky UDP réussi < 15 s (preuve connexion, même sans trafic)
+    uint8_t ss_mode;     // (v20) cadence SafeSky AT-CORE : 0=vol · 1=sol/idle (60s) → badge GND + trafic gris
     uint8_t flt_phase;   // 0=fly 1=ended 2=closed 3=uploading 4=done 5=fail (tâche D)
     uint8_t upload_pct;  // 0..100 (tâche D)
     uint8_t flt_rdy;     // WP8 : 1=liste vols prête à lire (CHR_FLIGHTS)
@@ -187,6 +201,7 @@ static FlightData  g_flight  = {};
 static TrafficData g_traffic = {};
 static uint32_t g_ss_lost_ms = 0;   // millis() de la perte signal SafeSky (0 = signal OK) — vieillissement trafic
 static lv_obj_t* r_ss_dot = nullptr; // point santé signal (T4) : vert = UDP OK <10 s, rouge = perte
+static lv_obj_t* r_ss_gnd = nullptr; // (v20) badge "GND" : SafeSky en mode éco sol (cadence 60s)
 static AlertData   g_alert   = {};
 static DebugData   g_debug   = {};
 static volatile bool g_dataUpdated = false;
@@ -654,6 +669,7 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.hdg=d["hdg"]|0;g_status.bat=d["bat"]|-1;g_status.lat=d["lat"]|0.0f;g_status.lon=d["lon"]|0.0f;
     g_status.gps_fix=d["gps_fix"]|false;g_status.sd_ok=d["sd_ok"]|false;
     g_status.ss_ok=d["ss"]|false;
+    g_status.ss_mode=d["ssm"]|0;   // (v20) 0=vol 1=sol/idle (cadence éco)
     // Santé signal (2026-06-06) : mémorise l'instant de PERTE (ss passe false,
     // = >10 s sans échange UDP côté boîtier). Sert au vieillissement du trafic :
     // gris dès la perte, effacé à perte+20 s (= 30 s réels), cf updateRadarDR.
@@ -2676,6 +2692,17 @@ void buildRadarPage(){
     r_hdr_ble  = mkTabPill(p, LV_SYMBOL_BLUETOOTH,   434, 194);
 #endif
 
+    // (v20) Badge "GND" : SafeSky en mode éco au sol (cadence 60 s côté AT-CORE). La
+    // pastille reste VERTE (SafeSky fonctionne) ; le trafic s'affiche en GRIS = rafraîchi
+    // lentement → le pilote ne sur-fie pas à une image figée, sans taper le forfait.
+    // Caché en vol (ssm=0). Commun T4/T-RGB (RLC_X/PILL_W définis pour les deux).
+    r_ss_gnd = lv_label_create(p);
+    lv_label_set_text(r_ss_gnd, "GND");
+    lv_obj_set_style_text_color(r_ss_gnd, C_AMBER, 0);
+    lv_obj_set_style_text_font(r_ss_gnd, &lv_font_montserrat_14, 0);
+    lv_obj_set_pos(r_ss_gnd, RLC_X + PILL_W + 8, 64);
+    lv_obj_add_flag(r_ss_gnd, LV_OBJ_FLAG_HIDDEN);
+
     // Outer ring
     lv_obj_t*ro=lv_obj_create(p);lv_obj_set_size(ro,RAD_R*2,RAD_R*2);
     lv_obj_set_pos(ro,RAD_CX-RAD_R,RAD_CY-RAD_R);lv_obj_set_style_radius(ro,LV_RADIUS_CIRCLE,0);
@@ -4018,7 +4045,7 @@ void updateRadarDR(){
     // boîtier) → trafic GRIS MOYEN, le dead reckoning continue de l'extrapoler
     // sur cap/vitesse dernière connue ; à perte+20 s (= 30 s réels) sans reprise
     // → trafic EFFACÉ. Retour ss=true → couleurs normales immédiates.
-    bool ssStale = !g_status.ss_ok;
+    bool ssStale = !g_status.ss_ok || g_status.ss_mode==1;  // (v20) gris aussi en mode sol/idle (ss reste OK, mais trafic dégradé/lent)
     bool ssDead  = ssStale && g_ss_lost_ms && (millis()-g_ss_lost_ms > 20000);
     // dt + compensation du mouvement propre sont désormais PAR AVION (base_ms par
     // entrée, posé dans parseTraffic) : la DR ne se réinitialise plus à chaque paquet
@@ -4456,6 +4483,10 @@ void updateAllPages(){
      // Point santé signal : vert = UDP OK, rouge = perte (≥10 s) — retour vert immédiat
      if(r_ss_dot) lv_obj_set_style_bg_color(r_ss_dot,
          (g_connected&&g_status.valid&&g_status.ss_ok)?C_GREEN:C_RED,0);
+     // (v20) Badge GND visible quand SafeSky est en mode éco sol (ssm=1) → trafic gris.
+     if(r_ss_gnd){ if(g_connected&&g_status.valid&&g_status.ss_mode==1)
+              lv_obj_clear_flag(r_ss_gnd,LV_OBJ_FLAG_HIDDEN);
+          else lv_obj_add_flag(r_ss_gnd,LV_OBJ_FLAG_HIDDEN); }
      // FLARM / ADS-B retirés du radar (pastilles supprimées).
      // Battery — g_status.bat (STATUS char, ~1s) prioritaire sur g_debug.bat_pct (DEBUG char).
      // Charging (champ "chg" JSON STATUS) détecté AT-CORE : hausse tension OU float ≥4.13V.
@@ -4714,6 +4745,12 @@ void setup(){
     Serial.println("Touch: CST226SE (T4-S3)");
     delay(50); // card power-on stabilization
     g_sd_ok=amoled.installSD();   // SD en SPI (MISO 4 / MOSI 2 / SCK 3 / CS 1)
+#elif defined(BOARD_WS216)
+    // Waveshare 2.16 : init CO5300 + touch CST9220 + SD SPI via le shim (ws216_shim.h)
+    if(!panel.begin()){while(1){Serial.println("Panel FAIL");delay(1000);}}
+    Serial.printf("Touch: %s\n",panel.getTouchModelName());
+    delay(50); // card power-on stabilization
+    g_sd_ok=panel.installSD();   // SD en SPI (best-effort : échec non fatal)
 #else
     if(!panel.begin()){while(1){Serial.println("Panel FAIL");delay(1000);}}
     Serial.printf("Touch: %s\n",panel.getTouchModelName());
