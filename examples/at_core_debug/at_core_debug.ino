@@ -68,7 +68,9 @@
 //   v15 : (AT-CORE v20) badge "GND" + trafic GRIS quand SafeSky passe en mode éco sol
 //         (cadence 60 s) — pastille reste VERTE (SafeSky fonctionne), trafic rafraîchi
 //         lentement → conscience situationnelle préservée sans taper le forfait data.
-#define VIEW_VERSION  "15"
+//   v16 : (AT-CORE v22) bouton "Reboot box" (Maintenance, double-tap) → {"cmd":"reboot"}
+//         → RST logiciel du boîtier scellé/inaccessible sans accès physique.
+#define VIEW_VERSION  "16"
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -3618,6 +3620,24 @@ static void _maint_ota_cb(lv_event_t*e){
     sendCtl("otaupdate");   // AT-CORE : connecte hotspot → check version → download → flash
 }
 
+// (v22-C) Reboot LOGICIEL du boîtier (scellé/inaccessible) : double-tap → {"cmd":"reboot"}.
+// Le SIM7600 n'est pas power-cyclé → almanac GPS préservé → re-fix rapide. Sert de filet
+// quand le pilote voit un blocage et ne peut pas atteindre le bouton RST physique.
+static bool g_maint_reboot_armed=false;
+static void _maint_reboot_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
+    if(!g_maint_reboot_armed){
+        g_maint_reboot_armed=true;
+        if(l)lv_label_set_text(l,"Confirm reboot?");
+        lv_obj_set_style_bg_color(b,C_AMBER,0);
+        return;
+    }
+    g_maint_reboot_armed=false;
+    if(l)lv_label_set_text(l,"Reboot box");
+    sendCtl("reboot");
+}
+
 void mkMaintenanceOverlay(){
     if(g_maint_ov)return;
     g_maint_ov=lv_obj_create(lv_scr_act());
@@ -3688,6 +3708,9 @@ void mkMaintenanceOverlay(){
     g_maint_upd=lv_label_create(g_maint_ov);
     lv_obj_set_style_text_font(g_maint_upd,&lv_font_montserrat_14,0);lv_obj_set_pos(g_maint_upd,310,390);
     maintUpdAnnounce();
+    // (v22-C) Reboot soft du boîtier (filet boîtier inaccessible) — sous les labels d'état.
+    g_maint_reboot_armed=false;
+    mkMBtn("Reboot box",310,440,260,36,C_ORANGE,lv_color_hex(0xffffff),_maint_reboot_cb);
     g_maint_wst=lv_label_create(g_maint_ov);
     lv_obj_set_style_text_font(g_maint_wst,&lv_font_montserrat_14,0);lv_obj_set_pos(g_maint_wst,310,416);
     maintWifiStatus();
@@ -3787,6 +3810,16 @@ void mkMaintenanceOverlay(){
     lv_obj_set_style_border_width(bo,0,0);lv_obj_set_style_shadow_opa(bo,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bo,_maint_ota_cb,LV_EVENT_CLICKED,NULL);
     {lv_obj_t*l=lv_label_create(bo);lv_label_set_text(l,"Update firmware");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+    // (v22-C) Reboot soft du boîtier (filet boîtier inaccessible).
+    g_maint_reboot_armed=false;
+    {lv_obj_t*br=lv_btn_create(g_maint_ov);lv_obj_set_size(br,300,32);
+     lv_obj_align(br,LV_ALIGN_TOP_MID,0,344);
+     lv_obj_set_style_bg_color(br,C_ORANGE,0);lv_obj_set_style_radius(br,8,0);
+     lv_obj_set_style_border_width(br,0,0);lv_obj_set_style_shadow_opa(br,LV_OPA_TRANSP,0);
+     lv_obj_add_event_cb(br,_maint_reboot_cb,LV_EVENT_CLICKED,NULL);
+     lv_obj_t*l=lv_label_create(br);lv_label_set_text(l,"Reboot box");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
     // Annonce de MAJ firmware (ambre "Update available: vN" si dispo, gris "up to date" sinon).
@@ -4770,6 +4803,21 @@ void setup(){
         Serial.printf("[SD] OK %uGB\n",g_sd_gb);
     }else{Serial.println("[SD] No card");}
     beginLvglHelper(panel);
+#ifdef BOARD_WS216
+    // ── DIAG couleur TEMPORAIRE (à retirer) : direct gfx puis LVGL, couleurs connues ──
+    {
+      const uint16_t cc[5]={0xF800,0x07E0,0x001F,0xFFFF,0x0000};
+      const uint32_t hh[5]={0xFF0000,0x00FF00,0x0000FF,0xFFFFFF,0x000000};
+      const char* nn[5]={"RED","GREEN","BLUE","WHITE","BLACK"};
+      for(int i=0;i<5;i++){Serial.printf("[DIAG direct] %s\n",nn[i]);ws_gfx->fillScreen(cc[i]);delay(1300);}
+      for(int i=0;i<5;i++){
+        Serial.printf("[DIAG lvgl] %s\n",nn[i]);
+        lv_obj_set_style_bg_color(lv_scr_act(),lv_color_hex(hh[i]),0);
+        lv_obj_set_style_bg_opa(lv_scr_act(),LV_OPA_COVER,0);
+        for(int k=0;k<40;k++){lv_timer_handler();delay(20);}
+      }
+    }
+#endif
     // Le canvas 480×480 décalé (UI_OY<0 sur T4-S3) déborde de l'écran → sans ceci,
     // LVGL rend l'écran scrollable et dessine une scrollbar verticale grise au bord
     // droit (pleine hauteur). Toujours OFF : l'UI ne doit jamais scroller l'écran.
