@@ -118,10 +118,18 @@ pio run -e WS-216 -t upload        # build (flag -DBOARD_WS216)
   **tournée 90°** vs l'affichage. Transform validé sur les 4 coins :
   `screen_x = (480-1) - touch_y` ; `screen_y = touch_x`. (Alternative SensorLib :
   `setSwapXY(true)` + miroir X.)
-- **À faire post-validation** : greffer l'UI via shims `#ifdef BOARD_WS216` (modèle du
-  portage T4-S3) — **appliquer le mapping tactile ci-dessus** dans le read-cb LVGL ;
-  init AXP2101 via XPowersLib pour l'intégration complète. Atout du format carré : les
-  coins (perdus sur le cercle T-RGB) redeviennent exploitables. Cf. [[ws216_third_target]].
+- **Portage UI (2026-06-22) — ✅ compile** : firmware AT-VIEW complet branché sur la
+  WS-216. Shim hardware `examples/at_core_debug/ws216_shim.h` (objet `panel` +
+  `beginLvglHelper` maison : double buffer PSRAM, flush `draw16bitBeRGBBitmap`, indev
+  touch avec le mapping 90° ci-dessus). lv_conf dédié `include/lv_conf_ws216.h` (copie
+  T-RGB swap=0 → assets logos réutilisés). 3 branches `#elif defined(BOARD_WS216)` dans
+  le `.ino` (includes, decl `panel`+`panelBright`, init `setup()`). Écran **carré** →
+  prend les branches UI `#else` du T-RGB (pas le layout paysage T4). Build : Flash 30.0%
+  (1.97 MB), RAM 27.4% — mêmes chiffres que T-RGB/T4. ⚠ `LV_CONF_PATH=lv_conf_ws216.h`
+  exige `-Iinclude` (sinon la lib lvgl ne trouve pas le conf). **Validation UI hardware
+  à faire** (rendu pages + touch réel).
+- **À faire** : init AXP2101 via XPowersLib (optionnel — rail écran ON au POR) ;
+  exploiter les coins du format carré (perdus sur le cercle T-RGB). Cf. [[ws216_third_target]].
 
 ## Architecture — Pages LVGL
 
