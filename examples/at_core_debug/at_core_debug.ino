@@ -35,6 +35,18 @@
 #include "img_safesky.h"
 #include "img_flarm.h"
 #include "img_logos.h"
+#include <string>
+
+// ── Compat BLE core 2.x / 3.x ────────────────────────────────────────────────────
+// Les getters BLE (getManufacturerData / getAddress().toString() / readValue()) renvoient
+// std::string en core 2.x (Bluedroid historique) mais Arduino String en core 3.x. Ce helper
+// normalise en std::string en PRÉSERVANT les octets (manuf-data binaire → pas de troncature
+// sur un éventuel 0x00), pour garder le code aval (size()/[]/== std::string) inchangé.
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+static inline std::string bleStr(const String& s){ return std::string(s.c_str(), s.length()); }
+#else
+static inline const std::string& bleStr(const std::string& s){ return s; }
+#endif
 
 // ── Version AT-VIEW (T-RGB / T4-S3) ─────────────────────────────────────────────
 // Entier incrémenté À CHAQUE flash/release (même discipline que FW_VERSION côté
@@ -72,7 +84,11 @@
 //         → RST logiciel du boîtier scellé/inaccessible sans accès physique.
 //   v17 : placement — "Reboot box" à droite de "Update" (était hors cadre bas T4 450px) ;
 //         badge "GND" déplacé à droite du point santé SafeSky.
-#define VIEW_VERSION  "17"
+//   v18 : badge "GND" affiché SEULEMENT si SafeSky vert (ss_ok) → plus de "GND + rouge"
+//         trompeur quand le data est down (ex. antenne LTE débranchée).
+//   v19 : WS-216 migrée sur pile Waveshare (ESP32 core 3.x pioarduino + GFX 1.6.4) → noir
+//         CO5300 enfin profond. + fix conflit SPI : SD isolée sur HSPI (SPI2/FSPI = écran).
+#define VIEW_VERSION  "19"
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -175,7 +191,11 @@ static const char*   kIconSzNames[]={"S","M","L"};
 static const uint16_t kIconZoom[]={320,384,448};  // zoom for 60/72/84 px from 48px base (L=84px = 1.5× — visibilité vol 2026-06-08)
 static const int8_t  kIconHalf[]={30,36,42};
 struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd,wifi_en,aip_en,ad_heli,spd_kt; int16_t vfilt_ft; uint8_t icon_sz; };
-static CfgData     g_cfg={4,16,3,true,true,true,true,false,true,false,2000,2};
+// NB : l'init historique {…,false,2000,2} décalait les champs (le 2000 tombait sur le
+// bool spd_kt → true, vfilt_ft recevait 2, icon_sz défaut 0). Core 3.x refuse le narrowing
+// 2000→bool ; on fige ici EXACTEMENT les valeurs que core 2.x calculait (spd_kt=true,
+// vfilt_ft=2, icon_sz=0) pour ne pas changer le comportement existant.
+static CfgData     g_cfg={4,16,3,true,true,true,true,false,true,false,true,2,0};
 // Segmented toggle (UI Settings T4-S3). Types + registres déclarés
 // INCONDITIONNELLEMENT (2026-06-08) : les fonctions seg*/updSeg* ne sont pas
 // guardées #ifdef BOARD_T4S3 → sur T-RGB le type doit exister quand même (les
@@ -760,14 +780,14 @@ static void notifyP(BLERemoteCharacteristic*,uint8_t*d,size_t l,bool){
 // Boîtier en mode pairing ? AT-CORE pousse une manuf-data FF FF <pairable>.
 static bool advPairable(BLEAdvertisedDevice& d){
     if(!d.haveManufacturerData())return false;
-    std::string m=d.getManufacturerData();
+    std::string m=bleStr(d.getManufacturerData());
     if(m.size()<3)return false;
     return (uint8_t)m[0]==0xFF && (uint8_t)m[1]==0xFF && (uint8_t)m[2]==0x01;}
 
 // Insère/actualise un candidat pairing dans g_pcand (appelé depuis le cb scan).
 void pcandUpsert(BLEAdvertisedDevice& d){
     if(!g_pcand_mx)return;
-    std::string mac=d.getAddress().toString();
+    std::string mac=bleStr(d.getAddress().toString());
     if(xSemaphoreTake(g_pcand_mx,pdMS_TO_TICKS(20))!=pdTRUE)return;
     int idx=-1;
     for(int i=0;i<g_pcand_n;i++) if(mac==std::string(g_pcand[i].mac)){idx=i;break;}
@@ -800,7 +820,7 @@ class ATCAdv:public BLEAdvertisedDeviceCallbacks{
     void onResult(BLEAdvertisedDevice dev)override{
         String nm=dev.getName().c_str();
         if(!nm.startsWith("ATC-"))return;   // nom AT-CORE = ATC-<MAC> (ex ATC-CE276D)
-        std::string mac=dev.getAddress().toString();
+        std::string mac=bleStr(dev.getAddress().toString());
         if(g_paired_mac[0]!=0){
             // Déjà lié → on ne se connecte qu'à NOTRE boîtier (anti-cross-talk).
             if(mac!=std::string(g_paired_mac))return;
@@ -3488,7 +3508,7 @@ static void _vols_clean_cb(lv_event_t*e){
 static void volsBuildList(){
     if(!g_chrFl||!g_vols_list)return;
     if(g_vols_load){lv_obj_add_flag(g_vols_load,LV_OBJ_FLAG_HIDDEN);}
-    std::string v=g_chrFl->readValue();
+    std::string v=bleStr(g_chrFl->readValue());
     JsonDocument d; if(deserializeJson(d,v.c_str()))return;
     JsonArray arr=d.as<JsonArray>();
     lv_obj_clean(g_vols_list); g_vols_n=0;
@@ -4524,8 +4544,10 @@ void updateAllPages(){
      // Point santé signal : vert = UDP OK, rouge = perte (≥10 s) — retour vert immédiat
      if(r_ss_dot) lv_obj_set_style_bg_color(r_ss_dot,
          (g_connected&&g_status.valid&&g_status.ss_ok)?C_GREEN:C_RED,0);
-     // (v20) Badge GND visible quand SafeSky est en mode éco sol (ssm=1) → trafic gris.
-     if(r_ss_gnd){ if(g_connected&&g_status.valid&&g_status.ss_mode==1)
+     // (v18) Badge GND visible UNIQUEMENT si SafeSky fonctionne (ss_ok=vert) ET en mode éco
+     // sol (ssm=1). Si SafeSky est ROUGE (data down), on cache GND → pas de "GND + rouge"
+     // trompeur (GND laisserait croire que tout va bien alors que le data est mort).
+     if(r_ss_gnd){ if(g_connected&&g_status.valid&&g_status.ss_ok&&g_status.ss_mode==1)
               lv_obj_clear_flag(r_ss_gnd,LV_OBJ_FLAG_HIDDEN);
           else lv_obj_add_flag(r_ss_gnd,LV_OBJ_FLAG_HIDDEN); }
      // FLARM / ADS-B retirés du radar (pastilles supprimées).
@@ -4811,21 +4833,6 @@ void setup(){
         Serial.printf("[SD] OK %uGB\n",g_sd_gb);
     }else{Serial.println("[SD] No card");}
     beginLvglHelper(panel);
-#ifdef BOARD_WS216
-    // ── DIAG couleur TEMPORAIRE (à retirer) : direct gfx puis LVGL, couleurs connues ──
-    {
-      const uint16_t cc[5]={0xF800,0x07E0,0x001F,0xFFFF,0x0000};
-      const uint32_t hh[5]={0xFF0000,0x00FF00,0x0000FF,0xFFFFFF,0x000000};
-      const char* nn[5]={"RED","GREEN","BLUE","WHITE","BLACK"};
-      for(int i=0;i<5;i++){Serial.printf("[DIAG direct] %s\n",nn[i]);ws_gfx->fillScreen(cc[i]);delay(1300);}
-      for(int i=0;i<5;i++){
-        Serial.printf("[DIAG lvgl] %s\n",nn[i]);
-        lv_obj_set_style_bg_color(lv_scr_act(),lv_color_hex(hh[i]),0);
-        lv_obj_set_style_bg_opa(lv_scr_act(),LV_OPA_COVER,0);
-        for(int k=0;k<40;k++){lv_timer_handler();delay(20);}
-      }
-    }
-#endif
     // Le canvas 480×480 décalé (UI_OY<0 sur T4-S3) déborde de l'écran → sans ceci,
     // LVGL rend l'écran scrollable et dessine une scrollbar verticale grise au bord
     // droit (pleine hauteur). Toujours OFF : l'UI ne doit jamais scroller l'écran.

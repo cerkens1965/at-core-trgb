@@ -97,9 +97,16 @@ pio run -e WS-216 -t upload        # build (flag -DBOARD_WS216)
 | PMIC | AXP2101 (I²C @0x34) — rail écran **ON au POR** (pas requis pour bring-up) |
 | Autres | RTC PCF85063, IMU QMI8658, codec ES8311 + ES7210 (audio, non utilisé), SD **SPI** |
 
-- **Pile d'affichage** : `Arduino_GFX` (`Arduino_CO5300`, présent dès **GFX 1.5.0**
-  déjà épinglée pour le T-RGB) — **PAS** le `src/` T-RGB (ST7701 RGB parallèle) ni la
-  lib LilyGo-AMOLED (RM690B0). Touch via **SensorLib 0.4.1** umbrella `TouchDrvCSTXXX`
+- **⚠ Pile spécifique WS-216 = ESP32 Arduino core 3.x (pioarduino) + GFX 1.6.4.** Contrairement
+  au T-RGB/T4 (core 2.x `espressif32@6.9.0` + GFX 1.5.0), l'env WS-216 utilise
+  `platform = https://github.com/pioarduino/platform-espressif32/.../53.03.13` + `GFX @ 1.6.4`.
+  **Obligatoire pour le CO5300** : en GFX 1.5.0 (driver CO5300 basé `Arduino_TFT`) le **noir
+  sortait verdâtre** ; la 1.6.4 (driver réécrit `Arduino_OLED`) rend un noir profond. 1.6.x
+  exige core 3.x (`esp32-hal-periman.h`). Test de référence isolé : `examples/ws216_blacktest`.
+  Le `.ino` reste cross-core (helper `bleStr()` pour l'API BLE String↔std::string selon
+  `ESP_ARDUINO_VERSION_MAJOR`).
+- **Pile d'affichage** : `Arduino_GFX` (`Arduino_CO5300`) — **PAS** le `src/` T-RGB
+  (ST7701 RGB parallèle) ni la lib LilyGo-AMOLED (RM690B0). Touch via **SensorLib 0.4.1** umbrella `TouchDrvCSTXXX`
   (`#include <TouchDrvCSTXXX.hpp>` — le header racine forwarde `src/touch/`, sinon
   `TouchDrvCST92xx.h` est introuvable car les sous-dossiers ne sont pas sur l'include path).
 - **Pinout** (source = **BSP ESP-IDF officiel**, fait autorité) : QSPI CS=12, SCK=38,
@@ -118,16 +125,19 @@ pio run -e WS-216 -t upload        # build (flag -DBOARD_WS216)
   **tournée 90°** vs l'affichage. Transform validé sur les 4 coins :
   `screen_x = (480-1) - touch_y` ; `screen_y = touch_x`. (Alternative SensorLib :
   `setSwapXY(true)` + miroir X.)
-- **Portage UI (2026-06-22) — ✅ compile** : firmware AT-VIEW complet branché sur la
-  WS-216. Shim hardware `examples/at_core_debug/ws216_shim.h` (objet `panel` +
-  `beginLvglHelper` maison : double buffer PSRAM, flush `draw16bitBeRGBBitmap`, indev
-  touch avec le mapping 90° ci-dessus). lv_conf dédié `include/lv_conf_ws216.h` (copie
-  T-RGB swap=0 → assets logos réutilisés). 3 branches `#elif defined(BOARD_WS216)` dans
-  le `.ino` (includes, decl `panel`+`panelBright`, init `setup()`). Écran **carré** →
-  prend les branches UI `#else` du T-RGB (pas le layout paysage T4). Build : Flash 30.0%
-  (1.97 MB), RAM 27.4% — mêmes chiffres que T-RGB/T4. ⚠ `LV_CONF_PATH=lv_conf_ws216.h`
-  exige `-Iinclude` (sinon la lib lvgl ne trouve pas le conf). **Validation UI hardware
-  à faire** (rendu pages + touch réel).
+- **Portage UI — ✅ VALIDÉ HARDWARE (2026-06-22)** : firmware AT-VIEW complet sur la WS-216,
+  rendu propre (noirs profonds, couleurs justes, texte net) + tactile OK. Shim
+  `examples/at_core_debug/ws216_shim.h` : flush `draw16bitRGBBitmap` (swap=0), buffer LVGL
+  partiel 40 lignes en RAM **interne** (`MALLOC_CAP_INTERNAL`, pas DMA), indev mapping 90°.
+  lv_conf dédié `include/lv_conf_ws216.h` (swap=0 → assets logos réutilisés). Écran **carré**
+  → branches UI `#else` du T-RGB. ⚠ `LV_CONF_PATH=lv_conf_ws216.h` exige `-Iinclude`.
+- **🩺 3 pièges WS-216 résolus (à NE PAS réintroduire) — cf. [[ws216_co5300_green_black]]** :
+  1. **Noir verdâtre** ← GFX 1.5.0 (driver CO5300 `Arduino_TFT`). Fix = **GFX 1.6.4 + core 3.x**
+     (driver `Arduino_OLED`). Aucun registre vendeur (page 0x20 etc.) ne corrige sur 1.5.0.
+  2. **Couleurs corrompues au boot** ← `installSD()` faisait `SPI.begin()` sur **FSPI/SPI2**,
+     l'hôte de l'écran QSPI → réinit du bus écran. Fix = **SD sur HSPI** (`SPIClass{HSPI}` dédié).
+  3. **Texte live baveux/dédoublé** ← pas d'alignement 2 px des zones de flush partielles.
+     Fix = **`rounder_cb`** (x/y début pairs, fin impairs), repris du BSP d'usine.
 - **À faire** : init AXP2101 via XPowersLib (optionnel — rail écran ON au POR) ;
   exploiter les coins du format carré (perdus sur le cercle T-RGB). Cf. [[ws216_third_target]].
 
