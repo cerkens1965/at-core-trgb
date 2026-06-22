@@ -109,14 +109,19 @@ pio run -e WS-216 -t upload        # build (flag -DBOARD_WS216)
   buggé de la variante ronde 1.75C** (annonce 466×466 + display RST=GPIO2 qui collisionne
   SD_CLK). Ne pas s'y fier — utiliser les valeurs BSP ci-dessus. Le HelloWorld vendeur
   "marche" quand même car 466 sur 480 = image juste rognée.
-- **Bring-up** : `examples/ws216_bringup/ws216_bringup.ino` (autonome, valide écran +
-  ordre couleur R/V/B + géométrie/orientation par mire de coins + touch). Sélection via
-  la ligne `src_dir = examples/ws216_bringup` commentée dans `platformio.ini`. **Compile
-  OK** ; **validation hardware en attente** (MADCTL 0x36=0xA0 vendeur, rotation, offsets
-  à figer selon l'affichage réel — cf. [[ws216_third_target]]).
+- **Bring-up** : `examples/ws216_bringup/ws216_bringup.ino` (autonome). **✅ Validé
+  hardware (2026-06-22)** : `gfx->begin()` OK, `touch.begin(0x5A)` OK, écran droit
+  (rouge en haut-gauche, texte lisible → MADCTL `0xA0` + rotation 0 = orientation
+  correcte, ordre couleur RGB OK), tactile linéaire pleine échelle. Sélection via la
+  ligne `src_dir = examples/ws216_bringup` commentée dans `platformio.ini`.
+- **🧭 Mapping tactile → écran (calibré, à réutiliser dans l'UI)** : la dalle est
+  **tournée 90°** vs l'affichage. Transform validé sur les 4 coins :
+  `screen_x = (480-1) - touch_y` ; `screen_y = touch_x`. (Alternative SensorLib :
+  `setSwapXY(true)` + miroir X.)
 - **À faire post-validation** : greffer l'UI via shims `#ifdef BOARD_WS216` (modèle du
-  portage T4-S3) ; init AXP2101 via XPowersLib pour l'intégration complète. Atout du
-  format carré : les coins (perdus sur le cercle T-RGB) redeviennent exploitables.
+  portage T4-S3) — **appliquer le mapping tactile ci-dessus** dans le read-cb LVGL ;
+  init AXP2101 via XPowersLib pour l'intégration complète. Atout du format carré : les
+  coins (perdus sur le cercle T-RGB) redeviennent exploitables. Cf. [[ws216_third_target]].
 
 ## Architecture — Pages LVGL
 

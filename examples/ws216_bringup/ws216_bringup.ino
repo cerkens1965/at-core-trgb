@@ -119,8 +119,17 @@ void loop() {
     int16_t x[5], y[5];
     uint8_t n = touch.getPoint(x, y, 5);
     if (n > 0) {
-      Serial.printf("[WS216] touch n=%u  p0=(%d,%d)\n", n, x[0], y[0]);
-      gfx->fillCircle(x[0], y[0], 6, RGB565_YELLOW);
+      // ── Mapping touch → écran (calibré 2026-06-22) ───────────────────────
+      // La dalle tactile est tournée à 90° par rapport à l'affichage :
+      //   screen_x = (W-1) - touch_y   ;   screen_y = touch_x
+      // (vérifié sur les 4 coins ancrés couleur — cf. CLAUDE.md / mémoire).
+      int sx = (WS216_LCD_W - 1) - y[0];
+      int sy = x[0];
+      if (sx < 0) sx = 0; else if (sx >= WS216_LCD_W) sx = WS216_LCD_W - 1;
+      if (sy < 0) sy = 0; else if (sy >= WS216_LCD_H) sy = WS216_LCD_H - 1;
+      Serial.printf("[WS216] touch n=%u raw=(%d,%d) -> screen=(%d,%d)\n",
+                    n, x[0], y[0], sx, sy);
+      gfx->fillCircle(sx, sy, 6, RGB565_YELLOW);
     }
   }
   delay(15);
