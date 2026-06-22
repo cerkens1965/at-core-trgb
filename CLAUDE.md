@@ -79,6 +79,45 @@ pio run -e T4-S3            # build (flag -DBOARD_T4S3 active les shims)
   AT-CORE 7600 S3 = `20:6e:f1:ce:27:6c` (⚠ sonder un port fige la carte → RST).
 - Page #01 affiche ATV (version locale) + ATC (version AT-CORE live BLE).
 
+## Variante Waveshare AMOLED 2.16" (2026-06-22)
+
+Troisième hardware supporté : **Waveshare ESP32-S3-Touch-AMOLED-2.16** — AMOLED
+**carré 480×480** (≠ T-RGB circulaire, ≠ T4 paysage). Même firmware visé, env
+PlatformIO dédié :
+
+```bash
+pio run -e WS-216 -t upload        # build (flag -DBOARD_WS216)
+```
+
+| Composant | Détail |
+|-----------|--------|
+| SoC | ESP32-S3R8 — 8 MB PSRAM **OPI** / 16 MB flash (`board_build.arduino.memory_type = qio_opi`) |
+| Écran | 480×480 AMOLED **carré**, driver **CO5300** (QSPI) |
+| Touch | **CST9220** (famille CST92xx, I²C @0x5A) |
+| PMIC | AXP2101 (I²C @0x34) — rail écran **ON au POR** (pas requis pour bring-up) |
+| Autres | RTC PCF85063, IMU QMI8658, codec ES8311 + ES7210 (audio, non utilisé), SD **SPI** |
+
+- **Pile d'affichage** : `Arduino_GFX` (`Arduino_CO5300`, présent dès **GFX 1.5.0**
+  déjà épinglée pour le T-RGB) — **PAS** le `src/` T-RGB (ST7701 RGB parallèle) ni la
+  lib LilyGo-AMOLED (RM690B0). Touch via **SensorLib 0.4.1** umbrella `TouchDrvCSTXXX`
+  (`#include <TouchDrvCSTXXX.hpp>` — le header racine forwarde `src/touch/`, sinon
+  `TouchDrvCST92xx.h` est introuvable car les sous-dossiers ne sont pas sur l'include path).
+- **Pinout** (source = **BSP ESP-IDF officiel**, fait autorité) : QSPI CS=12, SCK=38,
+  D0-3=4/5/6/7, **display RST=39**, **touch RST=40 / INT=11**, I²C SDA=15/SCL=14,
+  SD SPI MOSI=1/SCK=2/MISO=3/CS=41. Centralisé dans `examples/ws216_bringup/pin_config_ws216.h`.
+- **⚠ Piège** : le `pin_config.h` Arduino livré par Waveshare est un **copier-coller
+  buggé de la variante ronde 1.75C** (annonce 466×466 + display RST=GPIO2 qui collisionne
+  SD_CLK). Ne pas s'y fier — utiliser les valeurs BSP ci-dessus. Le HelloWorld vendeur
+  "marche" quand même car 466 sur 480 = image juste rognée.
+- **Bring-up** : `examples/ws216_bringup/ws216_bringup.ino` (autonome, valide écran +
+  ordre couleur R/V/B + géométrie/orientation par mire de coins + touch). Sélection via
+  la ligne `src_dir = examples/ws216_bringup` commentée dans `platformio.ini`. **Compile
+  OK** ; **validation hardware en attente** (MADCTL 0x36=0xA0 vendeur, rotation, offsets
+  à figer selon l'affichage réel — cf. [[ws216_third_target]]).
+- **À faire post-validation** : greffer l'UI via shims `#ifdef BOARD_WS216` (modèle du
+  portage T4-S3) ; init AXP2101 via XPowersLib pour l'intégration complète. Atout du
+  format carré : les coins (perdus sur le cercle T-RGB) redeviennent exploitables.
+
 ## Architecture — Pages LVGL
 
 | Page | Accès | Contenu |
