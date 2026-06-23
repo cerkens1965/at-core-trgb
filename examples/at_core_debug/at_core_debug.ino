@@ -255,6 +255,7 @@ static BLERemoteCharacteristic *g_chrS=nullptr,*g_chrF=nullptr,
 static char    g_prx_buf[4096] = {};
 static int     g_prx_len       = 0;
 static volatile bool g_connected=false, g_doConnect=false, g_doReconnect=false;
+static volatile bool g_scanning=false;   // (juin 2026) scan BLE async en cours (anti-relance + reset propre)
 uint32_t g_connect_ms = 0;   // millis() au moment de la connexion BLE (0 si pas connecte)
 static BLEAdvertisedDevice*    g_target = nullptr;
 
@@ -818,7 +819,7 @@ void pcandUpsert(BLEAdvertisedDevice& d){
 
 // Arme la connexion vers un device (chemin commun : reconnexion liée + pairing).
 void connectTarget(BLEAdvertisedDevice& dev){
-    BLEDevice::getScan()->stop();
+    BLEDevice::getScan()->stop();g_scanning=false;   // scan stoppé → libère le flag (sinon reconnexion future bloquée)
     if(g_target){delete g_target;g_target=nullptr;}
     g_target=new BLEAdvertisedDevice(dev);g_doConnect=true;}
 
@@ -832,6 +833,7 @@ class ATCCB:public BLEClientCallbacks{
         g_peer_name[0]=0;g_prx_len=0;  // reset pilots buffer — évite données résiduelles
         // Reset latches page 0 → progression repart de zero a la reconnexion
         for(int i=0;i<N_CHK;i++)g_chk_latched[i]=false;
+        g_scanning=false;   // permet au scan de reconnexion de démarrer
         g_dataUpdated=true;g_doReconnect=true;Serial.println("[BLE] Disconnected");}};
 class ATCAdv:public BLEAdvertisedDeviceCallbacks{
     void onResult(BLEAdvertisedDevice dev)override{
@@ -900,7 +902,22 @@ bool connectBLE(){
     // si l'identité locale n'est pas renseignée ou si CHR_CONFIG non inscriptible.
     acPushBLE();
     return true;}
-void startScan(){BLEScan*s=BLEDevice::getScan();s->setAdvertisedDeviceCallbacks(new ATCAdv());s->setActiveScan(true);s->start(5,false);}
+// (juin 2026) SCAN BLE ASYNCHRONE — cause racine du tactile « lent/fastidieux » :
+// l'ancien `s->start(5,false)` BLOQUAIT la boucle 5 s (mesuré loopMax=5007ms) → tous
+// les taps pendant le scan étaient perdus (« j'appuie plusieurs fois, parfois ça marche »).
+// Variante asynchrone `start(5, cb, false)` : retourne immédiatement, le callback ATCAdv
+// arme la connexion quand le boîtier apparaît, scanDoneCb libère le flag à la fin. De plus :
+// instance ATCAdv UNIQUE (l'ancien `new ATCAdv()` à chaque scan fuyait de la mémoire).
+static void scanDoneCb(BLEScanResults){ g_scanning=false; }
+void startScan(){
+    if(g_scanning||g_connected||g_doConnect) return;   // pas de scan inutile/concurrent
+    static ATCAdv s_atcAdv;                              // singleton (plus de fuite)
+    BLEScan*s=BLEDevice::getScan();
+    s->setAdvertisedDeviceCallbacks(&s_atcAdv);
+    s->setActiveScan(true);
+    g_scanning=true;
+    if(!s->start(5,scanDoneCb,false)) g_scanning=false;  // ASYNCHRONE → la boucle n'est plus figée
+}
 
 // ── Navigation & swipe ────────────────────────────────────────────────────────
 void switchPage(uint8_t np){
@@ -5204,7 +5221,20 @@ void setup(){
         if(!SD_MMC.exists("/aip"))SD_MMC.mkdir("/aip");
         Serial.printf("[SD] OK %uGB\n",g_sd_gb);
     }else{Serial.println("[SD] No card");}
+#ifdef BOARD_T4S3
+    // (juin 2026) RÉACTIVITÉ TACTILE — cause racine : beginLvglHelper (non-DMA) alloue un
+    // buffer PLEIN ÉCRAN de ~540 KB en PSRAM (lente) + flush SYNCHRONE bloquant (pushColors)
+    // → la boucle reste figée pendant chaque rendu/transition, le tactile paraît lent/raté.
+    // beginLvglHelperDMA : double buffer 1/10 d'écran en RAM INTERNE rapide + flush DMA
+    // ASYNCHRONE (pushColorsDMA) → la boucle n'est plus bloquée par le push pixels. C'est
+    // la voie « perf » prévue par LilyGo (exemples factory T4). Geometry/rounder inchangés.
+    beginLvglHelperDMA(panel);
+    // En complément : échantillonnage tactile 30→12 ms (lecture du touch plus fréquente).
+    for(lv_indev_t* d=lv_indev_get_next(NULL); d; d=lv_indev_get_next(d))
+        if(d->driver && d->driver->read_timer) lv_timer_set_period(d->driver->read_timer,12);
+#else
     beginLvglHelper(panel);
+#endif
     // Le canvas 480×480 décalé (UI_OY<0 sur T4-S3) déborde de l'écran → sans ceci,
     // LVGL rend l'écran scrollable et dessine une scrollbar verticale grise au bord
     // droit (pleine hauteur). Toujours OFF : l'UI ne doit jamais scroller l'écran.
@@ -5244,7 +5274,7 @@ void loop(){
     if(g_doReconnect){g_doReconnect=false;startScan();}
     if(g_doConnect&&!g_connected){g_doConnect=false;
         if(connectBLE())Serial.println("[BLE] OK");
-        else{delay(2000);startScan();}}
+        else startScan();}   // (juin 2026) plus de delay(2000) bloquant : scan async + throttle 8 s gèrent la cadence
     if(!g_connected&&!g_doConnect){
         static uint32_t ls=0;if(now-ls>8000){ls=now;startScan();}}
     // ── Pairing AT-CORE : tant qu'aucun boîtier n'est lié, overlay de sélection ──
