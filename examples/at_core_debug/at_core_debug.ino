@@ -195,7 +195,7 @@ struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,s
 // bool spd_kt → true, vfilt_ft recevait 2, icon_sz défaut 0). Core 3.x refuse le narrowing
 // 2000→bool ; on fige ici EXACTEMENT les valeurs que core 2.x calculait (spd_kt=true,
 // vfilt_ft=2, icon_sz=0) pour ne pas changer le comportement existant.
-static CfgData     g_cfg={4,16,3,true,true,true,true,false,true,false,true,2,0};
+static CfgData     g_cfg={4,16,3,true,true,false,true,false,true,false,true,2,0};   // (juin 2026) défaut thème = LIGHT (champ dark=false) — aligné maquette
 // Segmented toggle (UI Settings T4-S3). Types + registres déclarés
 // INCONDITIONNELLEMENT (2026-06-08) : les fonctions seg*/updSeg* ne sont pas
 // guardées #ifdef BOARD_T4S3 → sur T-RGB le type doit exister quand même (les
@@ -318,13 +318,15 @@ static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE
 // ── Layout radar spécifique T4-S3 (écran 600×450 paysage) ────────────────────
 // La page radar est PLEIN ÉCRAN (600×450 à (0,0)) → coords radar = coords écran.
 // Radar maximisé à droite, annotations agrandies en colonne gauche.
-#define RAD_CX 375          // centre radar écran
+// (juin 2026) Radar CENTRÉ sur l'écran (« mettre le radar bien au milieu »).
+// CX=300 = centre du 600×450 → cluster bas + pill cap recentrés (RB_DX/HDG_DX=0).
+#define RAD_CX 300          // centre radar écran (= centre du 600 px)
 #define RAD_CY 225
-#define RAD_R  220          // Ø440 — maximisé (marge 5 px haut/bas)
-#define RLC_X  10           // x colonne annotations gauche
-#define RB_DX  (-225)       // cluster scale/GS/zoom/version : BOTTOM_MID(300) → x≈75
+#define RAD_R  200          // Ø400 — laisse la place aux cardinaux À L'EXTÉRIEUR (450 px de haut)
+#define RLC_X  10           // x colonne annotations gauche (pastilles GPS/LTE + mode SafeSky)
+#define RB_DX  0            // cluster scale/GS centré sous le radar (radar au milieu)
 #define RB_DY  0
-#define HDG_DX 75           // pill heading + chips centrés sur le radar (pas la page)
+#define HDG_DX 0            // pill cap + overlays centrés sur le radar (= centre écran)
 #define CO_SZ  520          // arc CO : Ø extérieur (rayon mi-arc 252 = RAD_R+32)
 #define CO_MIR (-1.0f)      // arc CO en bas-GAUCHE (miroir horizontal du bas-droite)
 #define PILL_W 64           // pills annotations agrandies
@@ -361,6 +363,13 @@ static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE
 #define CHIP_H 48
 #define CHIP_FONT lv_font_montserrat_16
 #define RAD_FONT lv_font_montserrat_14
+#endif
+// (juin 2026) Décalage radial des cardinaux N/E/S/W vs l'anneau : T4-S3 = À
+// L'EXTÉRIEUR (+), T-RGB = à l'intérieur (−24, layout rond d'origine inchangé).
+#ifdef BOARD_T4S3
+ #define RAD_CARD_OFF  16
+#else
+ #define RAD_CARD_OFF  (-24)
 #endif
 // Débord hors mire (2026-06-05, demande vol test) : sur le T4 rectangulaire,
 // trafic + AIP se dessinent jusqu'aux BORDS de l'écran (coins ≈ 2× RAD_R du
@@ -537,6 +546,14 @@ static lv_obj_t *s_set_uline = nullptr; // fine ligne bleue sous le titre (large
 static lv_obj_t *s_sys_atcver= nullptr; // page System : version AT-CORE (live BLE)
 static lv_obj_t *s_sys_atcbat= nullptr; // page System : batterie AT-CORE (live BLE)
 static const char* kSetTab[S_NPG] = {"RADAR","TRAFFIC","SYSTEM"};
+#ifdef BOARD_T4S3
+// ── (juin 2026) Settings T4 refondu : menu en grille → 6 sections → popups ──────
+static lv_obj_t* s_menu      = nullptr;  // page d'accueil réglages (grille 6 gros boutons)
+static lv_obj_t* s_sec[6]    = {};       // conteneurs sections (cachés sauf l'ouvert)
+static int8_t    s_cur_sec   = -1;       // -1 = menu affiché, sinon index section ouverte
+static const char* kSecName[6]={"RADAR","DISPLAY","TRAFFIC","AIRCRAFT","SYSTEM","ABOUT"};
+static void settingsShowMenu();          // (fwd) utilisé par switchPage pour reset à l'entrée
+#endif
 
 // ── SD card (AT-VIEW local) ───────────────────────────────────────────────────
 static bool     g_sd_ok = false;
@@ -681,8 +698,8 @@ void updCheckRow(int idx,const char*txt,bool ok){
     if(ok) g_chk_latched[idx]=true;
     bool show = g_chk_latched[idx];
     lv_label_set_text(r_chk_ico[idx],show?LV_SYMBOL_OK:"");
-    // Fond page 0 blanc → texte noir si actif, gris sinon
-    lv_obj_set_style_text_color(r_chk_lbl[idx],show?lv_color_hex(0x0f172a):TGREY(),0);
+    // Texte actif = couleur premier-plan du thème (noir en clair / blanc en sombre), gris sinon
+    lv_obj_set_style_text_color(r_chk_lbl[idx],show?TFG():TGREY(),0);
     if(txt)lv_label_set_text(r_chk_lbl[idx],txt);
 }
 
@@ -889,7 +906,13 @@ void startScan(){BLEScan*s=BLEDevice::getScan();s->setAdvertisedDeviceCallbacks(
 void switchPage(uint8_t np){
     if(g_inDebug){lv_obj_add_flag(g_dbgPage,LV_OBJ_FLAG_HIDDEN);g_inDebug=false;}
     lv_obj_add_flag(g_pages[g_page],LV_OBJ_FLAG_HIDDEN);
-    g_page=np;lv_obj_clear_flag(g_pages[g_page],LV_OBJ_FLAG_HIDDEN);}
+    g_page=np;lv_obj_clear_flag(g_pages[g_page],LV_OBJ_FLAG_HIDDEN);
+#ifdef BOARD_T4S3
+    // (juin 2026) Settings T4 = menu en grille : à chaque entrée sur la page, on
+    // repart de la grille (pas de la dernière section ouverte).
+    if(np==2) settingsShowMenu();
+#endif
+}
 
 static lv_coord_t g_swipe_sx=-1, g_swipe_lx=0, g_swipe_sy=0, g_swipe_ly=0;
 // Vrai pendant le drag du slider brightness — bloque le swipe horizontal
@@ -923,7 +946,8 @@ static void swipeCb(lv_event_t*e){
                 if(abs(dx)>40){lv_obj_add_flag(g_dbgPage,LV_OBJ_FLAG_HIDDEN);
                     lv_obj_clear_flag(g_pages[g_page],LV_OBJ_FLAG_HIDDEN);g_inDebug=false;}
             }else if(abs(dy)>abs(dx) && abs(dy)>60 && g_page==2){
-                // Swipe vertical sur Settings → bascule sous-page (haut=suivante, bas=précédente)
+                // Swipe vertical sur Settings → bascule sous-page (haut=suivante, bas=précédente).
+                // (T4 : s_pg[] non créés → no-op ; la nav se fait par le menu en grille.)
                 int np = (dy<0) ? (s_pg_idx+1) : ((int)s_pg_idx-1);
                 if(np<0)np=0; if(np>S_NPG-1)np=S_NPG-1;   // clamp (pas de wrap)
                 if((uint8_t)np!=s_pg_idx && s_pg[s_pg_idx] && s_pg[np]){
@@ -950,7 +974,7 @@ void cfgLoad(){
     g_cfg.trf_src   =g_prefs.getUChar("trf_src",3);
     g_cfg.dist_nm   =g_prefs.getBool("dist_nm",true);
     g_cfg.alt_ft    =g_prefs.getBool("alt_ft",true);
-    g_cfg.dark      =g_prefs.getBool("dark",true);
+    g_cfg.dark      =g_prefs.getBool("dark",false);   // (juin 2026) défaut LIGHT (aligné maquette)
     g_cfg.show_grnd =g_prefs.getBool("show_grnd",true);
     g_cfg.wifi_en   =g_prefs.getBool("wifi_en",false);
     g_cfg.aip_en    =g_prefs.getBool("aip_en",true);
@@ -1199,6 +1223,7 @@ void buildDebugPage();
 void createSwipeHandlers();
 void updSetPage();
 static void cbSetBtn(lv_event_t*e);
+static void cbRadarLongPress(lv_event_t*e);   // (juin 2026) appui long radar → action sheet Start/Stop
 void mkAircraftOverlay();
 void acLoad();
 void acSave();
@@ -1242,7 +1267,9 @@ void p0UpdateAcId(){
 
 void buildStatusPage(){
     lv_obj_t*p=g_pages[0];
-    lv_obj_set_style_bg_color(p,lv_color_hex(0xffffff),0);
+    // (juin 2026) Thème GLOBAL : la page accueil suit LIGHT/DARK comme le radar
+    // (avant : fond blanc forcé). TBG()=blanc en clair, noir en sombre.
+    lv_obj_set_style_bg_color(p,TBG(),0);
     lv_obj_set_style_bg_opa(p,LV_OPA_COVER,0);
     // (v12) Géométrie par carte. T4-S3 : logos PLUS GROS (place dispo sur le 600×450) +
     // bloc versions du bas (batterie/ATV/ATC) ré-espacé pour ne PAS se chevaucher ni
@@ -2649,11 +2676,17 @@ void buildRadarPage(){
     lv_obj_set_style_text_font(r_radar_gs,&RAD_FONT,0);
     lv_obj_align(r_radar_gs,LV_ALIGN_BOTTOM_MID,RB_DX,-33+RB_DY);   // remonté pour loger la ligne version
 
-    // Version firmware AT-CORE + date de build (+ "UPD vN!" si MAJ dispo) — bas de page.
+    // Version firmware AT-CORE + date de build — bas de page.
+    // (juin 2026) RETIRÉE du radar sur T4-S3 (« pas de n° de version sur cette page »).
+    // L'info reste disponible en page Settings/ABOUT. updateAllPages garde `if(r_radar_ver)`.
+#ifdef BOARD_T4S3
+    r_radar_ver=nullptr;
+#else
     r_radar_ver=lv_label_create(p);lv_label_set_text(r_radar_ver,"");
     lv_obj_set_style_text_color(r_radar_ver,TGREY(),0);
     lv_obj_set_style_text_font(r_radar_ver,&lv_font_montserrat_10,0);
     lv_obj_align(r_radar_ver,LV_ALIGN_BOTTOM_MID,RB_DX,-13+RB_DY);
+#endif
 
     // Tab pills 52×32 — outer edge is AT the display circle boundary (8-12px behind bezel).
     // The circular LCD naturally clips the outer rounded corner → flat outer edge = "D" shape.
@@ -2731,6 +2764,25 @@ void buildRadarPage(){
 #endif
     lv_obj_add_flag(r_ss_gnd, LV_OBJ_FLAG_HIDDEN);
 
+#ifdef BOARD_T4S3
+    // ── (juin 2026) RADAR ÉPURÉ ────────────────────────────────────────────────
+    // « Supprimer toutes les icônes sauf SafeSky pour le statut. » On masque
+    // batterie / WiFi / BLE / SafeSky-img / point santé, on garde des MINI-pastilles
+    // GPS+LTE (choix utilisateur : rouge si KO), et le badge devient le LABEL DE MODE
+    // SafeSky unique (GND/CRZ/TURN), en tête de la colonne gauche.
+    if(r_hdr_bat)  lv_obj_add_flag(r_hdr_bat,  LV_OBJ_FLAG_HIDDEN);
+    if(r_hdr_sky)  lv_obj_add_flag(r_hdr_sky,  LV_OBJ_FLAG_HIDDEN);
+    if(r_hdr_wifi) lv_obj_add_flag(r_hdr_wifi, LV_OBJ_FLAG_HIDDEN);
+    if(r_hdr_ble)  lv_obj_add_flag(r_hdr_ble,  LV_OBJ_FLAG_HIDDEN);
+    if(r_ss_dot)   lv_obj_add_flag(r_ss_dot,   LV_OBJ_FLAG_HIDDEN);
+    if(r_hdr_gps)  lv_obj_set_pos(r_hdr_gps, RLC_X, 60);    // mini-pastilles remontées
+    if(r_hdr_lte)  lv_obj_set_pos(r_hdr_lte, RLC_X, 108);
+    lv_obj_set_pos(r_ss_gnd, RLC_X, 16);                    // mode SafeSky en tête de colonne
+    lv_obj_set_style_text_font(r_ss_gnd, &lv_font_montserrat_22, 0);
+    lv_label_set_text(r_ss_gnd, "---");
+    lv_obj_clear_flag(r_ss_gnd, LV_OBJ_FLAG_HIDDEN);        // toujours visible (texte/couleur live)
+#endif
+
     // Outer ring
     lv_obj_t*ro=lv_obj_create(p);lv_obj_set_size(ro,RAD_R*2,RAD_R*2);
     lv_obj_set_pos(ro,RAD_CX-RAD_R,RAD_CY-RAD_R);lv_obj_set_style_radius(ro,LV_RADIUS_CIRCLE,0);
@@ -2771,18 +2823,24 @@ void buildRadarPage(){
     lv_obj_t*ot=lv_line_create(p);lv_line_set_points(ot,tri,4);
     lv_obj_set_style_line_color(ot,C_GREEN,0);lv_obj_set_style_line_width(ot,2,0);
 
-    // Cardinal labels N/E/S/W — INSIDE the ring at RAD_R-24, avoiding the pill zone
+    // Cardinal labels N/E/S/W — position radiale via RAD_CARD_OFF (T4 = à l'extérieur de l'anneau)
     const char*cnames[]={"N","E","S","W"};
     for(int ci=0;ci<4;ci++){
         r_card[ci]=lv_label_create(p);
         lv_label_set_text(r_card[ci],cnames[ci]);
         lv_obj_set_style_text_font(r_card[ci],&RAD_FONT,0);
         lv_obj_set_style_text_color(r_card[ci],TFG(),0);
-        lv_obj_set_pos(r_card[ci],RAD_CX-5,RAD_CY-(RAD_R-24)-8);}
+        lv_obj_set_pos(r_card[ci],RAD_CX-5,RAD_CY-(RAD_R+RAD_CARD_OFF)-8);}
 
-    // Scale label — entre le S de la rose et la GS (ordre : S → 4nm → GS XXkt)
+    // Scale label — entre le S de la rose et la GS (ordre : S → 4nm → GS XXkt).
+    // (juin 2026) T4-S3 : police PLUS GRANDE + couleur premier-plan (« affichage plus
+    // clair et grand du NM du 2ème cadran »). T-RGB inchangé.
     char scl[12];snprintf(scl,12,"%dnm",g_cfg.scale_nm);
+#ifdef BOARD_T4S3
+    r_radar_scale_lbl=mkLbl(p,scl,TFG(),&lv_font_montserrat_32,LV_ALIGN_BOTTOM_MID,RB_DX,-58+RB_DY);
+#else
     r_radar_scale_lbl=mkLbl(p,scl,TGREY(),&RAD_FONT,LV_ALIGN_BOTTOM_MID,RB_DX,-53+RB_DY);
+#endif
 
     // Zoom +/- buttons — flanquent le label scale, mêmes ids que Settings (0=-, 1=+)
     // → reuse cbSetBtn → cfgSave() + updSetPage() (rafraichit aussi r_radar_scale_lbl)
@@ -2929,6 +2987,9 @@ void buildRadarPage(){
     // « bubbler » vers la page → swipeCb voit l'appui où qu'il commence.
     for(uint32_t i=0;i<lv_obj_get_child_cnt(p);i++)
         lv_obj_add_flag(lv_obj_get_child(p,i),LV_OBJ_FLAG_EVENT_BUBBLE);
+    // (juin 2026) Appui long sur la mire → action sheet Start/Stop (les enfants bubblent
+    // déjà vers la page, donc un long-press n'importe où sur le radar déclenche).
+    lv_obj_add_event_cb(p,cbRadarLongPress,LV_EVENT_LONG_PRESSED,NULL);
 #endif
 }
 
@@ -3884,20 +3945,244 @@ static void _open_maintenance_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
     if(!g_maint_ov)mkMaintenanceOverlay();}
 
+#ifdef BOARD_T4S3
+// ════════════════════════════════════════════════════════════════════════════
+// (juin 2026) SETTINGS T4-S3 — menu en GRILLE → 6 sections → POPUPS de choix
+//   Page 3 maquette : grille de gros boutons (RADAR/DISPLAY/TRAFFIC/AIRCRAFT/
+//   SYSTEM/ABOUT). Page 4 : les choix énumérés (SCALE/V-FILTER/SPEED) ouvrent
+//   un popup de gros boutons faciles à cliquer. SCALE = échelle par défaut au
+//   boot ; DIST conservé ; ALT supprimé (toujours en ft).
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── Popup picker générique (gros boutons de choix) ──────────────────────────
+static lv_obj_t* g_pick_ov=nullptr;
+static void (*g_pick_apply)(int)=nullptr;
+static void pickHide(){ if(g_pick_ov){lv_obj_del(g_pick_ov);g_pick_ov=nullptr;g_pick_apply=nullptr;} }
+static void _pick_close_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) pickHide(); }
+static void _pick_sel_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    int i=(int)(intptr_t)lv_event_get_user_data(e);
+    void(*ap)(int)=g_pick_apply;
+    pickHide();
+    if(ap){ ap(i); cfgSave(); updSetPage(); }   // applique → persiste → rafraîchit labels + radar
+}
+static void pickShow(const char* title,const char* const* opts,int n,int cur,void(*apply)(int)){
+    if(g_pick_ov)return;
+    g_pick_apply=apply;
+    g_pick_ov=lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_pick_ov,600,480);lv_obj_set_pos(g_pick_ov,0,0);
+    lv_obj_set_style_bg_color(g_pick_ov,lv_color_hex(0x000000),0);
+    lv_obj_set_style_bg_opa(g_pick_ov,LV_OPA_50,0);
+    lv_obj_set_style_border_width(g_pick_ov,0,0);lv_obj_set_style_pad_all(g_pick_ov,0,0);
+    lv_obj_clear_flag(g_pick_ov,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(g_pick_ov,_pick_close_cb,LV_EVENT_CLICKED,NULL);
+    int ph=56+n*60+14; if(ph>466)ph=466;
+    lv_obj_t* pan=lv_obj_create(g_pick_ov);
+    lv_obj_set_size(pan,360,ph);lv_obj_center(pan);
+    lv_obj_set_style_bg_color(pan,TBG(),0);lv_obj_set_style_bg_opa(pan,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(pan,TFG(),0);lv_obj_set_style_border_width(pan,2,0);
+    lv_obj_set_style_radius(pan,16,0);lv_obj_set_style_shadow_opa(pan,LV_OPA_TRANSP,0);
+    lv_obj_clear_flag(pan,LV_OBJ_FLAG_SCROLLABLE);lv_obj_add_flag(pan,LV_OBJ_FLAG_CLICKABLE);
+    mkLblP(pan,title,C_BRAND,&lv_font_montserrat_20,20,14);
+    for(int i=0;i<n;i++){
+        lv_obj_t* bt=lv_btn_create(pan);
+        lv_obj_set_size(bt,320,52);lv_obj_set_pos(bt,20,52+i*60);
+        bool sel=(i==cur);
+        lv_obj_set_style_bg_color(bt,sel?C_BRAND:lv_color_hex(0xeef2f6),0);
+        lv_obj_set_style_radius(bt,12,0);lv_obj_set_style_border_width(bt,0,0);
+        lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(bt,0,0);
+        lv_obj_add_event_cb(bt,_pick_sel_cb,LV_EVENT_CLICKED,(void*)(intptr_t)i);
+        lv_obj_t* l=lv_label_create(bt);lv_label_set_text(l,opts[i]);
+        lv_obj_set_style_text_color(l,sel?lv_color_hex(0xffffff):lv_color_hex(0x0f172a),0);
+        lv_obj_set_style_text_font(l,&lv_font_montserrat_20,0);lv_obj_center(l);
+    }
+}
+
+// ── Valeurs + apply/idx des popups énumérés ─────────────────────────────────
+static const char* kScaleStr[7]={"1 nm","2 nm","4 nm","8 nm","10 nm","20 nm","40 nm"};
+static const int16_t kVfiltOpts[4]={500,1000,1500,2000};
+static const char* kVfiltStr[4]={"500 ft","1000 ft","1500 ft","2000 ft"};
+static const char* kSpeedStr[2]={"kt","km/h"};
+static int  _idxScale(){ for(int i=0;i<7;i++) if(kScaleOpts[i]==g_cfg.scale_nm) return i; return 2; }
+static void _applyScale(int i){ if(i>=0&&i<7) g_cfg.scale_nm=kScaleOpts[i]; }
+static int  _idxVfilt(){ for(int i=0;i<4;i++) if(kVfiltOpts[i]==g_cfg.vfilt_ft) return i; return 3; }
+static void _applyVfilt(int i){ if(i>=0&&i<4) g_cfg.vfilt_ft=kVfiltOpts[i]; }
+static int  _idxSpeed(){ return g_cfg.spd_kt?0:1; }
+static void _applySpeed(int i){ g_cfg.spd_kt=(i==0); }
+
+// ── Ligne « gros bouton valeur → popup » ────────────────────────────────────
+struct PopSpec { const char* title; const char* const* opts; int n; int(*idx)(); void(*apply)(int); };
+static PopSpec g_pop[6]; static int g_pop_n=0;
+static void _pop_open_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    int i=(int)(intptr_t)lv_event_get_user_data(e);
+    if(i<0||i>=g_pop_n)return;
+    PopSpec&s=g_pop[i];
+    pickShow(s.title,s.opts,s.n,s.idx(),s.apply);
+}
+static lv_obj_t* mkPopRow(lv_obj_t*p,const char*k,int y,const char*curval,
+                          const char* title,const char* const* opts,int n,int(*idx)(),void(*apply)(int)){
+    mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
+    if(g_pop_n>=6) return nullptr;
+    int pi=g_pop_n;
+    g_pop[pi].title=title; g_pop[pi].opts=opts; g_pop[pi].n=n; g_pop[pi].idx=idx; g_pop[pi].apply=apply;
+    const int BW=224,BH=52,BX=600-40-BW;
+    lv_obj_t*bt=lv_btn_create(p);lv_obj_set_size(bt,BW,BH);lv_obj_set_pos(bt,BX,y);
+    lv_obj_set_style_bg_color(bt,lv_color_hex(0xeef2f6),0);lv_obj_set_style_radius(bt,14,0);
+    lv_obj_set_style_border_width(bt,0,0);lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(bt,0,0);
+    lv_obj_add_event_cb(bt,_pop_open_cb,LV_EVENT_CLICKED,(void*)(intptr_t)pi);
+    lv_obj_t*vl=lv_label_create(bt);lv_label_set_text(vl,curval);
+    lv_obj_set_style_text_color(vl,lv_color_hex(0x0f172a),0);
+    lv_obj_set_style_text_font(vl,&lv_font_montserrat_20,0);lv_obj_center(vl);
+    g_pop_n++;
+    return vl;
+}
+
+// ── Navigation menu ↔ sections ──────────────────────────────────────────────
+static void settingsShowMenu(){
+    if(!s_menu)return;
+    s_cur_sec=-1;
+    for(int i=0;i<6;i++) if(s_sec[i]) lv_obj_add_flag(s_sec[i],LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_menu,LV_OBJ_FLAG_HIDDEN);
+    if(s_set_title) lv_label_set_text(s_set_title,"SETTINGS");
+    if(s_set_uline&&s_set_title){ lv_obj_update_layout(s_set_title); lv_obj_set_width(s_set_uline,lv_obj_get_width(s_set_title)); }
+}
+static void settingsOpenSection(int i){
+    if(i<0||i>=6||!s_sec[i])return;
+    s_cur_sec=(int8_t)i;
+    if(s_menu) lv_obj_add_flag(s_menu,LV_OBJ_FLAG_HIDDEN);
+    for(int k=0;k<6;k++) if(s_sec[k]) lv_obj_add_flag(s_sec[k],LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(s_sec[i],LV_OBJ_FLAG_HIDDEN);
+    if(s_set_title){ char t[28]; snprintf(t,sizeof(t),LV_SYMBOL_LEFT "  %s",kSecName[i]); lv_label_set_text(s_set_title,t); }
+    if(s_set_uline&&s_set_title){ lv_obj_update_layout(s_set_title); lv_obj_set_width(s_set_uline,lv_obj_get_width(s_set_title)); }
+}
+static void _menu_btn_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) settingsOpenSection((int)(intptr_t)lv_event_get_user_data(e)); }
+static void _settitle_click_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED && s_cur_sec>=0) settingsShowMenu(); }
+
+// Gros bouton de la grille menu (contour bleu, rempli au press).
+static void mkMenuBtn(lv_obj_t*parent,int i,int x,int y){
+    lv_obj_t*bt=lv_btn_create(parent);
+    lv_obj_set_size(bt,250,90);lv_obj_set_pos(bt,x,y);
+    lv_obj_set_style_bg_color(bt,TBG(),0);lv_obj_set_style_bg_opa(bt,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(bt,C_BRAND,0);lv_obj_set_style_border_width(bt,2,0);
+    lv_obj_set_style_radius(bt,16,0);lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_color(bt,C_BRAND,LV_STATE_PRESSED);
+    lv_obj_add_event_cb(bt,_menu_btn_cb,LV_EVENT_CLICKED,(void*)(intptr_t)i);
+    lv_obj_t*l=lv_label_create(bt);lv_label_set_text(l,kSecName[i]);
+    lv_obj_set_style_text_color(l,C_BRAND,0);
+    lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_center(l);
+}
+
+void buildSettingsPageT4(lv_obj_t*p){
+    char b[20];
+    g_seg_n=0; g_segn_n=0; g_pop_n=0; s_cur_sec=-1;
+    s_scale_v=nullptr;s_vfilt_v=nullptr;s_dist_v=nullptr;s_alt_v=nullptr;s_spd_v=nullptr;
+    s_bright_v=nullptr;s_src_v=nullptr;s_theme_v=nullptr;s_grnd_v=nullptr;s_icon_sz_v=nullptr;
+    s_ac_v=nullptr;s_wifi_v=nullptr;s_sd_v=nullptr;
+
+    // En-tête : logo + titre (tap = retour menu si en section ; appui long = debug)
+    lv_obj_t*lA=lv_img_create(p);lv_img_set_src(lA,&img_logo_a);
+    lv_obj_align(lA,LV_ALIGN_TOP_LEFT,40,28);
+    s_set_title=mkLblP(p,"SETTINGS",TFG(),&lv_font_montserrat_24,40+56+16,42);
+    lv_obj_add_flag(s_set_title,LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_bg_opa(s_set_title,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(s_set_title,_settitle_click_cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_add_event_cb(s_set_title,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);
+    s_set_uline=lv_obj_create(p);lv_obj_set_size(s_set_uline,120,2);lv_obj_set_pos(s_set_uline,40+56+16,74);
+    lv_obj_set_style_bg_color(s_set_uline,C_BRAND,0);lv_obj_set_style_bg_opa(s_set_uline,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(s_set_uline,0,0);lv_obj_set_style_pad_all(s_set_uline,0,0);lv_obj_set_style_radius(s_set_uline,1,0);
+    lv_obj_clear_flag(s_set_uline,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+
+    const int CY=86, CH=480-86;     // zone contenu sous l'en-tête
+
+    // ── Menu : grille 2×3 de gros boutons ───────────────────────────────────
+    s_menu=lv_obj_create(p);
+    lv_obj_set_size(s_menu,600,CH);lv_obj_set_pos(s_menu,0,CY);
+    lv_obj_set_style_bg_opa(s_menu,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(s_menu,0,0);
+    lv_obj_set_style_pad_all(s_menu,0,0);lv_obj_clear_flag(s_menu,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(s_menu,swipeCb,LV_EVENT_ALL,NULL);   // swipe horizontal (nav page) conservé
+    {const int col0=50,col1=310,r0=24,dyr=120;
+     mkMenuBtn(s_menu,0,col0,r0);        mkMenuBtn(s_menu,3,col1,r0);
+     mkMenuBtn(s_menu,1,col0,r0+dyr);    mkMenuBtn(s_menu,4,col1,r0+dyr);
+     mkMenuBtn(s_menu,2,col0,r0+2*dyr);  mkMenuBtn(s_menu,5,col1,r0+2*dyr);}
+
+    // ── 6 conteneurs sections (cachés au départ) ────────────────────────────
+    for(int i=0;i<6;i++){
+        s_sec[i]=lv_obj_create(p);
+        lv_obj_set_size(s_sec[i],600,CH);lv_obj_set_pos(s_sec[i],0,CY);
+        lv_obj_set_style_bg_opa(s_sec[i],LV_OPA_TRANSP,0);lv_obj_set_style_border_width(s_sec[i],0,0);
+        lv_obj_set_style_pad_all(s_sec[i],0,0);lv_obj_clear_flag(s_sec[i],LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_event_cb(s_sec[i],swipeCb,LV_EVENT_ALL,NULL);
+        lv_obj_add_flag(s_sec[i],LV_OBJ_FLAG_HIDDEN);
+    }
+
+    // 0) RADAR : SCALE (défaut boot) · V-FILTER · SPEED → popups ; DIST segmented
+    {lv_obj_t*sp=s_sec[0]; const int Y0=8,DY=72;
+     snprintf(b,sizeof(b),"%d nm",g_cfg.scale_nm);
+     s_scale_v=mkPopRow(sp,"SCALE",Y0+0*DY,b,"DEFAULT SCALE",kScaleStr,7,_idxScale,_applyScale);
+     snprintf(b,sizeof(b),"%d ft",g_cfg.vfilt_ft);
+     s_vfilt_v=mkPopRow(sp,"V-FILTER",Y0+1*DY,b,"V-FILTER (ft)",kVfiltStr,4,_idxVfilt,_applyVfilt);
+     s_spd_v  =mkPopRow(sp,"SPEED",Y0+2*DY,g_cfg.spd_kt?"kt":"km/h","SPEED UNIT",kSpeedStr,2,_idxSpeed,_applySpeed);
+     mkSegRow(sp,"DISTANCE",Y0+3*DY,"NM","KM",&g_cfg.dist_nm,true);}
+
+    // 1) DISPLAY : BRIGHTNESS slider · THEME segmented
+    {lv_obj_t*sp=s_sec[1]; const int Y0=8,DY=72;
+     mkBigBrightRow(sp,"BRIGHTNESS",Y0+0*DY,g_cfg.brightness);
+     mkSegRow(sp,"THEME",Y0+1*DY,"LIGHT","DARK",&g_cfg.dark,false);}
+
+    // 2) TRAFFIC : SOURCE · GROUNDED · ICONS · AIP · HELIPORT
+    {lv_obj_t*sp=s_sec[2]; const int Y0=8,DY=72;
+     mkSegRowN(sp,"SOURCE",Y0+0*DY,kSrcNames,4,&g_cfg.trf_src,0);
+     mkSegRow (sp,"GROUNDED",Y0+1*DY,"OFF","ON",&g_cfg.show_grnd,false);
+     mkSegRowN(sp,"ICONS",Y0+2*DY,kIconSzNames,3,&g_cfg.icon_sz,1);
+     mkSegRow (sp,"AIP",Y0+3*DY,"OFF","ON",&g_cfg.aip_en,false);
+     mkSegRow (sp,"HELIPORT",Y0+4*DY,"OFF","ON",&g_cfg.ad_heli,false);}
+
+    // 3) AIRCRAFT : identité (EDIT → overlay aircraft) + hex
+    {lv_obj_t*sp=s_sec[3];
+     char t[24];snprintf(t,sizeof(t),"%s  %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");
+     s_ac_v=mkBigBtnRow(sp,"AIRCRAFT",8,t,"EDIT",_open_aircraft_cb);
+     char h[20];snprintf(h,sizeof(h),"HEX  %s",g_ac_hex[0]?g_ac_hex:"------");
+     mkLblP(sp,h,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,8+72+15);}
+
+    // 4) SYSTEM : WIFI AP · MAINTENANCE · SD CARD
+    {lv_obj_t*sp=s_sec[4]; const int Y0=8,DY=72;
+     mkSegRow(sp,"WIFI AP",Y0+0*DY,"OFF","ON",&g_cfg.wifi_en,false);
+     mkBigBtnRow(sp,"MAINTENANCE",Y0+1*DY,"","OPEN",_open_maintenance_cb);
+     char sd[14]; if(g_sd_ok)snprintf(sd,sizeof(sd),"%u GB",g_sd_gb);else strlcpy(sd,"NO CARD",sizeof(sd));
+     mkLblP(sp,"SD CARD",lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,Y0+2*DY+15);
+     s_sd_v=mkLblP(sp,sd,g_sd_ok?C_GREEN:lv_color_hex(0x4b5563),&lv_font_montserrat_20,360,Y0+2*DY+15);}
+
+    // 5) ABOUT : versions & batteries (lecture seule, live BLE)
+    {lv_obj_t*sp=s_sec[5]; const lv_color_t kcol=lv_color_hex(0x4b5563); const int X2=320,DYr=40;
+     mkLblP(sp,"AT-VIEW",kcol,&lv_font_montserrat_20,40,8+0*DYr);
+     mkLblP(sp,"v" VIEW_VERSION "  " __DATE__,C_BRAND,&lv_font_montserrat_20,X2,8+0*DYr);
+     mkLblP(sp,"AT-CORE",kcol,&lv_font_montserrat_20,40,8+1*DYr);
+     s_sys_atcver=mkLblP(sp,"v--",C_BRAND,&lv_font_montserrat_20,X2,8+1*DYr);
+     mkLblP(sp,"AT-CORE BATT",kcol,&lv_font_montserrat_20,40,8+2*DYr);
+     s_sys_atcbat=mkLblP(sp,"---%",C_BRAND,&lv_font_montserrat_20,X2,8+2*DYr);
+     mkLblP(sp,"AT-VIEW BATT",kcol,&lv_font_montserrat_20,40,8+3*DYr);
+     mkLblP(sp,"N/A (future)",TGREY(),&lv_font_montserrat_20,X2,8+3*DYr);}
+
+    settingsShowMenu();   // démarre sur la grille
+}
+#endif // BOARD_T4S3 (settings refondu)
+
 void buildSettingsPage(){
     lv_obj_t*p=g_pages[2]; char b[16];
     s_pg_idx=0;
 
-    // Force fond blanc (maquette AeroTrace)
-    lv_obj_set_style_bg_color(p,lv_color_hex(0xffffff),0);
+    // (juin 2026) Thème GLOBAL : la page réglages suit LIGHT/DARK (avant : blanc forcé)
+    lv_obj_set_style_bg_color(p,TBG(),0);
     lv_obj_set_style_bg_opa(p,LV_OPA_COVER,0);
 #ifdef BOARD_T4S3
-    // T4-S3 : la page Settings occupe TOUTE la largeur (600 px) au lieu du canvas
-    // 480 centré → fini les bandes noires latérales. On garde l'offset vertical -15
-    // (UI_OY) pour préserver le placement titre/footer (alignés TOP_MID → recentrés
-    // sur 600). Les autres pages/overlays restent en 480 centré (inchangés).
+    // T4-S3 : page Settings plein écran (600×480) + refonte juin 2026 (menu grille →
+    // sections → popups). On délègue à buildSettingsPageT4 et on sort : le reste de
+    // cette fonction est le layout T-RGB d'origine (inchangé, non atteint sur T4).
     lv_obj_set_size(p,600,480);lv_obj_set_pos(p,0,UI_OY);
     lv_obj_set_scrollbar_mode(p,LV_SCROLLBAR_MODE_OFF);
+    buildSettingsPageT4(p);
+    return;
 #endif
 
     // ── Logo A bleu + titre SETTINGS
@@ -4128,7 +4413,11 @@ void updateRadarDR(){
             // Seuil 20 kt valable si AT-CORE fournit le champ "s" (spd_kt) dans le JSON TRAFFIC.
             // Si "s" absent, défaut = 100 kt → l'avion reste visible même filtré. Normal.
             float scale_m=(float)g_cfg.scale_nm*1852.0f;
-            if((!g_cfg.show_grnd&&e.spd_kt<20)||(e.dist_m>scale_m*RAD_OVERSCAN)||ssDead){
+            // (juin 2026) V-FILTER LOCAL : on masque le trafic hors de la bande verticale
+            // choisie (±vfilt_ft). e.alt_m = delta en CENTAINES de pieds (AT-CORE = alt_rel_ft/100)
+            // → delta_ft = |alt_m|×100. Filtre 100 % AT-VIEW (AT-CORE inchangé).
+            bool vfiltOut = (g_cfg.vfilt_ft>0 && abs(e.alt_m)*100 > (int)g_cfg.vfilt_ft);
+            if((!g_cfg.show_grnd&&e.spd_kt<20)||(e.dist_m>scale_m*RAD_OVERSCAN)||ssDead||vfiltOut){
                 lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
                 lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
             } else {
@@ -4303,6 +4592,62 @@ static void stopShow(){
 }
 static void stopHide(){ if(g_stop_ov){lv_obj_del(g_stop_ov);g_stop_ov=nullptr;g_stop_lbl=nullptr;} }
 
+// ── (juin 2026) Action sheet Start/Stop sur APPUI LONG du radar ─────────────────
+// Le radar n'a plus de bouton Start (vol auto à 15 kt) ni de panneau STOP permanent.
+// Un appui long (~400 ms LVGL) sur la mire ouvre une feuille d'action contextuelle :
+//   au sol → « Start flight » · en vol → « Stop flight ». Sert surtout aux tests sol.
+static lv_obj_t* g_radar_act_ov=nullptr;
+static void radarActHide(){ if(g_radar_act_ov){lv_obj_del(g_radar_act_ov);g_radar_act_ov=nullptr;} }
+static void _radarAct_start(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED){ sendCtl("start_flight"); radarActHide(); } }
+static void _radarAct_stop (lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED){ sendCtl("stop_flight");  radarActHide(); } }
+static void _radarAct_close(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) radarActHide(); }
+static void radarActShow(){
+    if(g_radar_act_ov) return;
+    // Backdrop plein écran semi-opaque : tap HORS panneau = fermer.
+    g_radar_act_ov=lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_radar_act_ov,600,450);lv_obj_center(g_radar_act_ov);
+    lv_obj_set_style_bg_color(g_radar_act_ov,lv_color_hex(0x000000),0);
+    lv_obj_set_style_bg_opa(g_radar_act_ov,LV_OPA_50,0);
+    lv_obj_set_style_border_width(g_radar_act_ov,0,0);lv_obj_set_style_radius(g_radar_act_ov,0,0);
+    lv_obj_set_style_pad_all(g_radar_act_ov,0,0);
+    lv_obj_clear_flag(g_radar_act_ov,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(g_radar_act_ov,_radarAct_close,LV_EVENT_CLICKED,NULL);
+    // Panneau central (CLICKABLE → absorbe le tap, ne ferme pas).
+    lv_obj_t* pan=lv_obj_create(g_radar_act_ov);
+    lv_obj_set_size(pan,300,210);lv_obj_center(pan);
+    lv_obj_set_style_bg_color(pan,TBG(),0);lv_obj_set_style_bg_opa(pan,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(pan,TFG(),0);lv_obj_set_style_border_width(pan,2,0);
+    lv_obj_set_style_radius(pan,16,0);lv_obj_set_style_shadow_opa(pan,LV_OPA_TRANSP,0);
+    lv_obj_clear_flag(pan,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(pan,LV_OBJ_FLAG_CLICKABLE);
+    // Bouton principal contextuel : Start (au sol) / Stop (en vol).
+    bool flying=(g_status.valid && g_status.flt_st!=0);
+    lv_obj_t* b=lv_btn_create(pan);
+    lv_obj_set_size(b,256,76);lv_obj_align(b,LV_ALIGN_TOP_MID,0,10);
+    lv_obj_set_style_bg_color(b,flying?C_RED:C_GREEN,0);lv_obj_set_style_radius(b,16,0);
+    lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(b,flying?_radarAct_stop:_radarAct_start,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,flying?"Stop flight":"Start flight");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_center(l);}
+    // Bouton Close.
+    lv_obj_t* c=lv_btn_create(pan);
+    lv_obj_set_size(c,256,60);lv_obj_align(c,LV_ALIGN_BOTTOM_MID,0,-10);
+    lv_obj_set_style_bg_color(c,TGREY(),0);lv_obj_set_style_radius(c,14,0);
+    lv_obj_set_style_border_width(c,0,0);lv_obj_set_style_shadow_opa(c,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(c,_radarAct_close,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(c);lv_label_set_text(l,"Close");
+     lv_obj_set_style_text_color(l,TFG(),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_20,0);lv_obj_center(l);}
+}
+static void cbRadarLongPress(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_LONG_PRESSED) return;
+    if(g_page!=1) return;                                   // radar uniquement
+    // Pas d'ouverture si un autre overlay/modal est déjà à l'écran.
+    if(g_radar_act_ov||g_stop_ov||g_up_ov||g_fb_ov||g_maint_ov||g_vols_ov||g_pair_ov||g_auth_ov) return;
+    radarActShow();
+}
+
 // Met à jour bannière/chip/overlay selon g_status.flt_st (reçu par BLE STATUS).
 void updFlightState(){
     if(!g_status.valid){ fbHide();chipHide();stopHide();g_prev_flt_st=0xFF;return; }
@@ -4328,6 +4673,14 @@ void updFlightState(){
     // exige taxi >15 kt + fix). On autorise tous les états SAUF UPLOADING(3) en cours
     // (FLYING0/ENDED1/CLOSED2/UPLOADED4/FAIL5). Le handler S3 start_flight régénère le
     // fid + repasse FLYING depuis n'importe quel état terminal.
+#ifdef BOARD_T4S3
+    // (juin 2026) Radar épuré : plus de chip Start ni panneau STOP permanents.
+    // Start/Stop = APPUI LONG sur le radar (action sheet contextuelle, cf cbRadarLongPress).
+    // On conserve la bannière FLIGHT STARTED (fbShow) + le countdown atterrissage (stopShow).
+    (void)ph;
+    if(r_flt_stop) lv_obj_add_flag(r_flt_stop,LV_OBJ_FLAG_HIDDEN);
+    chipHide();
+#else
     bool fltIdle = (ph != 3);
     bool base = g_connected && fltIdle && g_page==1   // page radar
               && !g_up_ov && !g_stop_ov && !g_fb_ov && !g_maint_ov && !g_vols_ov
@@ -4339,6 +4692,7 @@ void updFlightState(){
                     else          lv_obj_add_flag(r_flt_stop,LV_OBJ_FLAG_HIDDEN); }
     if(base && st==0) chipShow(1);   // Start flight (au sol)
     else chipHide();
+#endif
 
     g_prev_flt_st=st;
 }
@@ -4544,12 +4898,26 @@ void updateAllPages(){
      // Point santé signal : vert = UDP OK, rouge = perte (≥10 s) — retour vert immédiat
      if(r_ss_dot) lv_obj_set_style_bg_color(r_ss_dot,
          (g_connected&&g_status.valid&&g_status.ss_ok)?C_GREEN:C_RED,0);
+#ifdef BOARD_T4S3
+     // (juin 2026) Indicateur SafeSky UNIQUE = label de mode toujours affiché :
+     //   GND  (ssm=1, sol/idle) · CRZ (ssm=0, vol) · TURN (ssm=2, virage — futur AT-CORE).
+     // Couleur = santé SafeSky : VERT si échange UDP < 10 s, ROUGE sinon (= "tout sauf rouge").
+     if(r_ss_gnd){
+         bool sky=g_connected&&g_status.valid&&g_status.ss_ok;
+         const char* m = !g_connected ? "---"
+                       : (g_status.ss_mode==1) ? "GND"
+                       : (g_status.ss_mode==2) ? "TURN" : "CRZ";
+         lv_label_set_text(r_ss_gnd,m);
+         lv_obj_set_style_text_color(r_ss_gnd, sky?C_GREEN:C_RED, 0);
+     }
+#else
      // (v18) Badge GND visible UNIQUEMENT si SafeSky fonctionne (ss_ok=vert) ET en mode éco
      // sol (ssm=1). Si SafeSky est ROUGE (data down), on cache GND → pas de "GND + rouge"
      // trompeur (GND laisserait croire que tout va bien alors que le data est mort).
      if(r_ss_gnd){ if(g_connected&&g_status.valid&&g_status.ss_ok&&g_status.ss_mode==1)
               lv_obj_clear_flag(r_ss_gnd,LV_OBJ_FLAG_HIDDEN);
           else lv_obj_add_flag(r_ss_gnd,LV_OBJ_FLAG_HIDDEN); }
+#endif
      // FLARM / ADS-B retirés du radar (pastilles supprimées).
      // Battery — g_status.bat (STATUS char, ~1s) prioritaire sur g_debug.bat_pct (DEBUG char).
      // Charging (champ "chg" JSON STATUS) détecté AT-CORE : hausse tension OU float ≥4.13V.
@@ -4583,8 +4951,12 @@ void updateAllPages(){
         if(ready){g_authShown=true;mkAuthOverlay();}
     }
 #endif
-    // Auto-navigate to radar once BLE+GPS ready (one-shot per connection)
-    if(!g_autoNavDone&&!g_pair_ov&&g_connected&&g_status.valid&&g_status.gps_fix&&g_page==0){
+    // (juin 2026) Bascule auto vers le radar SEULEMENT quand TOUT est OK — « Ne passer
+    // sur le radar que si tout est OK, LTE et GPS inclus » : BLE connecté + GPS fix + LTE
+    // (csq>5). Tant qu'un manque, on reste sur l'accueil (le pilote peut toujours swiper
+    // manuellement). One-shot par connexion.
+    if(!g_autoNavDone&&!g_pair_ov&&g_connected&&g_status.valid
+       &&g_status.gps_fix&&g_status.csq>5&&g_page==0){
         g_autoNavDone=true;g_navPending=true;g_navPage=1;}
     // Radar — heading-up en mouvement, north-up auto à l'arrêt (radarEffHdg()).
     // Le cap GPS (course over ground) n'est pas calculable sous RADAR_STILL_KMH :
@@ -4612,7 +4984,7 @@ void updateAllPages(){
         for(int ci=0;ci<4;ci++){
             int rel=((cbear[ci]-radarEffHdg())%360+360)%360;
             float ra=(float)rel*(float)M_PI/180.0f;
-            int r_inner=RAD_R-24;
+            int r_inner=RAD_R+RAD_CARD_OFF;
             int cx=(int)(RAD_CX+sinf(ra)*(float)r_inner)-5;
             int cy=(int)(RAD_CY-cosf(ra)*(float)r_inner)-8;
             lv_obj_set_pos(r_card[ci],cx,cy);}}
