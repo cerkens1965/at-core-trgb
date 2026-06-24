@@ -96,7 +96,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "22"   /* v22 : bouton "Upload all" (Vols) → {"cmd":"uploadall"} AT-CORE v26 (transfert auto des legs SD non envoyés) */
+#define VIEW_VERSION  "23"   /* v23 : page TEST (Settings → SYSTEM → TEST, T4-S3) → start/stop/continue_flight + wifitest + uploadall → simuler un cycle vol au banc (valider Phase A upload auto). (v22 bouton Upload all.) */
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -4248,6 +4248,50 @@ static void _open_maintenance_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
     if(!g_maint_ov)mkMaintenanceOverlay();}
 
+// ── Page TEST (sous-page SYSTEM) — déclencheurs cycle de vol pour QA / valider Phase A ──
+// Les boutons Start/Stop ont été retirés de l'UI normale (cycle 100% auto), mais les
+// commandes CHR_CONTROL existent toujours côté firmware. Cette page expose Start/Stop/
+// Continue (+ WiFi test / Upload all) pour SIMULER un cycle SANS mouvement au banc :
+// Start → attendre qq s → Stop = "atterrissage" → FLT_CLOSED → upload auto (Phase A).
+#ifdef BOARD_T4S3
+static lv_obj_t* g_test_ov=nullptr;
+static void mkTestOverlay(){
+    if(g_test_ov)return;
+    g_test_ov=lv_obj_create(lv_scr_act());
+    const int OW=600; lv_obj_set_size(g_test_ov,600,480);lv_obj_set_pos(g_test_ov,0,UI_OY);
+    lv_obj_set_style_bg_color(g_test_ov,TBG(),0);lv_obj_set_style_bg_opa(g_test_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(g_test_ov,0,0);lv_obj_set_style_radius(g_test_ov,0,0);
+    lv_obj_set_style_pad_all(g_test_ov,0,0);lv_obj_clear_flag(g_test_ov,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(g_test_ov,LV_SCROLLBAR_MODE_OFF);
+    auto mkTB=[&](const char*txt,int y,lv_color_t col,lv_event_cb_t cb){
+        lv_obj_t*b=lv_btn_create(g_test_ov);lv_obj_set_size(b,OW-60,52);lv_obj_set_pos(b,30,y);
+        lv_obj_set_style_bg_color(b,col,0);lv_obj_set_style_radius(b,10,0);
+        lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(b,0,0);
+        lv_obj_add_event_cb(b,cb,LV_EVENT_CLICKED,NULL);
+        lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,txt);
+        lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_18,0);lv_obj_center(l);};
+    {lv_obj_t*tl=lv_label_create(g_test_ov);lv_label_set_text(tl,"TEST");
+     lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,&lv_font_montserrat_22,0);lv_obj_set_pos(tl,30,18);}
+    {lv_obj_t*b=lv_btn_create(g_test_ov);lv_obj_set_size(b,115,44);lv_obj_set_pos(b,OW-145,20);
+     lv_obj_set_style_bg_color(b,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(b,10,0);
+     lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(b,0,0);
+     lv_obj_add_event_cb(b,[](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED){ lv_obj_del(g_test_ov); g_test_ov=nullptr; } },LV_EVENT_CLICKED,NULL);
+     lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,"Close");lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_18,0);lv_obj_center(l);}
+    {lv_obj_t*h=lv_label_create(g_test_ov);
+     lv_label_set_text(h,"Simulate flight (no movement):\nStart -> wait -> Stop = landing -> auto-upload");
+     lv_obj_set_style_text_color(h,TGREY(),0);lv_obj_set_style_text_font(h,&lv_font_montserrat_14,0);lv_obj_set_pos(h,30,72);}
+    int y=126,DY=62;
+    mkTB("Start flight",           y+0*DY,C_GREEN,                [](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("start_flight"); });
+    mkTB("Stop flight  (= landing)",y+1*DY,C_RED,                 [](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("stop_flight"); });
+    mkTB("Continue flight",        y+2*DY,lv_color_hex(0x4b5563), [](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("continue_flight"); });
+    mkTB("WiFi test",              y+3*DY,lv_color_hex(0x1f4068), [](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("wifitest"); });
+    mkTB("Upload all",             y+4*DY,C_BRAND,                [](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("uploadall"); });
+}
+static void _open_test_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    if(!g_test_ov)mkTestOverlay();}
+#endif // BOARD_T4S3 — page TEST (sous-page SYSTEM)
+
 #ifdef BOARD_T4S3
 // ════════════════════════════════════════════════════════════════════════════
 // (juin 2026) SETTINGS T4-S3 — menu en GRILLE → 6 sections → POPUPS de choix
@@ -4475,13 +4519,14 @@ void buildSettingsPageT4(lv_obj_t*p){
      char h[20];snprintf(h,sizeof(h),"HEX  %s",g_ac_hex[0]?g_ac_hex:"------");
      mkLblP(sp,h,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,8+72+15);}
 
-    // 4) SYSTEM : WIFI AP · MAINTENANCE · SD CARD
+    // 4) SYSTEM : WIFI AP · MAINTENANCE · TEST · SD CARD
     {lv_obj_t*sp=s_sec[4]; const int Y0=8,DY=72;
      mkSegRow(sp,"WIFI AP",Y0+0*DY,"OFF","ON",&g_cfg.wifi_en,false);
      mkBigBtnRow(sp,"MAINTENANCE",Y0+1*DY,"","OPEN",_open_maintenance_cb);
+     mkBigBtnRow(sp,"TEST",Y0+2*DY,"","OPEN",_open_test_cb);   // QA : simuler cycle vol (Phase A)
      char sd[14]; if(g_sd_ok)snprintf(sd,sizeof(sd),"%u GB",g_sd_gb);else strlcpy(sd,"NO CARD",sizeof(sd));
-     mkLblP(sp,"SD CARD",lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,Y0+2*DY+15);
-     s_sd_v=mkLblP(sp,sd,g_sd_ok?C_GREEN:lv_color_hex(0x4b5563),&lv_font_montserrat_20,360,Y0+2*DY+15);}
+     mkLblP(sp,"SD CARD",lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,Y0+3*DY+15);
+     s_sd_v=mkLblP(sp,sd,g_sd_ok?C_GREEN:lv_color_hex(0x4b5563),&lv_font_montserrat_20,360,Y0+3*DY+15);}
 
     // 5) ABOUT : versions & batteries (lecture seule, live BLE)
     {lv_obj_t*sp=s_sec[5]; const lv_color_t kcol=lv_color_hex(0x4b5563); const int X2=320,DYr=40;
