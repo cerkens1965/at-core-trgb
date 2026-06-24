@@ -88,7 +88,11 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         trompeur quand le data est down (ex. antenne LTE débranchée).
 //   v19 : WS-216 migrée sur pile Waveshare (ESP32 core 3.x pioarduino + GFX 1.6.4) → noir
 //         CO5300 enfin profond. + fix conflit SPI : SD isolée sur HSPI (SPI2/FSPI = écran).
-#define VIEW_VERSION  "19"
+//   v20 : (AT-CORE v23) bouton "WiFi Setup" (Maintenance, double-tap) → {"cmd":"portal"} :
+//         ouvre le portail WiFi du boîtier (SoftAP ATCORE-SETUP-<box>) + overlay guidant le
+//         pilote (SSID/pass/URL) → saisie identité aéronef (callsign/type/hex) au clavier
+//         smartphone + creds hotspot + OTA navigateur. Parse STATUS "box" pour le SSID.
+#define VIEW_VERSION  "20"
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -173,6 +177,7 @@ struct StatusData {
     uint8_t fwv;         // version firmware AT-CORE
     char    fwd[14];     // date de build AT-CORE (__DATE__)
     uint8_t oav;         // MAJ dispo : version cloud si > fwv, sinon 0
+    char    box[8];      // box-id boîtier (STATUS "box", ex "CE276D") → SSID portail ATCORE-SETUP-<box>
     };
 struct FlightData  { float gforce_z; int co_ppm,rpm,phase; bool valid; };
 #define MAX_TRF 5
@@ -725,6 +730,7 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     strlcpy(g_status.wssid,d["wss"]|"",sizeof(g_status.wssid));   // SSID hotspot enregistré (boîtier)
     g_status.ota=d["ota"]|0; g_status.opct=d["opct"]|0;
     g_status.fwv=d["fwv"]|0; strlcpy(g_status.fwd,d["fwd"]|"",sizeof(g_status.fwd)); g_status.oav=d["oav"]|0;
+    strlcpy(g_status.box,d["box"]|"",sizeof(g_status.box));   // box-id → SSID portail (WiFi Setup)
     g_status.valid=true;g_dataUpdated=true;}
 void parseFlight(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_flight.gforce_z=d["gf"]|1.0f;g_flight.co_ppm=d["co"]|0;
@@ -3819,6 +3825,69 @@ static void _maint_reboot_cb(lv_event_t*e){
     sendCtl("reboot");
 }
 
+// (v20) WiFi Setup — demande au boîtier d'ouvrir son portail WiFi ({"cmd":"portal"}),
+// puis affiche au pilote comment s'y connecter depuis son téléphone (saisie identité
+// aéronef au clavier smartphone + creds hotspot + OTA navigateur). Le SSID est
+// ATCORE-SETUP-<box> où <box> = box-id reçu en STATUS (aligné v23 boîtier). Le boîtier
+// reboote après Save côté portail ; sinon le pilote peut "Reboot box" pour annuler.
+static lv_obj_t* g_wifisetup_ov=nullptr;
+static void _wifisetup_close_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    if(g_wifisetup_ov){lv_obj_del(g_wifisetup_ov);g_wifisetup_ov=nullptr;}}
+static void showWifiSetupInfo(){
+    if(g_wifisetup_ov)return;
+    g_wifisetup_ov=lv_obj_create(lv_scr_act());
+#ifdef BOARD_T4S3
+    lv_obj_set_size(g_wifisetup_ov,600,480);lv_obj_set_pos(g_wifisetup_ov,0,UI_OY);
+    const lv_font_t* TF=&lv_font_montserrat_22; const lv_font_t* BF=&lv_font_montserrat_18;
+#else
+    lv_obj_set_size(g_wifisetup_ov,480,480);lv_obj_set_pos(g_wifisetup_ov,UI_OX,UI_OY);
+    const lv_font_t* TF=&lv_font_montserrat_18; const lv_font_t* BF=&lv_font_montserrat_14;
+#endif
+    lv_obj_set_style_bg_color(g_wifisetup_ov,TBG(),0);lv_obj_set_style_bg_opa(g_wifisetup_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(g_wifisetup_ov,0,0);lv_obj_set_style_radius(g_wifisetup_ov,0,0);
+    lv_obj_set_style_pad_all(g_wifisetup_ov,0,0);lv_obj_clear_flag(g_wifisetup_ov,LV_OBJ_FLAG_SCROLLABLE);
+    // Tout centré (LV_ALIGN_TOP_MID) → reste dans le disque sur l'écran rond (un x fixe
+    // à 60 sortirait du cercle en haut) ET sur le rectangle T4.
+    char ssid[28];
+    snprintf(ssid,sizeof(ssid),"ATCORE-SETUP-%s",
+             (g_status.valid&&g_status.box[0])?g_status.box:"----");
+    mkLbl(g_wifisetup_ov,"WiFi SETUP",C_AMBER,TF,LV_ALIGN_TOP_MID,0,44);
+    mkLbl(g_wifisetup_ov,"On your phone, join this WiFi:",TGREY(),BF,LV_ALIGN_TOP_MID,0,100);
+    mkLbl(g_wifisetup_ov,ssid,C_GREEN,BF,LV_ALIGN_TOP_MID,0,128);
+    mkLbl(g_wifisetup_ov,"password:  atcore-setup",TFG(),BF,LV_ALIGN_TOP_MID,0,156);
+    mkLbl(g_wifisetup_ov,"Then open in a browser:",TGREY(),BF,LV_ALIGN_TOP_MID,0,200);
+    mkLbl(g_wifisetup_ov,"http://192.168.4.1",C_CYAN,BF,LV_ALIGN_TOP_MID,0,228);
+    mkLbl(g_wifisetup_ov,"Edit callsign / type / hex,",TFG(),BF,LV_ALIGN_TOP_MID,0,272);
+    mkLbl(g_wifisetup_ov,"hotspot, or flash firmware.",TFG(),BF,LV_ALIGN_TOP_MID,0,300);
+    mkLbl(g_wifisetup_ov,"The box reboots after Save.",TGREY(),BF,LV_ALIGN_TOP_MID,0,328);
+    // Close
+    lv_obj_t*b=lv_btn_create(g_wifisetup_ov);lv_obj_set_size(b,180,48);
+    lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-30);
+    lv_obj_set_style_bg_color(b,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(b,10,0);
+    lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(b,_wifisetup_close_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,"Close");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,BF,0);lv_obj_center(l);}}
+
+static bool g_maint_portal_armed=false;
+static void _maint_portal_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
+    if(!g_maint_portal_armed){
+        g_maint_portal_armed=true;
+        if(l)lv_label_set_text(l,"Confirm?");
+        lv_obj_set_style_bg_color(b,C_AMBER,0);
+        return;
+    }
+    g_maint_portal_armed=false;
+    if(l)lv_label_set_text(l,"WiFi Setup");
+    lv_obj_set_style_bg_color(b,C_BRAND,0);
+    sendCtl("portal");        // boîtier ouvre son SoftAP ATCORE-SETUP-<box>
+    showWifiSetupInfo();      // guide le pilote (SSID/pass/URL)
+}
+
 void mkMaintenanceOverlay(){
     if(g_maint_ov)return;
     g_maint_ov=lv_obj_create(lv_scr_act());
@@ -3882,14 +3951,17 @@ void mkMaintenanceOverlay(){
     mkMHdr("FLIGHTS",268);
     mkMBtn("Last flight",30,300,260,46,C_BRAND,lv_color_hex(0xffffff),_maint_upload_cb);
     mkMBtn("Flights...",310,300,260,46,lv_color_hex(0x1f4068),lv_color_hex(0xffffff),_open_vols_cb);
-    // ── FIRMWARE ──────────────────────────────────────────────────────────────
-    mkMHdr("FIRMWARE",356);
+    // ── FIRMWARE / SETUP ────────────────────────────────────────────────────────
+    mkMHdr("FIRMWARE / SETUP",356);
     g_maint_ota_armed=false;
-    mkMBtn("Update",30,388,260,46,C_BRAND,lv_color_hex(0xffffff),_maint_ota_cb);
-    // (v22-C) Reboot soft du boîtier (filet boîtier inaccessible) — à DROITE de Update,
-    // même ligne (l'écran T4 ne fait que 450 px de haut → pas de place sous Update).
+    // (v20) 3 boutons sur la ligne (180 px chacun) : Update (OTA pull cloud par hotspot),
+    // WiFi Setup (ouvre le portail du boîtier : identité au clavier smartphone + OTA navigateur),
+    // Reboot box (filet boîtier scellé). L'écran T4 ne fait que 450 px → tout sur une ligne.
+    mkMBtn("Update",30,388,180,46,C_BRAND,lv_color_hex(0xffffff),_maint_ota_cb);
+    g_maint_portal_armed=false;
+    mkMBtn("WiFi Setup",220,388,180,46,C_BRAND,lv_color_hex(0xffffff),_maint_portal_cb);
     g_maint_reboot_armed=false;
-    mkMBtn("Reboot box",310,388,260,46,C_ORANGE,lv_color_hex(0xffffff),_maint_reboot_cb);
+    mkMBtn("Reboot box",410,388,180,46,C_ORANGE,lv_color_hex(0xffffff),_maint_reboot_cb);
     // Labels d'état firmware/wifi : ligne fine sous les 2 boutons (toujours dans le cadre).
     g_maint_upd=lv_label_create(g_maint_ov);
     lv_obj_set_style_text_font(g_maint_upd,&lv_font_montserrat_14,0);lv_obj_set_pos(g_maint_upd,30,440);
@@ -3985,14 +4057,26 @@ void mkMaintenanceOverlay(){
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
 
-    // OTA cloud-pull : bouton "Update firmware" → {"cmd":"otaupdate"} (download via hotspot).
+    // Ligne y=256 (bande centrale large du cercle) : OTA cloud-pull "Update FW"
+    // ({"cmd":"otaupdate"}) à gauche + "WiFi Setup" ({"cmd":"portal"}) à droite.
+    // 2 demi-boutons (145) façon Last flight/Flights → pas de bouton en bas du
+    // disque (où le cercle se rétrécit → clip). cf géométrie écran rond.
     g_maint_ota_armed=false;
-    lv_obj_t*bo=lv_btn_create(g_maint_ov);lv_obj_set_size(bo,300,32);
-    lv_obj_align(bo,LV_ALIGN_TOP_MID,0,256);
+    lv_obj_t*bo=lv_btn_create(g_maint_ov);lv_obj_set_size(bo,145,32);
+    lv_obj_align(bo,LV_ALIGN_TOP_MID,-78,256);
     lv_obj_set_style_bg_color(bo,C_BRAND,0);lv_obj_set_style_radius(bo,8,0);
     lv_obj_set_style_border_width(bo,0,0);lv_obj_set_style_shadow_opa(bo,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(bo,_maint_ota_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(bo);lv_label_set_text(l,"Update firmware");
+    {lv_obj_t*l=lv_label_create(bo);lv_label_set_text(l,"Update FW");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
+    g_maint_portal_armed=false;
+    lv_obj_t*bws=lv_btn_create(g_maint_ov);lv_obj_set_size(bws,145,32);
+    lv_obj_align(bws,LV_ALIGN_TOP_MID,78,256);
+    lv_obj_set_style_bg_color(bws,C_BRAND,0);lv_obj_set_style_radius(bws,8,0);
+    lv_obj_set_style_border_width(bws,0,0);lv_obj_set_style_shadow_opa(bws,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bws,_maint_portal_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bws);lv_label_set_text(l,"WiFi Setup");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
     // (v22-C) Reboot soft du boîtier (filet boîtier inaccessible).
