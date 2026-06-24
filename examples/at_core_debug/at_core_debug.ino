@@ -92,7 +92,11 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail WiFi du boîtier (SoftAP ATCORE-SETUP-<box>) + overlay guidant le
 //         pilote (SSID/pass/URL) → saisie identité aéronef (callsign/type/hex) au clavier
 //         smartphone + creds hotspot + OTA navigateur. Parse STATUS "box" pour le SSID.
-#define VIEW_VERSION  "20"
+//   v21 : (AT-CORE v24) bouton "Update both" (Maintenance, double-tap) → relais ATV-as-STA :
+//         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
+//         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
+//         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
+#define VIEW_VERSION  "21"
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -3888,6 +3892,97 @@ static void _maint_portal_cb(lv_event_t*e){
     showWifiSetupInfo();      // guide le pilote (SSID/pass/URL)
 }
 
+// ── (v21) Relais "Update both" — flasher ATC + ATV sur un seul réseau WiFi ──────
+// L'AT-VIEW demande au boîtier d'ouvrir son portail ({"cmd":"portal"}), puis rejoint
+// son AP ATCORE-SETUP-<box> EN STA (pass = constante ATC_PORTAL_PASS), garde son
+// serveur web (/update existant) joignable sur ce réseau, et s'annonce au boîtier
+// (GET /atv?ip=&v=) → la page portail du boîtier affiche un lien vers l'updater de
+// l'AT-VIEW. Un seul téléphone sur l'AP flashe les deux. Machine d'état pilotée par
+// relayTick() dans loop() (WiFi.begin non bloquant en boucle).
+#define ATC_PORTAL_PASS "atcore-setup"   // = PORTAL_PASS côté AT-CORE (constante compilée)
+enum { RLY_IDLE=0, RLY_WAIT_AP, RLY_JOINING, RLY_UP, RLY_FAIL };
+static uint8_t  g_relay_state=RLY_IDLE;
+static uint32_t g_relay_t0=0;
+static char     g_relay_ssid[28]="";
+static char     g_relay_ip[16]="";
+static lv_obj_t* g_relay_ov=nullptr;
+static lv_obj_t* g_relay_status_lbl=nullptr;
+static void relayStop();         // fwd (défini près de wifiStart)
+
+static void relayUpdateOverlay(){
+    if(!g_relay_status_lbl)return;
+    if(g_relay_state==RLY_UP){
+        char b[40];snprintf(b,sizeof(b),"Ready - this screen %s",g_relay_ip);
+        lv_label_set_text(g_relay_status_lbl,b);
+        lv_obj_set_style_text_color(g_relay_status_lbl,C_GREEN,0);
+    }else{
+        const char* t = g_relay_state==RLY_WAIT_AP?"Opening box WiFi..."
+                      : g_relay_state==RLY_JOINING?"Joining box network..."
+                      : g_relay_state==RLY_FAIL  ?"Join failed - close & retry":"";
+        lv_label_set_text(g_relay_status_lbl,t);
+        lv_obj_set_style_text_color(g_relay_status_lbl,g_relay_state==RLY_FAIL?C_RED:C_AMBER,0);
+    }}
+
+static void _relay_close_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    relayStop();
+    if(g_relay_ov){lv_obj_del(g_relay_ov);g_relay_ov=nullptr;g_relay_status_lbl=nullptr;}}
+
+static void showRelayOverlay(){
+    if(g_relay_ov)return;
+    g_relay_ov=lv_obj_create(lv_scr_act());
+#ifdef BOARD_T4S3
+    lv_obj_set_size(g_relay_ov,600,480);lv_obj_set_pos(g_relay_ov,0,UI_OY);
+    const lv_font_t* TF=&lv_font_montserrat_22; const lv_font_t* BF=&lv_font_montserrat_18;
+#else
+    lv_obj_set_size(g_relay_ov,480,480);lv_obj_set_pos(g_relay_ov,UI_OX,UI_OY);
+    const lv_font_t* TF=&lv_font_montserrat_18; const lv_font_t* BF=&lv_font_montserrat_14;
+#endif
+    lv_obj_set_style_bg_color(g_relay_ov,TBG(),0);lv_obj_set_style_bg_opa(g_relay_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(g_relay_ov,0,0);lv_obj_set_style_radius(g_relay_ov,0,0);
+    lv_obj_set_style_pad_all(g_relay_ov,0,0);lv_obj_clear_flag(g_relay_ov,LV_OBJ_FLAG_SCROLLABLE);
+    char ssid[28];
+    snprintf(ssid,sizeof(ssid),"ATCORE-SETUP-%s",
+             (g_status.valid&&g_status.box[0])?g_status.box:"----");
+    mkLbl(g_relay_ov,"UPDATE BOTH",C_AMBER,TF,LV_ALIGN_TOP_MID,0,40);
+    g_relay_status_lbl=mkLbl(g_relay_ov,"",C_AMBER,BF,LV_ALIGN_TOP_MID,0,82);
+    mkLbl(g_relay_ov,"On your phone, join this WiFi:",TGREY(),BF,LV_ALIGN_TOP_MID,0,124);
+    mkLbl(g_relay_ov,ssid,C_GREEN,BF,LV_ALIGN_TOP_MID,0,150);
+    mkLbl(g_relay_ov,"password:  atcore-setup",TFG(),BF,LV_ALIGN_TOP_MID,0,176);
+    mkLbl(g_relay_ov,"Open  http://192.168.4.1",C_CYAN,BF,LV_ALIGN_TOP_MID,0,212);
+    mkLbl(g_relay_ov,"Flash AT-CORE on that page,",TFG(),BF,LV_ALIGN_TOP_MID,0,248);
+    mkLbl(g_relay_ov,"then tap 'Open AT-VIEW updater'",TFG(),BF,LV_ALIGN_TOP_MID,0,274);
+    mkLbl(g_relay_ov,"to flash this screen.",TFG(),BF,LV_ALIGN_TOP_MID,0,300);
+    lv_obj_t*b=lv_btn_create(g_relay_ov);lv_obj_set_size(b,200,48);
+    lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-30);
+    lv_obj_set_style_bg_color(b,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(b,10,0);
+    lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(b,_relay_close_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,"Close (stop WiFi)");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,BF,0);lv_obj_center(l);}
+    relayUpdateOverlay();}
+
+static bool g_maint_both_armed=false;
+static void _maint_updateboth_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
+    if(!g_maint_both_armed){
+        g_maint_both_armed=true;
+        if(l)lv_label_set_text(l,"Confirm?");
+        lv_obj_set_style_bg_color(b,C_AMBER,0);
+        return;
+    }
+    g_maint_both_armed=false;
+    if(l)lv_label_set_text(l,"Update both");
+    lv_obj_set_style_bg_color(b,C_BRAND,0);
+    if(!(g_status.valid&&g_status.box[0])){showRelayOverlay();return;}  // pas de box-id → affiche quand même les consignes
+    snprintf(g_relay_ssid,sizeof(g_relay_ssid),"ATCORE-SETUP-%s",g_status.box);
+    sendCtl("portal");                 // boîtier ouvre son AP
+    g_relay_state=RLY_WAIT_AP;g_relay_t0=millis();
+    showRelayOverlay();                // overlay live (machine d'état dans relayTick)
+}
+
 void mkMaintenanceOverlay(){
     if(g_maint_ov)return;
     g_maint_ov=lv_obj_create(lv_scr_act());
@@ -3954,14 +4049,17 @@ void mkMaintenanceOverlay(){
     // ── FIRMWARE / SETUP ────────────────────────────────────────────────────────
     mkMHdr("FIRMWARE / SETUP",356);
     g_maint_ota_armed=false;
-    // (v20) 3 boutons sur la ligne (180 px chacun) : Update (OTA pull cloud par hotspot),
-    // WiFi Setup (ouvre le portail du boîtier : identité au clavier smartphone + OTA navigateur),
-    // Reboot box (filet boîtier scellé). L'écran T4 ne fait que 450 px → tout sur une ligne.
-    mkMBtn("Update",30,388,180,46,C_BRAND,lv_color_hex(0xffffff),_maint_ota_cb);
+    // (v21) 4 boutons (130 px) : Update (OTA pull cloud par hotspot) · WiFi Setup (portail
+    // boîtier : identité clavier smartphone + OTA navigateur) · Update both (relais STA :
+    // flashe ATC+ATV sur un seul réseau) · Reboot box (filet boîtier scellé). Une seule
+    // ligne (T4 = 450 px de haut).
+    mkMBtn("Update",30,388,130,46,C_BRAND,lv_color_hex(0xffffff),_maint_ota_cb);
     g_maint_portal_armed=false;
-    mkMBtn("WiFi Setup",220,388,180,46,C_BRAND,lv_color_hex(0xffffff),_maint_portal_cb);
+    mkMBtn("WiFi Setup",170,388,130,46,C_BRAND,lv_color_hex(0xffffff),_maint_portal_cb);
+    g_maint_both_armed=false;
+    mkMBtn("Update both",310,388,130,46,C_BRAND,lv_color_hex(0xffffff),_maint_updateboth_cb);
     g_maint_reboot_armed=false;
-    mkMBtn("Reboot box",410,388,180,46,C_ORANGE,lv_color_hex(0xffffff),_maint_reboot_cb);
+    mkMBtn("Reboot box",450,388,130,46,C_ORANGE,lv_color_hex(0xffffff),_maint_reboot_cb);
     // Labels d'état firmware/wifi : ligne fine sous les 2 boutons (toujours dans le cadre).
     g_maint_upd=lv_label_create(g_maint_ov);
     lv_obj_set_style_text_font(g_maint_upd,&lv_font_montserrat_14,0);lv_obj_set_pos(g_maint_upd,30,440);
@@ -4079,10 +4177,20 @@ void mkMaintenanceOverlay(){
     {lv_obj_t*l=lv_label_create(bws);lv_label_set_text(l,"WiFi Setup");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
-    // (v22-C) Reboot soft du boîtier (filet boîtier inaccessible).
+    // Ligne y=344 : "Update both" (relais STA → flashe ATC+ATV sur un seul réseau) +
+    // "Reboot box" (filet boîtier scellé). 2 demi-boutons dans la bande centrale large.
+    g_maint_both_armed=false;
+    {lv_obj_t*bb=lv_btn_create(g_maint_ov);lv_obj_set_size(bb,145,32);
+     lv_obj_align(bb,LV_ALIGN_TOP_MID,-78,344);
+     lv_obj_set_style_bg_color(bb,C_BRAND,0);lv_obj_set_style_radius(bb,8,0);
+     lv_obj_set_style_border_width(bb,0,0);lv_obj_set_style_shadow_opa(bb,LV_OPA_TRANSP,0);
+     lv_obj_add_event_cb(bb,_maint_updateboth_cb,LV_EVENT_CLICKED,NULL);
+     lv_obj_t*l=lv_label_create(bb);lv_label_set_text(l,"Update both");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
     g_maint_reboot_armed=false;
-    {lv_obj_t*br=lv_btn_create(g_maint_ov);lv_obj_set_size(br,300,32);
-     lv_obj_align(br,LV_ALIGN_TOP_MID,0,344);
+    {lv_obj_t*br=lv_btn_create(g_maint_ov);lv_obj_set_size(br,145,32);
+     lv_obj_align(br,LV_ALIGN_TOP_MID,78,344);
      lv_obj_set_style_bg_color(br,C_ORANGE,0);lv_obj_set_style_radius(br,8,0);
      lv_obj_set_style_border_width(br,0,0);lv_obj_set_style_shadow_opa(br,LV_OPA_TRANSP,0);
      lv_obj_add_event_cb(br,_maint_reboot_cb,LV_EVENT_CLICKED,NULL);
@@ -5369,15 +5477,21 @@ static void handleOtaData(){
         else Serial.printf("[OTA] end FAIL err=%d\n",Update.getError());
     }else if(u.status==UPLOAD_FILE_ABORTED){Update.abort();Serial.println("[OTA] aborte");}}
 
-void wifiStart(){
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(g_unit_name,g_wifi_pass);
-    MDNS.begin("atview");
+// Crée le WebServer + routes (/, /upload SD, /update OTA) + begin. Partagé par
+// l'AP propre (wifiStart) ET le relais STA (relayTick) → mêmes endpoints, l'updater
+// web de l'AT-VIEW est joignable dans les deux modes.
+static void startWebServer(){
     g_webserver=new WebServer(80);
     g_webserver->on("/",HTTP_GET,handleRoot);
     g_webserver->on("/upload",HTTP_POST,handleUploadDone,handleUploadData);
     g_webserver->on("/update",HTTP_POST,handleOtaDone,handleOtaData);   // OTA firmware (WP7)
-    g_webserver->begin();
+    g_webserver->begin();}
+
+void wifiStart(){
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(g_unit_name,g_wifi_pass);
+    MDNS.begin("atview");
+    startWebServer();
     g_wifi_active=true;
     if(s_wifi_v)lv_label_set_text(s_wifi_v,"192.168.4.1");
     Serial.printf("[WiFi] AP: %s  pass: %s\n",g_unit_name,g_wifi_pass);}
@@ -5389,6 +5503,61 @@ void wifiStop(){
     g_wifi_active=false;
     if(s_wifi_v)lv_label_set_text(s_wifi_v,"OFF");
     Serial.println("[WiFi] Stopped");}
+
+// (v21) Annonce au boîtier (AP portail, 192.168.4.1) : GET /atv?ip=&v= → le boîtier
+// affiche un lien vers cet updater. Fire-and-forget, court timeout.
+static void relayAnnounce(){
+    if(!g_relay_ip[0])return;
+    WiFiClient c;
+    if(!c.connect(IPAddress(192,168,4,1),80)){Serial.println("[RLY] announce: no connect");return;}
+    c.printf("GET /atv?ip=%s&v=%s HTTP/1.1\r\nHost: 192.168.4.1\r\nConnection: close\r\n\r\n",
+             g_relay_ip,VIEW_VERSION);
+    uint32_t t0=millis();
+    while(c.connected()&&millis()-t0<1500){while(c.available())c.read();delay(5);}
+    c.stop();
+    Serial.printf("[RLY] announced %s v%s\n",g_relay_ip,VIEW_VERSION);}
+
+// Arrête le relais : serveur web + WiFi OFF, retour BLE-only (le BLE survit). Appelé
+// au Close de l'overlay. (Après un self-flash, l'AT-VIEW reboote → état moot.)
+static void relayStop(){
+    if(g_webserver){g_webserver->stop();delete g_webserver;g_webserver=nullptr;}
+    WiFi.disconnect(true);WiFi.mode(WIFI_OFF);
+    g_wifi_active=false;g_relay_state=RLY_IDLE;g_relay_ip[0]=0;
+    Serial.println("[RLY] stopped");}
+
+// Machine d'état du relais — appelée à chaque loop(). WiFi.begin non bloquant : on
+// poll WiFi.status() jusqu'à WL_CONNECTED (ou timeout). Le handleClient() de loop()
+// sert l'updater web une fois g_wifi_active.
+static void relayTick(){
+    if(g_relay_state==RLY_IDLE||g_relay_state==RLY_FAIL)return;
+    uint32_t now=millis();
+    if(g_relay_state==RLY_UP){
+        static uint32_t la=0;
+        if(now-la>5000){la=now;relayAnnounce();}   // ré-annonce (au cas où l'AP a redémarré)
+        return;
+    }
+    if(g_relay_state==RLY_WAIT_AP){
+        // Laisse le temps au boîtier de lever son AP après {"cmd":"portal"}.
+        if(now-g_relay_t0>3500){
+            WiFi.mode(WIFI_STA);
+            WiFi.begin(g_relay_ssid,(char*)ATC_PORTAL_PASS);   // core attend char* (pas const)
+            Serial.printf("[RLY] joining %s\n",g_relay_ssid);
+            g_relay_state=RLY_JOINING;g_relay_t0=now;relayUpdateOverlay();
+        }
+    }else if(g_relay_state==RLY_JOINING){
+        if(WiFi.status()==WL_CONNECTED){
+            strlcpy(g_relay_ip,WiFi.localIP().toString().c_str(),sizeof(g_relay_ip));
+            startWebServer();          // updater web joignable sur l'IP STA
+            g_wifi_active=true;        // loop() → handleClient()
+            relayAnnounce();
+            g_relay_state=RLY_UP;relayUpdateOverlay();
+            Serial.printf("[RLY] up, ip=%s\n",g_relay_ip);
+        }else if(now-g_relay_t0>20000){
+            g_relay_state=RLY_FAIL;relayUpdateOverlay();
+            WiFi.disconnect(true);WiFi.mode(WIFI_OFF);
+            Serial.println("[RLY] join timeout");
+        }
+    }}
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
 void setup(){
@@ -5526,6 +5695,7 @@ void loop(){
     static uint32_t drLast=0;
     if(g_page==1&&now-drLast>=200){drLast=now;updateRadarDR();
         if(g_cfg.aip_en&&r_aip_layer&&g_status.valid)lv_obj_invalidate(r_aip_layer);}
+    relayTick();   // (v21) machine d'état du relais "Update both" (STA-join + annonce)
     if(g_wifi_active&&g_webserver)g_webserver->handleClient();
     if(g_ota_reboot_ms&&millis()-g_ota_reboot_ms>1200){Serial.println("[OTA] reboot");delay(200);ESP.restart();}
     // WP8 — liste vols prête : handshake flt_rdy 0→1 (AT-CORE met 0 à la réception
