@@ -96,7 +96,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "21"
+#define VIEW_VERSION  "22"   /* v22 : bouton "Upload all" (Vols) → {"cmd":"uploadall"} AT-CORE v26 (transfert auto des legs SD non envoyés) */
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -3592,8 +3592,14 @@ static void _vols_close_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLIC
 
 static void volsUpdXfer(){
     if(!g_vols_xfer)return;
-    int n=0; for(int i=0;i<g_vols_n;i++) if(g_vols[i].sel)n++;
-    char b[24]; snprintf(b,sizeof(b),"Transfer (%d)",n); lv_label_set_text(g_vols_xfer,b);}
+    int n=0,unsent=0; for(int i=0;i<g_vols_n;i++){ if(g_vols[i].sel)n++; if(!g_vols[i].up)unsent++; }
+    // Rien coché mais des vols non-envoyés présents → "Upload all" (AT-CORE {"cmd":"uploadall"}
+    // FW v26 : scan SD + transfert auto de tous les non-envoyés). Sinon "Transfer (N)".
+    char b[24];
+    if(n)           snprintf(b,sizeof(b),"Transfer (%d)",n);
+    else if(unsent) snprintf(b,sizeof(b),"Upload all");
+    else            snprintf(b,sizeof(b),"Transfer (0)");
+    lv_label_set_text(g_vols_xfer,b);}
 
 // Remplace la liste par un message d'état (transfert/suppression en cours, on reste
 // sur la page). g_vols_load réutilisé comme label, g_vols_n=0 (plus de lignes).
@@ -3636,6 +3642,17 @@ static void _vols_xfer_cb(lv_event_t*e){
         volsShowStatus("Transferring...",C_AMBER);   // on RESTE sur la page (overlay up_pct par-dessus)
         g_vols_xfer_pending=true; g_vols_xfer_seen3=false; g_vols_xfer_t0=millis();
         g_vols_xfer_prog_ms=millis(); g_vols_xfer_lastpct=0; g_vols_xfer_lastph=0xFF;
+    } else {
+        // Aucun coché : "Upload all" → transfert AUTO de tous les vols non-envoyés (AT-CORE
+        // v26). Gardé sur ≥1 non-envoyé visible (sinon la commande ne ferait rien et l'overlay
+        // attendrait son timeout). Même suivi de progression que uploadlist (phases STATUS).
+        int unsent=0; for(int i=0;i<g_vols_n;i++) if(!g_vols[i].up)unsent++;
+        if(unsent){
+            sendCtl("uploadall");
+            volsShowStatus("Uploading all...",C_AMBER);
+            g_vols_xfer_pending=true; g_vols_xfer_seen3=false; g_vols_xfer_t0=millis();
+            g_vols_xfer_prog_ms=millis(); g_vols_xfer_lastpct=0; g_vols_xfer_lastph=0xFF;
+        }
     }
 }
 // Suppression des .up (transférés) — double-tap de confirmation.
