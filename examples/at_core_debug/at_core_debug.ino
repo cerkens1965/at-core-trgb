@@ -306,7 +306,7 @@ static bool             g_authShown=false;   // reset on disconnect → popup re
 static lv_obj_t *r_sess_trig,*r_sess_name;
 // Nouveau layout page 0 — 6 check rows (cercle + label) + label AT-CORE + batterie + version
 #define N_CHK 6
-enum { CHK_CORE=0, CHK_BT=1, CHK_GPS=2, CHK_LTE=3, CHK_ADSB=4, CHK_OGN=5 };
+enum { CHK_CORE=0, CHK_BT=1, CHK_GPS=2, CHK_LTE=3, CHK_SKY=4, CHK_OGN=5 };   // (juin 2026) slot 4 = SafeSky (ex-ADSB)
 static lv_obj_t *r_chk_dot[N_CHK]={};   // cercles
 static lv_obj_t *r_chk_ico[N_CHK]={};   // ✓ blanc (visible si actif)
 static lv_obj_t *r_chk_lbl[N_CHK]={};   // texte
@@ -323,7 +323,7 @@ static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE
 // CX=300 = centre du 600×450 → cluster bas + pill cap recentrés (RB_DX/HDG_DX=0).
 #define RAD_CX 300          // centre radar écran (= centre du 600 px)
 #define RAD_CY 225
-#define RAD_R  200          // Ø400 — laisse la place aux cardinaux À L'EXTÉRIEUR (450 px de haut)
+#define RAD_R  193          // (juin 2026) réduit pour que S/N (cardinaux extérieurs) tiennent dans 450 px
 #define RLC_X  10           // x colonne annotations gauche (pastilles GPS/LTE + mode SafeSky)
 #define RB_DX  0            // cluster scale/GS centré sous le radar (radar au milieu)
 #define RB_DY  0
@@ -368,7 +368,7 @@ static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE
 // (juin 2026) Décalage radial des cardinaux N/E/S/W vs l'anneau : T4-S3 = À
 // L'EXTÉRIEUR (+), T-RGB = à l'intérieur (−24, layout rond d'origine inchangé).
 #ifdef BOARD_T4S3
- #define RAD_CARD_OFF  16
+ #define RAD_CARD_OFF  12
 #else
  #define RAD_CARD_OFF  (-24)
 #endif
@@ -551,6 +551,7 @@ static const char* kSetTab[S_NPG] = {"RADAR","TRAFFIC","SYSTEM"};
 // ── (juin 2026) Settings T4 refondu : menu en grille → 6 sections → popups ──────
 static lv_obj_t* s_menu      = nullptr;  // page d'accueil réglages (grille 6 gros boutons)
 static lv_obj_t* s_sec[6]    = {};       // conteneurs sections (cachés sauf l'ouvert)
+static lv_obj_t* s_back_btn  = nullptr;  // (juin 2026) cercle « retour » haut-droite (visible en section)
 static int8_t    s_cur_sec   = -1;       // -1 = menu affiché, sinon index section ouverte
 static const char* kSecName[6]={"RADAR","DISPLAY","TRAFFIC","AIRCRAFT","SYSTEM","ABOUT"};
 static void settingsShowMenu();          // (fwd) utilisé par switchPage pour reset à l'entrée
@@ -957,8 +958,11 @@ static void swipeCb(lv_event_t*e){
     else if(code==LV_EVENT_PRESSING){g_swipe_lx=pt.x;g_swipe_ly=pt.y;}
     else if(code==LV_EVENT_RELEASED||code==LV_EVENT_PRESS_LOST){
         if(g_swipe_sx>=0){
-            int dx=(int)g_swipe_lx-(int)g_swipe_sx;
-            int dy=(int)g_swipe_ly-(int)g_swipe_sy;
+            // (juin 2026) FIX swipe radar : on prend le point de RELÂCHEMENT réel (pt), pas le
+            // dernier PRESSING (g_swipe_lx) — sur le radar le rendu lourd espace les PRESSING,
+            // g_swipe_lx restait périmé → delta sous-estimé → swipe raté aléatoirement.
+            int dx=(int)pt.x-(int)g_swipe_sx;
+            int dy=(int)pt.y-(int)g_swipe_sy;
             if(g_inDebug){
                 if(abs(dx)>40){lv_obj_add_flag(g_dbgPage,LV_OBJ_FLAG_HIDDEN);
                     lv_obj_clear_flag(g_pages[g_page],LV_OBJ_FLAG_HIDDEN);g_inDebug=false;}
@@ -973,8 +977,9 @@ static void swipeCb(lv_event_t*e){
                     lv_obj_clear_flag(s_pg[s_pg_idx],LV_OBJ_FLAG_HIDDEN);
                     setUpdTitle();}
             }else{
-                if(dx>60){g_navPage=(g_page==0)?NUM_PAGES-1:g_page-1;g_navPending=true;}
-                else if(dx<-60){g_navPage=(g_page+1)%NUM_PAGES;g_navPending=true;}}}
+                // (juin 2026) seuil abaissé 60→45 (swipe plus facile)
+                if(dx>45){g_navPage=(g_page==0)?NUM_PAGES-1:g_page-1;g_navPending=true;}
+                else if(dx<-45){g_navPage=(g_page+1)%NUM_PAGES;g_navPending=true;}}}
         g_swipe_sx=-1;}}
 
 static void cbDebugLongPress(lv_event_t*e){
@@ -1275,7 +1280,7 @@ void p0UpdateAcId(){
         snprintf(t,sizeof(t),"%s  /  %s  /  %s",
             g_ac_reg, g_ac_type, g_ac_hex);
         lv_label_set_text(g_p0_acid,t);
-        lv_obj_set_style_text_color(g_p0_acid,lv_color_hex(0x0f172a),0);  // fixe foncé : la page statut force un fond blanc (TFG=blanc en dark → invisible)
+        lv_obj_set_style_text_color(g_p0_acid,TFG(),0);  // (juin 2026) suit le thème (accueil sombre OK)
     }else{
         lv_label_set_text(g_p0_acid,LV_SYMBOL_WARNING " APPAREIL NON CONFIGURE");
         lv_obj_set_style_text_color(g_p0_acid,lv_color_hex(0xD32F2F),0);
@@ -1292,9 +1297,9 @@ void buildStatusPage(){
     // bloc versions du bas (batterie/ATV/ATC) ré-espacé pour ne PAS se chevaucher ni
     // coller au bord bas (overlay à UI_OY=-15 → y écran = y local - 15). T-RGB inchangé.
 #ifdef BOARD_T4S3
-    const int vwZoom=400, vwY=46, atZoom=480, atY=86, acidY=192, batY=388, verY=414, atcY=440;
-    const lv_font_t *FID=&lv_font_montserrat_18, *FVER=&lv_font_montserrat_16;   // (v14) textes +~25%
-    const int chkY0=224, chkDY=36;                                               // checks plus espacés (dots+police plus gros)
+    const int vwZoom=400, vwY=44, atZoom=480, atY=82, acidY=176, batY=394, verY=422, atcY=422;
+    const lv_font_t *FID=&lv_font_montserrat_24, *FVER=&lv_font_montserrat_16;   // (juin 2026) identité PLUS GRANDE
+    const int chkY0=226, chkDY=33;                                               // (juin 2026) plus d'air sous l'identité + 5 checks (SafeSky)
 #else
     const int vwZoom=320, vwY=70, atZoom=384, atY=108, acidY=190, batY=414, verY=432, atcY=450;
     const lv_font_t *FID=&lv_font_montserrat_14, *FVER=&lv_font_montserrat_12;
@@ -1306,6 +1311,9 @@ void buildStatusPage(){
     lv_img_set_src(lVw,&img_logo_atview);          // 110×22 source
     lv_img_set_zoom(lVw,vwZoom);
     lv_obj_align(lVw,LV_ALIGN_TOP_MID,0,vwY);
+    // (juin 2026) Thème sombre : logos bicolores (bleu+noir, pensés fond blanc) → on les
+    // recolore en TFG (blanc) en DARK pour rester lisibles ; en LIGHT on garde l'original.
+    if(g_dark_theme){lv_obj_set_style_img_recolor(lVw,TFG(),0);lv_obj_set_style_img_recolor_opa(lVw,LV_OPA_COVER,0);}
     // Long-press 1.5s sur ce logo = oublie pair BLE + reboot. Même geste
     // qu'en page Settings (logo footer). Critique ici : c'est le SEUL moyen
     // de sortir d'un blocage "Scanning BLE…" quand la MAC stockée pointe
@@ -1319,6 +1327,7 @@ void buildStatusPage(){
     lv_img_set_src(lAt,&img_logo_aerotrace);       // 240×50 source
     lv_img_set_zoom(lAt,atZoom);                    // T4 ×1.875 (~450×94) — plus gros
     lv_obj_align(lAt,LV_ALIGN_TOP_MID,0,atY);
+    if(g_dark_theme){lv_obj_set_style_img_recolor(lAt,TFG(),0);lv_obj_set_style_img_recolor_opa(lAt,LV_OPA_COVER,0);}
 
     // ── Identité appareil transmise à SafeSky (sous le logo, centrée).
     g_p0_acid=mkLbl(p,"",TFG(),FID,LV_ALIGN_TOP_MID,0,acidY);
@@ -1332,12 +1341,13 @@ void buildStatusPage(){
     mkCheckRow(p,CHK_BT,  X,Y0+1*DY,"Bluetooth");
     mkCheckRow(p,CHK_GPS, X,Y0+2*DY,"GPS");
     mkCheckRow(p,CHK_LTE, X,Y0+3*DY,"LTE");
+    mkCheckRow(p,CHK_SKY, X,Y0+4*DY,"SafeSky");   // (juin 2026) statut SafeSky sous LTE
     // ADS-B / ADS-L et OGN / FLARM retirés (non poussés pour l'instant).
 
-    // ── Batterie AT-CORE + version
+    // ── Batterie AT-CORE + versions (juin 2026 : ATV + ATC sur UNE ligne, largeur exploitée)
     r_p0_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),FVER,LV_ALIGN_TOP_MID,0,batY);
-    mkLbl(p,VIEW_VER_STR,TGREY(),FVER,LV_ALIGN_TOP_MID,0,verY);
-    r_p0_atc=mkLbl(p,"ATC --",TGREY(),FVER,LV_ALIGN_TOP_MID,0,atcY);   // bloc ré-espacé (anti-chevauchement)
+    mkLbl(p,VIEW_VER_STR,TGREY(),FVER,LV_ALIGN_TOP_LEFT,40,verY);      // ATV vX  date — à gauche
+    r_p0_atc=mkLbl(p,"ATC --",TGREY(),FVER,LV_ALIGN_TOP_RIGHT,-40,atcY);  // ATC vX date — à droite
 }
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
@@ -2636,8 +2646,8 @@ static void aipDrawCb(lv_event_t*e){
     // CTR polygons
     lv_draw_line_dsc_t ctr_d,atz_d;
     lv_draw_line_dsc_init(&ctr_d);
-    ctr_d.color=lv_color_hex(0x9ca3af);ctr_d.width=1;
-    atz_d=ctr_d;atz_d.color=lv_color_hex(0xb0bcc8);
+    ctr_d.color=C_BRAND;ctr_d.width=2;                       // (juin 2026) AIP bleu AeroTrace, trait 2px
+    atz_d=ctr_d;atz_d.color=lv_color_hex(0x9fb3cc);          // ATZ : bleu un peu plus clair (width hérité=2)
     for(int c=0;c<g_aip_ctr_cnt;c++){
         lv_draw_line_dsc_t&dsc=(g_aip_ctr[c].type_id==13)?atz_d:ctr_d;
         int psx=0,psy=0;bool pok=false;
@@ -2675,10 +2685,21 @@ void buildRadarPage(){
     // invalide tout l'écran (pas de résidus dans les bandes lors des swipes)
     lv_obj_set_size(p,600,450);lv_obj_set_pos(p,0,0);
 #endif
+    // (juin 2026) Radar NON scrollable : le trafic/AIP en OVERSCAN déborde des bords →
+    // si la page est scrollable, un drag horizontal SCROLLE au lieu de déclencher le
+    // swipe-nav (cause du « swipe radar capricieux », absent des autres pages qui tiennent
+    // dans l'écran). On coupe scroll + scrollbar + élasticité.
+    lv_obj_clear_flag(p,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(p,LV_SCROLLBAR_MODE_OFF);
+    lv_obj_set_scroll_dir(p,LV_DIR_NONE);
 
-    // Heading pill (top centre du radar)
+    // Heading pill (top centre du radar) — (juin 2026) descendue un peu sur T4-S3
     lv_obj_t*hb=lv_obj_create(p);lv_obj_set_size(hb,HDG_W,HDG_H);
+#ifdef BOARD_T4S3
+    lv_obj_align(hb,LV_ALIGN_TOP_MID,HDG_DX,46);
+#else
     lv_obj_align(hb,LV_ALIGN_TOP_MID,HDG_DX,28);
+#endif
     lv_obj_set_style_bg_color(hb,THDG(),0);lv_obj_set_style_bg_opa(hb,LV_OPA_COVER,0);
     lv_obj_set_style_border_color(hb,TFG(),0);lv_obj_set_style_border_width(hb,1,0);
     lv_obj_set_style_radius(hb,14,0);lv_obj_set_style_shadow_opa(hb,LV_OPA_TRANSP,0);
@@ -2687,11 +2708,15 @@ void buildRadarPage(){
     lv_obj_set_style_text_color(r_radar_hdg,TFG(),0);
     lv_obj_set_style_text_font(r_radar_hdg,&HDG_FONT,0);lv_obj_center(r_radar_hdg);
 
-    // GS deplacee en bas, sous la taille du radar (voir _radar_scale_lbl)
+    // GS — (juin 2026) RETIRÉE du radar sur T4-S3 (« GS pas nécessaire »). updateAllPages garde `if(r_radar_gs)`.
+#ifdef BOARD_T4S3
+    r_radar_gs=nullptr;
+#else
     r_radar_gs=lv_label_create(p);lv_label_set_text(r_radar_gs,"GS ---");
     lv_obj_set_style_text_color(r_radar_gs,TFG(),0);
     lv_obj_set_style_text_font(r_radar_gs,&RAD_FONT,0);
     lv_obj_align(r_radar_gs,LV_ALIGN_BOTTOM_MID,RB_DX,-33+RB_DY);   // remonté pour loger la ligne version
+#endif
 
     // Version firmware AT-CORE + date de build — bas de page.
     // (juin 2026) RETIRÉE du radar sur T4-S3 (« pas de n° de version sur cette page »).
@@ -2782,22 +2807,40 @@ void buildRadarPage(){
     lv_obj_add_flag(r_ss_gnd, LV_OBJ_FLAG_HIDDEN);
 
 #ifdef BOARD_T4S3
-    // ── (juin 2026) RADAR ÉPURÉ ────────────────────────────────────────────────
-    // « Supprimer toutes les icônes sauf SafeSky pour le statut. » On masque
-    // batterie / WiFi / BLE / SafeSky-img / point santé, on garde des MINI-pastilles
-    // GPS+LTE (choix utilisateur : rouge si KO), et le badge devient le LABEL DE MODE
-    // SafeSky unique (GND/CRZ/TURN), en tête de la colonne gauche.
-    if(r_hdr_bat)  lv_obj_add_flag(r_hdr_bat,  LV_OBJ_FLAG_HIDDEN);
-    if(r_hdr_sky)  lv_obj_add_flag(r_hdr_sky,  LV_OBJ_FLAG_HIDDEN);
-    if(r_hdr_wifi) lv_obj_add_flag(r_hdr_wifi, LV_OBJ_FLAG_HIDDEN);
-    if(r_hdr_ble)  lv_obj_add_flag(r_hdr_ble,  LV_OBJ_FLAG_HIDDEN);
-    if(r_ss_dot)   lv_obj_add_flag(r_ss_dot,   LV_OBJ_FLAG_HIDDEN);
-    if(r_hdr_gps)  lv_obj_set_pos(r_hdr_gps, RLC_X, 60);    // mini-pastilles remontées
-    if(r_hdr_lte)  lv_obj_set_pos(r_hdr_lte, RLC_X, 108);
-    lv_obj_set_pos(r_ss_gnd, RLC_X, 16);                    // mode SafeSky en tête de colonne
+    // ── (juin 2026) STATUT RADAR ───────────────────────────────────────────────
+    // HAUT-GAUCHE : icône SafeSky (TEINTE = santé signal, vert/rouge) + à sa droite le
+    // STATUT DE VOL (GND au sol / FLT en vol). BAS-GAUCHE : pastilles GPS + LTE (LTE plus
+    // bas, demande utilisateur). Masqués : batterie / WiFi / BLE / point santé (redondant).
+    // ⚠ mk*Pill renvoient l'objet INTERNE → on déplace/masque la PASTILLE (le parent).
+    #define PILL_OF(x) lv_obj_get_parent(x)
+    if(r_hdr_bat)  lv_obj_add_flag(PILL_OF(r_hdr_bat),  LV_OBJ_FLAG_HIDDEN);
+    if(r_hdr_wifi) lv_obj_add_flag(PILL_OF(r_hdr_wifi), LV_OBJ_FLAG_HIDDEN);
+    if(r_hdr_ble)  lv_obj_add_flag(PILL_OF(r_hdr_ble),  LV_OBJ_FLAG_HIDDEN);
+    if(r_ss_dot)   lv_obj_add_flag(r_ss_dot,            LV_OBJ_FLAG_HIDDEN);   // r_ss_dot = objet autonome
+    // Icône SafeSky 2× en HAUT-GAUCHE (teintée live dans updateAllPages — vert OK / rouge KO)
+    if(r_hdr_sky){
+        lv_obj_t* sp=PILL_OF(r_hdr_sky);
+        lv_obj_clear_flag(sp,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_size(sp,52,52);lv_obj_set_pos(sp,RLC_X,8);   // 24×24 ×2 = 48 → pastille 52
+        lv_img_set_zoom(r_hdr_sky,512);                          // 256 = 1× → 512 = 2×
+        lv_obj_center(r_hdr_sky);
+    }
+    // Statut de vol, à DROITE de l'icône SafeSky (défaut GND)
+    lv_obj_set_pos(r_ss_gnd, RLC_X + 52 + 14, 24);
     lv_obj_set_style_text_font(r_ss_gnd, &lv_font_montserrat_22, 0);
-    lv_label_set_text(r_ss_gnd, "---");
-    lv_obj_clear_flag(r_ss_gnd, LV_OBJ_FLAG_HIDDEN);        // toujours visible (texte/couleur live)
+    lv_label_set_text(r_ss_gnd, "GND");
+    lv_obj_clear_flag(r_ss_gnd, LV_OBJ_FLAG_HIDDEN);
+    // LTE & GPS(GNSS) : CENTRÉS sous l'icône SafeSky (centre x≈36), agrandis manuellement
+    // (pas de transform_zoom : il les faisait disparaître). Pastille PILL_W=64 → x=4 = centre 36.
+    if(r_hdr_lte){ lv_obj_set_pos(PILL_OF(r_hdr_lte), RLC_X-6, 70);
+        // barres plus grandes
+        static const int8_t bh2[4]={9,14,19,25}; const int bw=5, sp=7, gx=(PILL_W-(4*bw+3*(sp-bw)))/2;
+        for(int i=0;i<4;i++) if(r_hdr_lte_b[i]){
+            lv_obj_set_size(r_hdr_lte_b[i],bw,bh2[i]);
+            lv_obj_set_pos(r_hdr_lte_b[i],gx+i*sp,(PILL_H-2)-bh2[i]); } }
+    if(r_hdr_gps){ lv_obj_set_pos(PILL_OF(r_hdr_gps), RLC_X-6, 120);   // gap SafeSky→LTE = LTE→GPS = 10
+        lv_obj_set_style_text_font(r_hdr_gps,&lv_font_montserrat_28,0); }   // symbole GPS plus grand
+    #undef PILL_OF
 #endif
 
     // Outer ring
@@ -2847,14 +2890,17 @@ void buildRadarPage(){
         lv_label_set_text(r_card[ci],cnames[ci]);
         lv_obj_set_style_text_font(r_card[ci],&RAD_FONT,0);
         lv_obj_set_style_text_color(r_card[ci],TFG(),0);
-        lv_obj_set_pos(r_card[ci],RAD_CX-5,RAD_CY-(RAD_R+RAD_CARD_OFF)-8);}
+        // (juin 2026) largeur fixe + texte centré → W (large) ne paraît plus décalé
+        lv_obj_set_width(r_card[ci],24);
+        lv_obj_set_style_text_align(r_card[ci],LV_TEXT_ALIGN_CENTER,0);
+        lv_obj_set_pos(r_card[ci],RAD_CX-12,RAD_CY-(RAD_R+RAD_CARD_OFF)-10);}
 
     // Scale label — entre le S de la rose et la GS (ordre : S → 4nm → GS XXkt).
     // (juin 2026) T4-S3 : police PLUS GRANDE + couleur premier-plan (« affichage plus
     // clair et grand du NM du 2ème cadran »). T-RGB inchangé.
     char scl[12];snprintf(scl,12,"%dnm",g_cfg.scale_nm);
 #ifdef BOARD_T4S3
-    r_radar_scale_lbl=mkLbl(p,scl,TFG(),&lv_font_montserrat_32,LV_ALIGN_BOTTOM_MID,RB_DX,-58+RB_DY);
+    r_radar_scale_lbl=mkLbl(p,scl,TFG(),&lv_font_montserrat_32,LV_ALIGN_BOTTOM_MID,RB_DX,-36+RB_DY);   // (juin 2026) descendu
 #else
     r_radar_scale_lbl=mkLbl(p,scl,TGREY(),&RAD_FONT,LV_ALIGN_BOTTOM_MID,RB_DX,-53+RB_DY);
 #endif
@@ -2868,27 +2914,44 @@ void buildRadarPage(){
         // Ergonomie vol (2026-06-05) : "+" coin HAUT-droit, "−" coin BAS-droit —
         // 64 px + zone tactile étendue (+12 px invisible), ~360 px de séparation
         // → impossible à confondre en turbulence. dx = coordonnée Y absolue ici.
-        lv_obj_set_pos(b,600-ZOOM_SZ-8,dx);
-        lv_obj_set_ext_click_area(b,12);
+        lv_obj_set_pos(b,600-ZOOM_SZ-24,dx);   // (juin 2026) décalé du bord (diagonale 45° via dx aussi)
+        // (juin 2026) plus de zone tactile étendue : elle capturait les swipes près du bord droit
 #else
         lv_obj_align(b,LV_ALIGN_BOTTOM_MID,RB_DX+dx,-28+RB_DY);
 #endif
         lv_obj_set_style_radius(b,LV_RADIUS_CIRCLE,0);
+#ifdef BOARD_T4S3
+        // (juin 2026) zoom = GLYPHE +/- seul, SANS cercle, plus grand
+        lv_obj_set_style_bg_opa(b,LV_OPA_TRANSP,0);
+        lv_obj_set_style_border_width(b,0,0);
+#else
         lv_obj_set_style_bg_color(b,THDG(),0);lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
         lv_obj_set_style_border_color(b,TFG(),0);lv_obj_set_style_border_width(b,1,0);
+#endif
         lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(b,0,0);
         lv_obj_clear_flag(b,LV_OBJ_FLAG_SCROLLABLE);
+#ifdef BOARD_T4S3
+        // (juin 2026) +/- DESSINÉS en barres (gros & gras, taille libre vs police).
+        {const int BAR=56, TH=10;
+         auto mkbar=[&](int w,int h){ lv_obj_t*r=lv_obj_create(b);lv_obj_set_size(r,w,h);lv_obj_center(r);
+            lv_obj_set_style_bg_color(r,TFG(),0);lv_obj_set_style_bg_opa(r,LV_OPA_COVER,0);
+            lv_obj_set_style_border_width(r,0,0);lv_obj_set_style_radius(r,2,0);lv_obj_set_style_pad_all(r,0,0);
+            lv_obj_clear_flag(r,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE); };
+         mkbar(BAR,TH);                       // barre horizontale (− et +)
+         if(sym[0]=='+') mkbar(TH,BAR);}      // barre verticale (+)
+#else
         lv_obj_t* lab=lv_label_create(b);lv_label_set_text(lab,sym);
         lv_obj_set_style_text_color(lab,TFG(),0);
         lv_obj_set_style_text_font(lab,&ZOOM_FONT,0);
         lv_obj_center(lab);
+#endif
         lv_obj_add_event_cb(b,cbSetBtn,LV_EVENT_CLICKED,(void*)id);
     };
     // id 0 = nm-- (zoom IN), id 1 = nm++ (zoom OUT). On mappe "+" sur le zoom IN
     // (pousser + = se rapprocher) et "-" sur le zoom OUT. Settings SCALE inchangé.
 #ifdef BOARD_T4S3
-    mkZoomBtn("+", 8,             0);   // coin haut-droit (param = Y absolu)
-    mkZoomBtn("-", 450-ZOOM_SZ-8, 1);   // coin bas-droit
+    mkZoomBtn("+", 24,             0);   // haut-droit, décalé 24px du bord (45°)
+    mkZoomBtn("-", 450-ZOOM_SZ-24, 1);   // bas-droit, décalé 24px du bord (45°)
 #else
     mkZoomBtn("-",-55,1);
     mkZoomBtn("+", 55,0);
@@ -3007,6 +3070,20 @@ void buildRadarPage(){
     // (juin 2026) Appui long sur la mire → action sheet Start/Stop (les enfants bubblent
     // déjà vers la page, donc un long-press n'importe où sur le radar déclenche).
     lv_obj_add_event_cb(p,cbRadarLongPress,LV_EVENT_LONG_PRESSED,NULL);
+
+    // (juin 2026) Bouton SETTINGS bien VISIBLE (cercle bleu + engrenage), créé EN DERNIER
+    // (au-dessus du trafic/AIP) et SANS EVENT_BUBBLE → tap 100 % fiable même si le swipe
+    // résiste. Coin bas-gauche. C'est la nav de secours demandée.
+    {lv_obj_t* gear=lv_btn_create(p);
+     lv_obj_set_size(gear,64,64);lv_obj_set_pos(gear,12,450-64-12);
+     lv_obj_set_style_radius(gear,LV_RADIUS_CIRCLE,0);
+     lv_obj_set_style_bg_color(gear,C_BRAND,0);lv_obj_set_style_bg_opa(gear,LV_OPA_COVER,0);
+     lv_obj_set_style_border_width(gear,0,0);lv_obj_set_style_shadow_opa(gear,LV_OPA_TRANSP,0);
+     lv_obj_set_ext_click_area(gear,10);
+     lv_obj_add_event_cb(gear,[](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED){ g_navPage=2; g_navPending=true; } },LV_EVENT_CLICKED,NULL);
+     lv_obj_t* gl=lv_label_create(gear);lv_label_set_text(gl,LV_SYMBOL_SETTINGS);
+     lv_obj_set_style_text_color(gl,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(gl,&lv_font_montserrat_28,0);lv_obj_center(gl);}
 #endif
 }
 
@@ -4061,6 +4138,7 @@ static void settingsShowMenu(){
     s_cur_sec=-1;
     for(int i=0;i<6;i++) if(s_sec[i]) lv_obj_add_flag(s_sec[i],LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_menu,LV_OBJ_FLAG_HIDDEN);
+    if(s_back_btn) lv_obj_add_flag(s_back_btn,LV_OBJ_FLAG_HIDDEN);   // pas de retour sur le menu
     if(s_set_title) lv_label_set_text(s_set_title,"SETTINGS");
     if(s_set_uline&&s_set_title){ lv_obj_update_layout(s_set_title); lv_obj_set_width(s_set_uline,lv_obj_get_width(s_set_title)); }
 }
@@ -4070,16 +4148,17 @@ static void settingsOpenSection(int i){
     if(s_menu) lv_obj_add_flag(s_menu,LV_OBJ_FLAG_HIDDEN);
     for(int k=0;k<6;k++) if(s_sec[k]) lv_obj_add_flag(s_sec[k],LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_sec[i],LV_OBJ_FLAG_HIDDEN);
-    if(s_set_title){ char t[28]; snprintf(t,sizeof(t),LV_SYMBOL_LEFT "  %s",kSecName[i]); lv_label_set_text(s_set_title,t); }
+    if(s_back_btn) lv_obj_clear_flag(s_back_btn,LV_OBJ_FLAG_HIDDEN);   // (juin 2026) cercle retour visible en section
+    if(s_set_title) lv_label_set_text(s_set_title,kSecName[i]);        // titre épuré (le retour est le cercle à droite)
     if(s_set_uline&&s_set_title){ lv_obj_update_layout(s_set_title); lv_obj_set_width(s_set_uline,lv_obj_get_width(s_set_title)); }
 }
 static void _menu_btn_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) settingsOpenSection((int)(intptr_t)lv_event_get_user_data(e)); }
-static void _settitle_click_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED && s_cur_sec>=0) settingsShowMenu(); }
+static void _sec_back_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) settingsShowMenu(); }
 
 // Gros bouton de la grille menu (contour bleu, rempli au press).
 static void mkMenuBtn(lv_obj_t*parent,int i,int x,int y){
     lv_obj_t*bt=lv_btn_create(parent);
-    lv_obj_set_size(bt,250,90);lv_obj_set_pos(bt,x,y);
+    lv_obj_set_size(bt,252,80);lv_obj_set_pos(bt,x,y);
     lv_obj_set_style_bg_color(bt,TBG(),0);lv_obj_set_style_bg_opa(bt,LV_OPA_COVER,0);
     lv_obj_set_style_border_color(bt,C_BRAND,0);lv_obj_set_style_border_width(bt,2,0);
     lv_obj_set_style_radius(bt,16,0);lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0);
@@ -4090,6 +4169,16 @@ static void mkMenuBtn(lv_obj_t*parent,int i,int x,int y){
     lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_center(l);
 }
 
+// (juin 2026) FIX swipe : propage EVENT_BUBBLE à TOUS les descendants (boutons, cellules
+// segmented imbriquées…) → un swipe horizontal démarré sur un contrôle remonte au conteneur
+// (qui porte swipeCb) au lieu d'être avalé. Sans ça, le menu plein de boutons cassait la
+// navigation par swipe. Les taps continuent de marcher (le handler propre du bouton fire quand
+// même ; LVGL annule le CLICKED si le doigt quitte le bouton = vrai swipe).
+static void bubbleAll(lv_obj_t* o){
+    uint32_t n=lv_obj_get_child_cnt(o);
+    for(uint32_t i=0;i<n;i++){ lv_obj_t*c=lv_obj_get_child(o,i); lv_obj_add_flag(c,LV_OBJ_FLAG_EVENT_BUBBLE); bubbleAll(c); }
+}
+
 void buildSettingsPageT4(lv_obj_t*p){
     char b[20];
     g_seg_n=0; g_segn_n=0; g_pop_n=0; s_cur_sec=-1;
@@ -4097,20 +4186,33 @@ void buildSettingsPageT4(lv_obj_t*p){
     s_bright_v=nullptr;s_src_v=nullptr;s_theme_v=nullptr;s_grnd_v=nullptr;s_icon_sz_v=nullptr;
     s_ac_v=nullptr;s_wifi_v=nullptr;s_sd_v=nullptr;
 
-    // En-tête : logo + titre (tap = retour menu si en section ; appui long = debug)
+    // En-tête : logo + titre (appui long titre = debug). Le RETOUR se fait par le cercle
+    // en haut-droite (maquette juin 2026). Titre un peu plus haut → plus d'air sous lui.
+    // En-tête (coords écran réelles, page à (0,0)). Air en haut + cercle « retour » accessible.
     lv_obj_t*lA=lv_img_create(p);lv_img_set_src(lA,&img_logo_a);
-    lv_obj_align(lA,LV_ALIGN_TOP_LEFT,40,28);
-    s_set_title=mkLblP(p,"SETTINGS",TFG(),&lv_font_montserrat_24,40+56+16,42);
+    lv_obj_align(lA,LV_ALIGN_TOP_LEFT,40,26);
+    s_set_title=mkLblP(p,"SETTINGS",TFG(),&lv_font_montserrat_24,40+56+16,38);
     lv_obj_add_flag(s_set_title,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(s_set_title,LV_OPA_TRANSP,0);
-    lv_obj_add_event_cb(s_set_title,_settitle_click_cb,LV_EVENT_CLICKED,NULL);
     lv_obj_add_event_cb(s_set_title,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);
-    s_set_uline=lv_obj_create(p);lv_obj_set_size(s_set_uline,120,2);lv_obj_set_pos(s_set_uline,40+56+16,74);
+    s_set_uline=lv_obj_create(p);lv_obj_set_size(s_set_uline,120,2);lv_obj_set_pos(s_set_uline,40+56+16,70);
     lv_obj_set_style_bg_color(s_set_uline,C_BRAND,0);lv_obj_set_style_bg_opa(s_set_uline,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(s_set_uline,0,0);lv_obj_set_style_pad_all(s_set_uline,0,0);lv_obj_set_style_radius(s_set_uline,1,0);
     lv_obj_clear_flag(s_set_uline,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
 
-    const int CY=86, CH=480-86;     // zone contenu sous l'en-tête
+    // Cercle « retour » haut-droite (bleu, ‹) — gros, accessible
+    s_back_btn=lv_btn_create(p);
+    lv_obj_set_size(s_back_btn,62,62);lv_obj_set_pos(s_back_btn,600-40-62,24);
+    lv_obj_set_style_radius(s_back_btn,LV_RADIUS_CIRCLE,0);
+    lv_obj_set_style_bg_color(s_back_btn,C_BRAND,0);lv_obj_set_style_shadow_opa(s_back_btn,LV_OPA_TRANSP,0);
+    lv_obj_set_style_border_width(s_back_btn,0,0);
+    lv_obj_add_event_cb(s_back_btn,_sec_back_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(s_back_btn);lv_label_set_text(l,LV_SYMBOL_LEFT);
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_28,0);lv_obj_center(l);}
+    lv_obj_add_flag(s_back_btn,LV_OBJ_FLAG_HIDDEN);
+
+    const int CY=94, CH=450-94;     // (juin 2026) zone contenu (écran réel)
 
     // ── Menu : grille 2×3 de gros boutons ───────────────────────────────────
     s_menu=lv_obj_create(p);
@@ -4118,7 +4220,9 @@ void buildSettingsPageT4(lv_obj_t*p){
     lv_obj_set_style_bg_opa(s_menu,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(s_menu,0,0);
     lv_obj_set_style_pad_all(s_menu,0,0);lv_obj_clear_flag(s_menu,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(s_menu,swipeCb,LV_EVENT_ALL,NULL);   // swipe horizontal (nav page) conservé
-    {const int col0=50,col1=310,r0=24,dyr=120;
+    // (juin 2026) marges ÉGALES (haut=bas=inter-rangées=29) : CH=356, btn 252×80, pitch 109.
+    // Colonnes centrées : 44..296 / 304..556 (marges latérales 44 chacune).
+    {const int col0=44,col1=304,r0=29,dyr=109;
      mkMenuBtn(s_menu,0,col0,r0);        mkMenuBtn(s_menu,3,col1,r0);
      mkMenuBtn(s_menu,1,col0,r0+dyr);    mkMenuBtn(s_menu,4,col1,r0+dyr);
      mkMenuBtn(s_menu,2,col0,r0+2*dyr);  mkMenuBtn(s_menu,5,col1,r0+2*dyr);}
@@ -4181,6 +4285,10 @@ void buildSettingsPageT4(lv_obj_t*p){
      mkLblP(sp,"AT-VIEW BATT",kcol,&lv_font_montserrat_20,40,8+3*DYr);
      mkLblP(sp,"N/A (future)",TGREY(),&lv_font_montserrat_20,X2,8+3*DYr);}
 
+    // (juin 2026) FIX swipe : tous les contrôles bubblent → swipe horizontal de nav page OK
+    bubbleAll(s_menu);
+    for(int s=0;s<6;s++) bubbleAll(s_sec[s]);
+
     settingsShowMenu();   // démarre sur la grille
 }
 #endif // BOARD_T4S3 (settings refondu)
@@ -4196,7 +4304,9 @@ void buildSettingsPage(){
     // T4-S3 : page Settings plein écran (600×480) + refonte juin 2026 (menu grille →
     // sections → popups). On délègue à buildSettingsPageT4 et on sort : le reste de
     // cette fonction est le layout T-RGB d'origine (inchangé, non atteint sur T4).
-    lv_obj_set_size(p,600,480);lv_obj_set_pos(p,0,UI_OY);
+    // (juin 2026) PLEIN ÉCRAN (0,0)/450 comme le radar → coords = écran (avant : y=-15 →
+    // tout collait au bord haut + marges du bas fausses).
+    lv_obj_set_size(p,600,450);lv_obj_set_pos(p,0,0);
     lv_obj_set_scrollbar_mode(p,LV_SCROLLBAR_MODE_OFF);
     buildSettingsPageT4(p);
     return;
@@ -4660,6 +4770,11 @@ static void radarActShow(){
 static void cbRadarLongPress(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_LONG_PRESSED) return;
     if(g_page!=1) return;                                   // radar uniquement
+    // (juin 2026) FIX swipe radar : un appui long pendant un SWIPE (doigt qui a bougé depuis
+    // l'appui) ne doit PAS ouvrir l'action sheet, sinon le geste de navigation est avalé.
+    lv_indev_t*indev=lv_indev_get_act();
+    if(indev){ lv_point_t pt; lv_indev_get_point(indev,&pt);
+        if(g_swipe_sx>=0 && (abs((int)pt.x-(int)g_swipe_sx)>22 || abs((int)pt.y-(int)g_swipe_sy)>22)) return; }
     // Pas d'ouverture si un autre overlay/modal est déjà à l'écran.
     if(g_radar_act_ov||g_stop_ov||g_up_ov||g_fb_ov||g_maint_ov||g_vols_ov||g_pair_ov||g_auth_ov) return;
     radarActShow();
@@ -4838,6 +4953,7 @@ void updateAllPages(){
         bool lte_ok = g_status.valid && g_status.csq>5;
         updCheckRow(CHK_GPS, "GPS",                   gps_ok);
         updCheckRow(CHK_LTE, "LTE",                   lte_ok);
+        updCheckRow(CHK_SKY, "SafeSky", g_connected&&g_status.valid&&g_status.ss_ok);   // (juin 2026)
         // Batterie AT-CORE (footer page #01 + page Settings)
         const char* bat_txt;
         lv_color_t  bat_col;
@@ -4911,21 +5027,25 @@ void updateAllPages(){
      // SafeSky — preuve de connexion bout en bout : échange UDP réussi < 10 s
      // (champ "ss" STATUS, FW ≥ v5). Fallback anciens FW : trafic reçu > 0.
      {bool sky_ok=g_connected&&(g_status.ss_ok||(g_traffic.valid&&g_traffic.count>0));
-      SET_PILL_IMG(r_hdr_sky, sky_ok);}
+#ifdef BOARD_T4S3
+      // (juin 2026) icône SafeSky = indicateur de santé signal par TEINTE : vert OK / rouge KO.
+      if(r_hdr_sky){ lv_obj_set_style_img_recolor(r_hdr_sky, sky_ok?C_GREEN:C_RED,0);
+                     lv_obj_set_style_img_recolor_opa(r_hdr_sky,LV_OPA_COVER,0); }
+#else
+      SET_PILL_IMG(r_hdr_sky, sky_ok);
+#endif
+     }
      // Point santé signal : vert = UDP OK, rouge = perte (≥10 s) — retour vert immédiat
      if(r_ss_dot) lv_obj_set_style_bg_color(r_ss_dot,
          (g_connected&&g_status.valid&&g_status.ss_ok)?C_GREEN:C_RED,0);
 #ifdef BOARD_T4S3
-     // (juin 2026) Indicateur SafeSky UNIQUE = label de mode toujours affiché :
-     //   GND  (ssm=1, sol/idle) · CRZ (ssm=0, vol) · TURN (ssm=2, virage — futur AT-CORE).
-     // Couleur = santé SafeSky : VERT si échange UDP < 10 s, ROUGE sinon (= "tout sauf rouge").
+     // (juin 2026) Label à droite de l'icône SafeSky = STATUT DE VOL : GND (au sol) / FLT
+     // (en vol). La santé SafeSky est portée par la TEINTE de l'icône (ci-dessus), pas ici
+     // → plus de « CRZ sans signal » qui n'avait pas de sens.
      if(r_ss_gnd){
-         bool sky=g_connected&&g_status.valid&&g_status.ss_ok;
-         const char* m = !g_connected ? "---"
-                       : (g_status.ss_mode==1) ? "GND"
-                       : (g_status.ss_mode==2) ? "TURN" : "CRZ";
-         lv_label_set_text(r_ss_gnd,m);
-         lv_obj_set_style_text_color(r_ss_gnd, sky?C_GREEN:C_RED, 0);
+         bool flying = g_status.valid && g_status.flt_st!=0;
+         lv_label_set_text(r_ss_gnd, flying?"FLT":"GND");
+         lv_obj_set_style_text_color(r_ss_gnd, flying?C_GREEN:TFG(), 0);
      }
 #else
      // (v18) Badge GND visible UNIQUEMENT si SafeSky fonctionne (ss_ok=vert) ET en mode éco
@@ -5002,8 +5122,8 @@ void updateAllPages(){
             int rel=((cbear[ci]-radarEffHdg())%360+360)%360;
             float ra=(float)rel*(float)M_PI/180.0f;
             int r_inner=RAD_R+RAD_CARD_OFF;
-            int cx=(int)(RAD_CX+sinf(ra)*(float)r_inner)-5;
-            int cy=(int)(RAD_CY-cosf(ra)*(float)r_inner)-8;
+            int cx=(int)(RAD_CX+sinf(ra)*(float)r_inner)-12;   // -12 = demi-largeur (labels centrés, juin 2026)
+            int cy=(int)(RAD_CY-cosf(ra)*(float)r_inner)-10;
             lv_obj_set_pos(r_card[ci],cx,cy);}}
     // Radar blips — handled by updateRadarDR() called every loop (dead reckoning)
 #if UI_CO_EN
