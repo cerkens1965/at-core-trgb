@@ -98,7 +98,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "27"   /* v27 (brique 0) : l'écran HÉRITE les creds WiFi club du boîtier (lecture CHR_WIFICRED 6E40000C à la connexion → unitSaveHotspot) → zéro saisie, l'OTA "Update ATV"/wifitest marchent direct. (v26 cloud-pull OTA écran, v25 prompt MAJ boot.) */
+#define VIEW_VERSION  "28"   /* v28 : fix OTA "Update ATV" — deinit BLE avant le TLS (Bluedroid ne laissait que ~40 KB → handshake échouait, GET=-1) → +50-80 KB ; toute sortie post-deinit reboote (restaure BLE). (v27 héritage creds WiFi, v26 cloud-pull OTA écran.) */
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -3870,34 +3870,42 @@ static void atvCloudOta(){
     uint32_t t0=millis();
     while(WiFi.status()!=WL_CONNECTED && millis()-t0<15000) delay(200);
     if(WiFi.status()!=WL_CONNECTED){ atvOtaShow("WiFi connect failed",C_RED); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
-    WiFiClientSecure client; client.setInsecure();
+    Serial.printf("[ATVOTA] WiFi OK ip=%s rssi=%d heap=%u\n",WiFi.localIP().toString().c_str(),(int)WiFi.RSSI(),(unsigned)ESP.getFreeHeap());
+    // Le Bluedroid BLE de l'écran ne laisse que ~40 KB de heap → le TLS handshake échoue
+    // (GET=-1). On LIBÈRE le BLE avant le TLS (+50-80 KB). ⚠️ Après ce deinit le BLE est mort
+    // → TOUTE sortie doit REBOOTER (le boot ré-init le BLE). On reboote de toute façon en fin d'OTA.
+    BLEDevice::deinit(true); delay(150);
+    Serial.printf("[ATVOTA] BLE deinit, heap=%u\n",(unsigned)ESP.getFreeHeap());
+    WiFiClientSecure client; client.setInsecure(); client.setHandshakeTimeout(20);
     char url[200];
     // 1) version
     snprintf(url,sizeof(url),"https://%s/v0/b/%s/o/firmware%%2Fatv%%2F%s%%2Fversion.txt?alt=media",ATV_STORAGE_HOST,ATV_STORAGE_BUCKET,ATV_OTA_TAG);
-    int remote=-1; { HTTPClient http; http.setConnectTimeout(8000); http.setTimeout(15000);
-        if(http.begin(client,url) && http.GET()==200) remote=http.getString().toInt(); http.end(); }
+    int remote=-1; { HTTPClient http; http.setConnectTimeout(10000); http.setTimeout(15000);
+        bool bg=http.begin(client,url); int code=bg?http.GET():-999;
+        Serial.printf("[ATVOTA] ver begin=%d GET=%d heap=%u\n",(int)bg,code,(unsigned)ESP.getFreeHeap());
+        if(code==200) remote=http.getString().toInt(); http.end(); }
     int local=atoi(VIEW_VERSION);
-    if(remote<0){ atvOtaShow("Version check failed",C_RED); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
-    if(remote<=local){ snprintf(b,sizeof(b),"Already up to date (v%d)",local); atvOtaShow(b,C_GREEN); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
+    if(remote<0){ atvOtaShow("Version check failed - reboot",C_RED); delay(2500); ESP.restart(); }
+    if(remote<=local){ snprintf(b,sizeof(b),"Already up to date (v%d) - reboot",local); atvOtaShow(b,C_GREEN); delay(2500); ESP.restart(); }
     // 2) download + flash
     snprintf(b,sizeof(b),"Downloading v%d...",remote); atvOtaShow(b,C_AMBER);
     snprintf(url,sizeof(url),"https://%s/v0/b/%s/o/firmware%%2Fatv%%2F%s%%2Ffirmware.bin?alt=media",ATV_STORAGE_HOST,ATV_STORAGE_BUCKET,ATV_OTA_TAG);
-    HTTPClient h2; h2.setConnectTimeout(8000); h2.setTimeout(20000);
-    if(!h2.begin(client,url) || h2.GET()!=200){ atvOtaShow("Download failed",C_RED); h2.end(); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
+    HTTPClient h2; h2.setConnectTimeout(10000); h2.setTimeout(20000);
+    if(!h2.begin(client,url) || h2.GET()!=200){ atvOtaShow("Download failed - reboot",C_RED); h2.end(); delay(2500); ESP.restart(); }
     int total=h2.getSize();
-    if(!Update.begin(total>0?total:UPDATE_SIZE_UNKNOWN)){ atvOtaShow("Update.begin failed",C_RED); h2.end(); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
+    if(!Update.begin(total>0?total:UPDATE_SIZE_UNKNOWN)){ atvOtaShow("Update.begin failed - reboot",C_RED); h2.end(); delay(2500); ESP.restart(); }
     WiFiClient* st=h2.getStreamPtr(); uint8_t buf[1024]; size_t written=0; bool hok=false; uint32_t last=millis(); int lastpct=-1;
     while(h2.connected() && (total<=0 || (int)written<total)){
         size_t av=st->available();
         if(av){ int n=st->readBytes(buf,av>sizeof(buf)?sizeof(buf):av); if(n<=0)break;
-            if(!hok && n>=13){ hok=true; if(buf[0]!=0xE9 || buf[12]!=0x09){ atvOtaShow("Bad image (wrong chip)",C_RED); Update.abort(); h2.end(); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; } }
-            if(Update.write(buf,n)!=(size_t)n){ atvOtaShow("Flash write error",C_RED); Update.abort(); h2.end(); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
+            if(!hok && n>=13){ hok=true; if(buf[0]!=0xE9 || buf[12]!=0x09){ atvOtaShow("Bad image - reboot",C_RED); Update.abort(); h2.end(); delay(2500); ESP.restart(); } }
+            if(Update.write(buf,n)!=(size_t)n){ atvOtaShow("Flash write error - reboot",C_RED); Update.abort(); h2.end(); delay(2500); ESP.restart(); }
             written+=n; last=millis();
             if(total>0){ int pct=(int)((uint32_t)written*100/total); if(pct!=lastpct && pct%5==0){ lastpct=pct; snprintf(b,sizeof(b),"Flashing v%d... %d%%",remote,pct); atvOtaShow(b,C_AMBER); } }
-        } else { if(millis()-last>20000){ atvOtaShow("Download timeout",C_RED); Update.abort(); h2.end(); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; } delay(5); }
+        } else { if(millis()-last>20000){ atvOtaShow("Download timeout - reboot",C_RED); Update.abort(); h2.end(); delay(2500); ESP.restart(); } delay(5); }
     }
     h2.end();
-    if(!Update.end(true)){ atvOtaShow("Flash failed",C_RED); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
+    if(!Update.end(true)){ atvOtaShow("Flash failed - reboot",C_RED); delay(2500); ESP.restart(); }
     atvOtaShow("Update OK - rebooting",C_GREEN); delay(2000); ESP.restart();
 }
 // "Update ATV" (cloud-pull self-OTA) — double-tap de confirmation (reflash + reboot écran).
