@@ -96,7 +96,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "23"   /* v23 : page TEST (Settings → SYSTEM → TEST, T4-S3) → start/stop/continue_flight + wifitest + uploadall → simuler un cycle vol au banc (valider Phase A upload auto). (v22 bouton Upload all.) */
+#define VIEW_VERSION  "24"   /* v24 : logo + point santé SafeSky → GRIS en mode sol/idle (ss_mode=1, beat dégradé) au lieu de rester vert ; rouge=KO, vert=vol frais. (v23 page TEST, v22 Upload all.) */
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -5282,16 +5282,21 @@ void updateAllPages(){
      // (champ "ss" STATUS, FW ≥ v5). Fallback anciens FW : trafic reçu > 0.
      {bool sky_ok=g_connected&&(g_status.ss_ok||(g_traffic.valid&&g_traffic.count>0));
 #ifdef BOARD_T4S3
-      // (juin 2026) icône SafeSky = indicateur de santé signal par TEINTE : vert OK / rouge KO.
-      if(r_hdr_sky){ lv_obj_set_style_img_recolor(r_hdr_sky, sky_ok?C_GREEN:C_RED,0);
+      // (juin 2026) icône SafeSky = santé signal par TEINTE : vert OK / rouge KO.
+      // (v23) + GRIS en mode sol/idle (ss_mode=1) : SafeSky vivant mais beat dégradé/lent
+      // (1 beacon/60 s) → l'image n'est pas fraîche. Priorité : KO=rouge, sinon idle=gris, sinon vert.
+      lv_color_t skyTint = !sky_ok ? C_RED
+                         : (g_status.ss_mode==1 ? lv_color_hex(0x9ca3af) : C_GREEN);
+      if(r_hdr_sky){ lv_obj_set_style_img_recolor(r_hdr_sky, skyTint,0);
                      lv_obj_set_style_img_recolor_opa(r_hdr_sky,LV_OPA_COVER,0); }
 #else
       SET_PILL_IMG(r_hdr_sky, sky_ok);
 #endif
      }
-     // Point santé signal : vert = UDP OK, rouge = perte (≥10 s) — retour vert immédiat
+     // Point santé signal : vert = UDP OK · GRIS = mode sol/idle (beat dégradé) · rouge = perte.
      if(r_ss_dot) lv_obj_set_style_bg_color(r_ss_dot,
-         (g_connected&&g_status.valid&&g_status.ss_ok)?C_GREEN:C_RED,0);
+         !(g_connected&&g_status.valid&&g_status.ss_ok) ? C_RED
+         : (g_status.ss_mode==1 ? lv_color_hex(0x9ca3af) : C_GREEN), 0);
 #ifdef BOARD_T4S3
      // (juin 2026) Label à droite de l'icône SafeSky = STATUT DE VOL : GND (au sol) / FLT
      // (en vol). La santé SafeSky est portée par la TEINTE de l'icône (ci-dessus), pas ici
