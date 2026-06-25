@@ -96,7 +96,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "24"   /* v24 : logo + point santé SafeSky → GRIS en mode sol/idle (ss_mode=1, beat dégradé) au lieu de rester vert ; rouge=KO, vert=vol frais. (v23 page TEST, v22 Upload all.) */
+#define VIEW_VERSION  "25"   /* v25 (Phase B) : prompt "FIRMWARE UPDATE vN available · Update now/Later" au démarrage quand le boîtier signale oav>fwv (check au boot ATC v32). (v24 logo SafeSky gris idle, v23 page TEST, v22 Upload all.) */
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -5118,6 +5118,38 @@ static void mkOtaOverlay(){
     lv_obj_set_style_bg_color(g_ota_bar,C_BRAND,LV_PART_INDICATOR);
 }
 static void hideOtaOverlay(){ if(g_ota_ov){lv_obj_del(g_ota_ov);g_ota_ov=nullptr;g_ota_lbl=nullptr;g_ota_bar=nullptr;} g_ota_done_ms=0; }
+// Phase B (2026-06-25) — prompt « MAJ firmware dispo » : quand le boîtier a détecté oav>fwv
+// (check au boot AT-CORE v32) → propose Update now / Later. Distinct de l'overlay progression.
+// "Later" arme g_otaav_acked → plus de prompt cette session (re-proposé au prochain boot écran).
+static lv_obj_t* g_otaav_ov=nullptr;
+static bool g_otaav_acked=false;
+void updOtaAvailPrompt(){
+    if(!g_status.valid || g_status.oav<=g_status.fwv || g_otaav_acked || g_status.ota!=0){
+        if(g_otaav_ov){lv_obj_del(g_otaav_ov);g_otaav_ov=nullptr;}
+        return;
+    }
+    if(g_otaav_ov) return;   // déjà affiché
+    g_otaav_ov=lv_obj_create(lv_layer_top());
+    lv_obj_set_size(g_otaav_ov,360,200);lv_obj_center(g_otaav_ov);
+    lv_obj_set_style_bg_color(g_otaav_ov,lv_color_hex(0x0d1117),0);lv_obj_set_style_bg_opa(g_otaav_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(g_otaav_ov,C_AMBER,0);lv_obj_set_style_border_width(g_otaav_ov,2,0);
+    lv_obj_set_style_radius(g_otaav_ov,12,0);lv_obj_clear_flag(g_otaav_ov,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t*t=lv_label_create(g_otaav_ov);lv_label_set_text(t,"FIRMWARE UPDATE");
+    lv_obj_set_style_text_color(t,C_AMBER,0);lv_obj_set_style_text_font(t,&lv_font_montserrat_20,0);
+    lv_obj_align(t,LV_ALIGN_TOP_MID,0,18);
+    char b[48]; snprintf(b,sizeof(b),"v%d available  (now v%d)",g_status.oav,g_status.fwv);
+    lv_obj_t*l=lv_label_create(g_otaav_ov);lv_label_set_text(l,b);
+    lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_16,0);
+    lv_obj_align(l,LV_ALIGN_TOP_MID,0,66);
+    {lv_obj_t*bn=lv_btn_create(g_otaav_ov);lv_obj_set_size(bn,150,54);lv_obj_align(bn,LV_ALIGN_BOTTOM_LEFT,18,-18);
+     lv_obj_set_style_bg_color(bn,C_GREEN,0);lv_obj_set_style_radius(bn,10,0);lv_obj_set_style_shadow_opa(bn,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(bn,0,0);
+     lv_obj_add_event_cb(bn,[](lv_event_t*e){ if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return; sendCtl("otaupdate"); g_otaav_acked=true; if(g_otaav_ov){lv_obj_del(g_otaav_ov);g_otaav_ov=nullptr;} },LV_EVENT_CLICKED,NULL);
+     lv_obj_t*bl=lv_label_create(bn);lv_label_set_text(bl,"Update now");lv_obj_set_style_text_color(bl,lv_color_hex(0xffffff),0);lv_obj_set_style_text_font(bl,&lv_font_montserrat_16,0);lv_obj_center(bl);}
+    {lv_obj_t*bn=lv_btn_create(g_otaav_ov);lv_obj_set_size(bn,150,54);lv_obj_align(bn,LV_ALIGN_BOTTOM_RIGHT,-18,-18);
+     lv_obj_set_style_bg_color(bn,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bn,10,0);lv_obj_set_style_shadow_opa(bn,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(bn,0,0);
+     lv_obj_add_event_cb(bn,[](lv_event_t*e){ if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return; g_otaav_acked=true; if(g_otaav_ov){lv_obj_del(g_otaav_ov);g_otaav_ov=nullptr;} },LV_EVENT_CLICKED,NULL);
+     lv_obj_t*bl=lv_label_create(bn);lv_label_set_text(bl,"Later");lv_obj_set_style_text_color(bl,lv_color_hex(0xffffff),0);lv_obj_set_style_text_font(bl,&lv_font_montserrat_16,0);lv_obj_center(bl);}
+}
 // MAJ selon g_status.ota (0 idle/1 check/2 download/3 OK reboot/4 fail/5 à jour).
 void updOtaOverlay(){
     if(!g_status.valid||g_status.ota==0){ if(g_ota_ov)hideOtaOverlay(); g_ota_acked=0; return; }
@@ -5153,7 +5185,8 @@ void updateAllPages(){
     // Tâche F : overlay upload progress (full-screen modal post-vol)
     updUploadOverlay();
     updFlightState();   // bannière FLIGHT STARTED / chip Start flight / overlay arrêt
-    updOtaOverlay();    // overlay MAJ firmware (OTA cloud)
+    updOtaOverlay();    // overlay MAJ firmware (OTA cloud, progression)
+    updOtaAvailPrompt(); // (Phase B) prompt "MAJ dispo" au boot : Update now / Later
     if(g_vols_ov) volsUpdWifi();   // ligne état WiFi hotspot dans la page Flights
     // Version firmware AT-CORE + date de build — bas page radar (l'annonce de MAJ est dans Maintenance)
     if(r_radar_ver||r_p0_atc){
