@@ -28,6 +28,8 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Update.h>   // OTA firmware AT-VIEW (WP7) — réception .bin via l'AP du WebServer
+#include <HTTPClient.h>        // (2026-06-25) cloud-pull OTA AT-VIEW : download depuis Firebase Storage
+#include <WiFiClientSecure.h>  //              (HTTPS, setInsecure — public-read firmware/atv/**)
 #include <ESPmDNS.h>
 #include "esp_mac.h"  // esp_read_mac(ESP_MAC_BT) → nom AT-VIEW = ATV-<MAC>
 #include "img_vl3.h"
@@ -96,7 +98,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "25"   /* v25 (Phase B) : prompt "FIRMWARE UPDATE vN available · Update now/Later" au démarrage quand le boîtier signale oav>fwv (check au boot ATC v32). (v24 logo SafeSky gris idle, v23 page TEST, v22 Upload all.) */
+#define VIEW_VERSION  "26"   /* v26 : cloud-pull OTA AT-VIEW — bouton "Update ATV" (Maintenance, double-tap) télécharge le firmware écran depuis Firebase (public-read firmware/atv/<t4s3|trgb>/), flashe, reboot. Remplace le relais "Update both" (redondant). (v25 prompt MAJ boot, v24 SafeSky gris idle.) */
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -3812,6 +3814,83 @@ static void _open_vols_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
     if(!g_vols_ov)mkVolsOverlay();}
 
+// ── (2026-06-25) Cloud-pull OTA de l'AT-VIEW : 1-bouton, sans câble ni téléphone ──────
+// L'écran télécharge SON firmware depuis Firebase Storage (public-read firmware/atv/<tag>/)
+// via le WiFi hotspot/club configuré (g_hs_ssid), flashe (Update) et reboote. Tag = t4s3/trgb
+// (binaires distincts). setInsecure (MITM non couvert, acceptable MVP). PAS de rollback :
+// écrans actuels récupérables en USB (le rollback viendra avec l'Anders scellé, Phase D).
+// Bloquant (LVGL figé pendant le download) → overlay rafraîchi par lv_refr_now().
+#define ATV_STORAGE_HOST   "firebasestorage.googleapis.com"
+#define ATV_STORAGE_BUCKET "aerotrace-74217.firebasestorage.app"
+#ifdef BOARD_T4S3
+  #define ATV_OTA_TAG "t4s3"
+#else
+  #define ATV_OTA_TAG "trgb"
+#endif
+static lv_obj_t* g_atvota_ov=nullptr,*g_atvota_lbl=nullptr;
+static void atvOtaShow(const char* m, lv_color_t c){
+    if(!g_atvota_ov){
+        g_atvota_ov=lv_obj_create(lv_layer_top());
+        lv_obj_set_size(g_atvota_ov,440,180);lv_obj_center(g_atvota_ov);
+        lv_obj_set_style_bg_color(g_atvota_ov,lv_color_hex(0x0d1117),0);lv_obj_set_style_bg_opa(g_atvota_ov,LV_OPA_COVER,0);
+        lv_obj_set_style_border_color(g_atvota_ov,C_BRAND,0);lv_obj_set_style_border_width(g_atvota_ov,2,0);
+        lv_obj_set_style_radius(g_atvota_ov,12,0);lv_obj_clear_flag(g_atvota_ov,LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t*t=lv_label_create(g_atvota_ov);lv_label_set_text(t,"AT-VIEW UPDATE");
+        lv_obj_set_style_text_color(t,C_BRAND,0);lv_obj_set_style_text_font(t,&lv_font_montserrat_20,0);lv_obj_align(t,LV_ALIGN_TOP_MID,0,22);
+        g_atvota_lbl=lv_label_create(g_atvota_ov);lv_obj_set_style_text_font(g_atvota_lbl,&lv_font_montserrat_16,0);lv_obj_align(g_atvota_lbl,LV_ALIGN_CENTER,0,10);
+    }
+    lv_label_set_text(g_atvota_lbl,m);lv_obj_set_style_text_color(g_atvota_lbl,c,0);
+    lv_refr_now(NULL);
+}
+static void atvOtaHide(){ if(g_atvota_ov){lv_obj_del(g_atvota_ov);g_atvota_ov=nullptr;g_atvota_lbl=nullptr;} }
+static void atvCloudOta(){
+    char b[64];
+    if(!g_hs_ssid[0]){ atvOtaShow("No WiFi configured (Maintenance)",C_RED); delay(2500); atvOtaHide(); return; }
+    atvOtaShow("Connecting WiFi...",lv_color_hex(0xffffff));
+    WiFi.mode(WIFI_STA); WiFi.begin(g_hs_ssid,(char*)g_hs_pass);
+    uint32_t t0=millis();
+    while(WiFi.status()!=WL_CONNECTED && millis()-t0<15000) delay(200);
+    if(WiFi.status()!=WL_CONNECTED){ atvOtaShow("WiFi connect failed",C_RED); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
+    WiFiClientSecure client; client.setInsecure();
+    char url[200];
+    // 1) version
+    snprintf(url,sizeof(url),"https://%s/v0/b/%s/o/firmware%%2Fatv%%2F%s%%2Fversion.txt?alt=media",ATV_STORAGE_HOST,ATV_STORAGE_BUCKET,ATV_OTA_TAG);
+    int remote=-1; { HTTPClient http; http.setConnectTimeout(8000); http.setTimeout(15000);
+        if(http.begin(client,url) && http.GET()==200) remote=http.getString().toInt(); http.end(); }
+    int local=atoi(VIEW_VERSION);
+    if(remote<0){ atvOtaShow("Version check failed",C_RED); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
+    if(remote<=local){ snprintf(b,sizeof(b),"Already up to date (v%d)",local); atvOtaShow(b,C_GREEN); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
+    // 2) download + flash
+    snprintf(b,sizeof(b),"Downloading v%d...",remote); atvOtaShow(b,C_AMBER);
+    snprintf(url,sizeof(url),"https://%s/v0/b/%s/o/firmware%%2Fatv%%2F%s%%2Ffirmware.bin?alt=media",ATV_STORAGE_HOST,ATV_STORAGE_BUCKET,ATV_OTA_TAG);
+    HTTPClient h2; h2.setConnectTimeout(8000); h2.setTimeout(20000);
+    if(!h2.begin(client,url) || h2.GET()!=200){ atvOtaShow("Download failed",C_RED); h2.end(); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
+    int total=h2.getSize();
+    if(!Update.begin(total>0?total:UPDATE_SIZE_UNKNOWN)){ atvOtaShow("Update.begin failed",C_RED); h2.end(); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
+    WiFiClient* st=h2.getStreamPtr(); uint8_t buf[1024]; size_t written=0; bool hok=false; uint32_t last=millis(); int lastpct=-1;
+    while(h2.connected() && (total<=0 || (int)written<total)){
+        size_t av=st->available();
+        if(av){ int n=st->readBytes(buf,av>sizeof(buf)?sizeof(buf):av); if(n<=0)break;
+            if(!hok && n>=13){ hok=true; if(buf[0]!=0xE9 || buf[12]!=0x09){ atvOtaShow("Bad image (wrong chip)",C_RED); Update.abort(); h2.end(); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; } }
+            if(Update.write(buf,n)!=(size_t)n){ atvOtaShow("Flash write error",C_RED); Update.abort(); h2.end(); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
+            written+=n; last=millis();
+            if(total>0){ int pct=(int)((uint32_t)written*100/total); if(pct!=lastpct && pct%5==0){ lastpct=pct; snprintf(b,sizeof(b),"Flashing v%d... %d%%",remote,pct); atvOtaShow(b,C_AMBER); } }
+        } else { if(millis()-last>20000){ atvOtaShow("Download timeout",C_RED); Update.abort(); h2.end(); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; } delay(5); }
+    }
+    h2.end();
+    if(!Update.end(true)){ atvOtaShow("Flash failed",C_RED); delay(2500); atvOtaHide(); WiFi.mode(WIFI_OFF); return; }
+    atvOtaShow("Update OK - rebooting",C_GREEN); delay(2000); ESP.restart();
+}
+// "Update ATV" (cloud-pull self-OTA) — double-tap de confirmation (reflash + reboot écran).
+static bool g_maint_atvota_armed=false;
+static void _maint_atvota_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
+    if(!g_maint_atvota_armed){ g_maint_atvota_armed=true; if(l)lv_label_set_text(l,"Confirm?"); lv_obj_set_style_bg_color(b,C_AMBER,0); return; }
+    g_maint_atvota_armed=false; if(l)lv_label_set_text(l,"Update ATV");
+    atvCloudOta();
+}
+
 // OTA cloud-pull : double-tap de confirmation (action destructive = reflash + reboot).
 static bool g_maint_ota_armed=false;
 static void _maint_ota_cb(lv_event_t*e){
@@ -4073,8 +4152,8 @@ void mkMaintenanceOverlay(){
     mkMBtn("Update",30,388,130,46,C_BRAND,lv_color_hex(0xffffff),_maint_ota_cb);
     g_maint_portal_armed=false;
     mkMBtn("WiFi Setup",170,388,130,46,C_BRAND,lv_color_hex(0xffffff),_maint_portal_cb);
-    g_maint_both_armed=false;
-    mkMBtn("Update both",310,388,130,46,C_BRAND,lv_color_hex(0xffffff),_maint_updateboth_cb);
+    g_maint_atvota_armed=false;
+    mkMBtn("Update ATV",310,388,130,46,C_BRAND,lv_color_hex(0xffffff),_maint_atvota_cb);   // cloud-pull self-OTA (remplace l'ancien relais "Update both")
     g_maint_reboot_armed=false;
     mkMBtn("Reboot box",450,388,130,46,C_ORANGE,lv_color_hex(0xffffff),_maint_reboot_cb);
     // Labels d'état firmware/wifi : ligne fine sous les 2 boutons (toujours dans le cadre).
@@ -4196,13 +4275,13 @@ void mkMaintenanceOverlay(){
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
     // Ligne y=344 : "Update both" (relais STA → flashe ATC+ATV sur un seul réseau) +
     // "Reboot box" (filet boîtier scellé). 2 demi-boutons dans la bande centrale large.
-    g_maint_both_armed=false;
+    g_maint_atvota_armed=false;
     {lv_obj_t*bb=lv_btn_create(g_maint_ov);lv_obj_set_size(bb,145,32);
      lv_obj_align(bb,LV_ALIGN_TOP_MID,-78,344);
      lv_obj_set_style_bg_color(bb,C_BRAND,0);lv_obj_set_style_radius(bb,8,0);
      lv_obj_set_style_border_width(bb,0,0);lv_obj_set_style_shadow_opa(bb,LV_OPA_TRANSP,0);
-     lv_obj_add_event_cb(bb,_maint_updateboth_cb,LV_EVENT_CLICKED,NULL);
-     lv_obj_t*l=lv_label_create(bb);lv_label_set_text(l,"Update both");
+     lv_obj_add_event_cb(bb,_maint_atvota_cb,LV_EVENT_CLICKED,NULL);   // cloud-pull self-OTA (ex "Update both")
+     lv_obj_t*l=lv_label_create(bb);lv_label_set_text(l,"Update ATV");
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);lv_obj_center(l);}
     g_maint_reboot_armed=false;
