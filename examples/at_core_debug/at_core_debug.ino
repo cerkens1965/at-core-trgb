@@ -98,7 +98,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "28"   /* v28 : fix OTA "Update ATV" — deinit BLE avant le TLS (Bluedroid ne laissait que ~40 KB → handshake échouait, GET=-1) → +50-80 KB ; toute sortie post-deinit reboote (restaure BLE). (v27 héritage creds WiFi, v26 cloud-pull OTA écran.) */
+#define VIEW_VERSION  "29"   /* v29 : refonte Settings — RADAR→CONFIG (V-FILTER poussé à l'ATC pour le VF= SafeSky + decluttering CALLSIGN/VERT DIFF + échelle boot) ; SPEED/DISTANCE retirés (toujours kt/nm) ; DISPLAY = lumi+thème. (v28 fix OTA deinit BLE, v27 héritage creds WiFi.) */
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -202,7 +202,7 @@ static const char*   kSrcNames[] ={"SSKY","FLRM","ADSB","ALL"};
 static const char*   kIconSzNames[]={"S","M","L"};
 static const uint16_t kIconZoom[]={320,384,448};  // zoom for 60/72/84 px from 48px base (L=84px = 1.5× — visibilité vol 2026-06-08)
 static const int8_t  kIconHalf[]={30,36,42};
-struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd,wifi_en,aip_en,ad_heli,spd_kt; int16_t vfilt_ft; uint8_t icon_sz; };
+struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd,wifi_en,aip_en,ad_heli,spd_kt; int16_t vfilt_ft; uint8_t icon_sz; bool show_cs,show_vdiff; };
 // NB : l'init historique {…,false,2000,2} décalait les champs (le 2000 tombait sur le
 // bool spd_kt → true, vfilt_ft recevait 2, icon_sz défaut 0). Core 3.x refuse le narrowing
 // 2000→bool ; on fige ici EXACTEMENT les valeurs que core 2.x calculait (spd_kt=true,
@@ -566,7 +566,7 @@ static lv_obj_t* s_menu      = nullptr;  // page d'accueil réglages (grille 6 g
 static lv_obj_t* s_sec[6]    = {};       // conteneurs sections (cachés sauf l'ouvert)
 static lv_obj_t* s_back_btn  = nullptr;  // (juin 2026) cercle « retour » haut-droite (visible en section)
 static int8_t    s_cur_sec   = -1;       // -1 = menu affiché, sinon index section ouverte
-static const char* kSecName[6]={"RADAR","DISPLAY","TRAFFIC","AIRCRAFT","SYSTEM","ABOUT"};
+static const char* kSecName[6]={"CONFIG","DISPLAY","TRAFFIC","AIRCRAFT","SYSTEM","ABOUT"};
 static void settingsShowMenu();          // (fwd) utilisé par switchPage pour reset à l'entrée
 #endif
 
@@ -933,6 +933,7 @@ bool connectBLE(){
             }
         }
     }
+    sendVfilt(g_cfg.vfilt_ft);   // (CONFIG) sync le VF= SafeSky du boîtier sur la valeur écran
     return true;}
 // (juin 2026) SCAN BLE ASYNCHRONE — cause racine du tactile « lent/fastidieux » :
 // l'ancien `s->start(5,false)` BLOQUAIT la boucle 5 s (mesuré loopMax=5007ms) → tous
@@ -1034,7 +1035,10 @@ void cfgLoad(){
     g_cfg.ad_heli   =g_prefs.getBool("ad_heli",false);
     g_cfg.vfilt_ft  =g_prefs.getShort("vfilt",2000);
     g_cfg.icon_sz   =g_prefs.getUChar("icon_sz",2);
-    g_cfg.spd_kt    =g_prefs.getBool("spd_kt",true);
+    g_cfg.spd_kt    =g_prefs.getBool("spd_kt",true);    // toujours kt (toggle retiré) — défaut conservé
+    g_cfg.dist_nm   =true;                              // (CONFIG) distance radar toujours NM (toggle retiré)
+    g_cfg.show_cs   =g_prefs.getBool("show_cs",true);   // decluttering : afficher le callsign
+    g_cfg.show_vdiff=g_prefs.getBool("show_vdiff",true);// decluttering : afficher la diff verticale
     g_prefs.end();
     g_dark_theme=g_cfg.dark;}
 void cfgSave(){
@@ -1052,6 +1056,8 @@ void cfgSave(){
     g_prefs.putShort("vfilt",g_cfg.vfilt_ft);
     g_prefs.putUChar("icon_sz",g_cfg.icon_sz);
     g_prefs.putBool("spd_kt",g_cfg.spd_kt);
+    g_prefs.putBool("show_cs",g_cfg.show_cs);
+    g_prefs.putBool("show_vdiff",g_cfg.show_vdiff);
     g_prefs.end();}
 
 void unitLoad(){
@@ -1120,6 +1126,14 @@ void sendWifiCreds(const char* ssid,const char* pass){
     if(n<=0||n>200)return;   // respecte la limite write AT-CORE
     g_chrCtl->writeValue((uint8_t*)p,strlen(p),false);
     Serial.printf("[BLE] CTRL wifi s=%s\n",ssid);}
+
+// (CONFIG) Pousse le V-FILTER (ft) au boîtier → VF= SafeSky IN (↓ trafic hors altitude).
+// Appelé au changement de V-FILTER et à la connexion (sync ATC sur la valeur écran).
+void sendVfilt(int ft){
+    if(!g_connected||!g_chrCtl||!g_chrCtl->canWrite())return;
+    char p[40];snprintf(p,sizeof(p),"{\"cmd\":\"vfilt\",\"ft\":%d}",ft);
+    g_chrCtl->writeValue((uint8_t*)p,strlen(p),false);
+    Serial.printf("[BLE] CTRL vfilt ft=%d\n",ft);}
 
 // Box ID = 3 derniers octets du MAC → "DD-EE-FF" (majuscules). Identifiant unique
 // gravé en usine, imprimé sur le sticker sous le boîtier → authentification physique.
@@ -4459,7 +4473,7 @@ static const char* kSpeedStr[2]={"kt","km/h"};
 static int  _idxScale(){ for(int i=0;i<7;i++) if(kScaleOpts[i]==g_cfg.scale_nm) return i; return 2; }
 static void _applyScale(int i){ if(i>=0&&i<7) g_cfg.scale_nm=kScaleOpts[i]; }
 static int  _idxVfilt(){ for(int i=0;i<4;i++) if(kVfiltOpts[i]==g_cfg.vfilt_ft) return i; return 3; }
-static void _applyVfilt(int i){ if(i>=0&&i<4) g_cfg.vfilt_ft=kVfiltOpts[i]; }
+static void _applyVfilt(int i){ if(i>=0&&i<4){ g_cfg.vfilt_ft=kVfiltOpts[i]; sendVfilt(g_cfg.vfilt_ft); } }  // + push VF= au boîtier
 static int  _idxSpeed(){ return g_cfg.spd_kt?0:1; }
 static void _applySpeed(int i){ g_cfg.spd_kt=(i==0); }
 
@@ -4596,14 +4610,14 @@ void buildSettingsPageT4(lv_obj_t*p){
         lv_obj_add_flag(s_sec[i],LV_OBJ_FLAG_HIDDEN);
     }
 
-    // 0) RADAR : SCALE (défaut boot) · V-FILTER · SPEED → popups ; DIST segmented
+    // 0) CONFIG : Default radar scale · Vertical filter (→ VF SafeSky poussé ATC) · Alt difference · Callsign
     {lv_obj_t*sp=s_sec[0]; const int Y0=8,DY=72;
      snprintf(b,sizeof(b),"%d nm",g_cfg.scale_nm);
-     s_scale_v=mkPopRow(sp,"SCALE",Y0+0*DY,b,"DEFAULT SCALE",kScaleStr,7,_idxScale,_applyScale);
+     s_scale_v=mkPopRow(sp,"DEFAULT RADAR SCALE",Y0+0*DY,b,"DEFAULT RADAR SCALE",kScaleStr,7,_idxScale,_applyScale);
      snprintf(b,sizeof(b),"%d ft",g_cfg.vfilt_ft);
-     s_vfilt_v=mkPopRow(sp,"V-FILTER",Y0+1*DY,b,"V-FILTER (ft)",kVfiltStr,4,_idxVfilt,_applyVfilt);
-     s_spd_v  =mkPopRow(sp,"SPEED",Y0+2*DY,g_cfg.spd_kt?"kt":"km/h","SPEED UNIT",kSpeedStr,2,_idxSpeed,_applySpeed);
-     mkSegRow(sp,"DISTANCE",Y0+3*DY,"NM","KM",&g_cfg.dist_nm,true);}
+     s_vfilt_v=mkPopRow(sp,"VERTICAL FILTER",Y0+1*DY,b,"VERTICAL FILTER (ft)",kVfiltStr,4,_idxVfilt,_applyVfilt);
+     mkSegRow(sp,"ALT DIFFERENCE",Y0+2*DY,"OFF","ON",&g_cfg.show_vdiff,false);
+     mkSegRow(sp,"CALLSIGN",Y0+3*DY,"OFF","ON",&g_cfg.show_cs,false);}
 
     // 1) DISPLAY : BRIGHTNESS slider · THEME segmented
     {lv_obj_t*sp=s_sec[1]; const int Y0=8,DY=72;
@@ -4975,14 +4989,18 @@ void updateRadarDR(){
             lv_obj_set_pos(r_trf_vect[i],0,0);
             lv_line_set_points(r_trf_vect[i],r_vect_pts[i],2);
             lv_obj_clear_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
-            lv_obj_set_pos(r_radar_cs[i],sx+ih+6,sy-22);lv_label_set_text(r_radar_cs[i],e.cs);  // à droite de l'icône agrandie (ih=demi-taille)
-            lv_obj_set_style_text_color(r_radar_cs[i],
+            if(g_cfg.show_cs){   // (CONFIG) decluttering : callsign optionnel
+              lv_obj_set_pos(r_radar_cs[i],sx+ih+6,sy-22);lv_label_set_text(r_radar_cs[i],e.cs);  // à droite de l'icône agrandie (ih=demi-taille)
+              lv_obj_set_style_text_color(r_radar_cs[i],
                 ssStale?lv_color_hex(0x9ca3af):(e.visible?TFG():C_AMBER),0);
-            lv_obj_clear_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
-            snprintf(b,32,"%+d",e.alt_m); // already delta in hundreds of feet from AT-CORE
-            lv_obj_set_pos(r_radar_alt[i],sx+ih+6,sy+4);lv_label_set_text(r_radar_alt[i],b);
-            lv_obj_set_style_text_color(r_radar_alt[i],col,0);
-            lv_obj_clear_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
+              lv_obj_clear_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
+            } else lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
+            if(g_cfg.show_vdiff){ // (CONFIG) decluttering : diff verticale optionnelle
+              snprintf(b,32,"%+d",e.alt_m); // already delta in hundreds of feet from AT-CORE
+              lv_obj_set_pos(r_radar_alt[i],sx+ih+6,sy+4);lv_label_set_text(r_radar_alt[i],b);
+              lv_obj_set_style_text_color(r_radar_alt[i],col,0);
+              lv_obj_clear_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
+            } else lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
             } // end else (dans l'échelle post-DR)
             } // end else (not grounded)
         }else{
