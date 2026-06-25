@@ -98,7 +98,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "26"   /* v26 : cloud-pull OTA AT-VIEW — bouton "Update ATV" (Maintenance, double-tap) télécharge le firmware écran depuis Firebase (public-read firmware/atv/<t4s3|trgb>/), flashe, reboot. Remplace le relais "Update both" (redondant). (v25 prompt MAJ boot, v24 SafeSky gris idle.) */
+#define VIEW_VERSION  "27"   /* v27 (brique 0) : l'écran HÉRITE les creds WiFi club du boîtier (lecture CHR_WIFICRED 6E40000C à la connexion → unitSaveHotspot) → zéro saisie, l'OTA "Update ATV"/wifitest marchent direct. (v26 cloud-pull OTA écran, v25 prompt MAJ boot.) */
 #define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
 
 #ifdef BOARD_T4S3
@@ -137,6 +137,7 @@ static inline void panelBright(uint8_t v){ panel.setBrightness(v); }
 #define BLE_CHR_CONFIG  "6E400009-B5A3-F393-E0A9-E50E24DCCA9E"
 #define BLE_CHR_CONTROL "6E40000A-B5A3-F393-E0A9-E50E24DCCA9E"  // write : binding {"cmd":"bind"|"unpair"}
 #define BLE_CHR_FLIGHTS "6E40000B-B5A3-F393-E0A9-E50E24DCCA9E"  // read  : liste vols SD (WP8)
+#define BLE_CHR_WIFICRED "6E40000C-B5A3-F393-E0A9-E50E24DCCA9E" // read  : creds WiFi club {s,p} hérités du boîtier (brique 0)
 // ── Bypass auth pilote (temporaire) ───────────────────────────────────────────
 // 1 = on saute la page #02 "Select your name" / #03 welcome : dès que la machine
 // est appairée (BLE) + GPS fix, on file direct au radar. L'appairage machine
@@ -261,7 +262,8 @@ static BLERemoteCharacteristic *g_chrS=nullptr,*g_chrF=nullptr,
                                 *g_chrP=nullptr,   // PILOTS notify (6E400008)
                                 *g_chrCfg=nullptr, // CONFIG write (6E400009) — identité aéronef
                                 *g_chrCtl=nullptr, // CONTROL write (6E40000A) — binding bind/unpair
-                                *g_chrFl=nullptr;  // FLIGHTS read (6E40000B) — liste vols SD (WP8)
+                                *g_chrFl=nullptr,  // FLIGHTS read (6E40000B) — liste vols SD (WP8)
+                                *g_chrWc=nullptr;  // WIFICRED read (6E40000C) — creds WiFi club hérités (brique 0)
 // Pilot list BLE reassembly buffer
 static char    g_prx_buf[4096] = {};
 static int     g_prx_len       = 0;
@@ -874,7 +876,7 @@ bool connectBLE(){
     // fenêtre de connexion voit g_chrCtl=null → sendCtl no-op sûr), puis découverte propre.
     if(g_client){ delete g_client; g_client=nullptr; }   // destructeur libère le cache services ; gattc_if déjà désenregistré à la déconnexion
     g_svc=nullptr;
-    g_chrS=g_chrF=g_chrT=g_chrA=g_chrD=g_chrW=g_chrP=g_chrCfg=g_chrCtl=g_chrFl=nullptr;
+    g_chrS=g_chrF=g_chrT=g_chrA=g_chrD=g_chrW=g_chrP=g_chrCfg=g_chrCtl=g_chrFl=g_chrWc=nullptr;
     static ATCCB s_cb;   // instance unique (l'ancien new ATCCB() fuyait à chaque reconnexion)
     g_client=BLEDevice::createClient(); g_client->setClientCallbacks(&s_cb);
     if(!g_client->connect(g_target))return false;
@@ -897,6 +899,7 @@ bool connectBLE(){
     g_chrCfg=g_svc->getCharacteristic(BLE_CHR_CONFIG);
     g_chrCtl=g_svc->getCharacteristic(BLE_CHR_CONTROL);
     g_chrFl =g_svc->getCharacteristic(BLE_CHR_FLIGHTS);
+    g_chrWc =g_svc->getCharacteristic(BLE_CHR_WIFICRED);
     if(g_chrS&&g_chrS->canNotify())g_chrS->registerForNotify(notifyS);
     if(g_chrF&&g_chrF->canNotify())g_chrF->registerForNotify(notifyF);
     if(g_chrT&&g_chrT->canNotify())g_chrT->registerForNotify(notifyT);
@@ -914,6 +917,22 @@ bool connectBLE(){
     // compilé (OO-E07) tant qu'on n'éditait pas l'écran Aircraft. acPushBLE no-op
     // si l'identité locale n'est pas renseignée ou si CHR_CONFIG non inscriptible.
     acPushBLE();
+    // (brique 0) Hériter les creds WiFi club du boîtier (CHR_WIFICRED, READ) → zéro saisie
+    // côté écran. On lit à la connexion ; si différents du NVS écran, on sauve (g_hs_ssid/pass).
+    // → l'OTA "Update ATV" et le wifitest marchent sans re-taper le hotspot.
+    if(g_chrWc){
+        std::string wc=bleStr(g_chrWc->readValue());
+        if(wc.size()>5){
+            JsonDocument d;
+            if(!deserializeJson(d,wc.c_str())){
+                const char* s=d["s"]|""; const char* p=d["p"]|"";
+                if(s[0] && (strcmp(s,g_hs_ssid)!=0 || strcmp(p,g_hs_pass)!=0)){
+                    unitSaveHotspot(s,p);
+                    Serial.printf("[WiFi] creds heritees du boitier: %s\n",s);
+                }
+            }
+        }
+    }
     return true;}
 // (juin 2026) SCAN BLE ASYNCHRONE — cause racine du tactile « lent/fastidieux » :
 // l'ancien `s->start(5,false)` BLOQUAIT la boucle 5 s (mesuré loopMax=5007ms) → tous
