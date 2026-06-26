@@ -128,7 +128,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "61"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v61 : AIP 2b/2c — pull AIP depuis le boîtier (CHR_AIP) dans TaskAipPull (tâche dédiée, lectures BLE hors boucle/radar) → PSRAM → parsers buffer → aipLoadFromBuffer → rendu. Armé à la connexion si CHR_AIP présent & !g_aip_loaded (WS241 sans SD ; boards à SD gardent leur AIP SD). v60 : mouchard tâche non bloquante. */
+#define VIEW_VERSION  "63"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v63 : WS241 — AIP EU EMBARQUÉE dans la flash écran (aip_data.h, gated BOARD_WS241) chargée au boot (instant, persistant) → remplace le pull BLE (qui corrompait les données par lectures curseur désalignées : nfiles garbage, 0/401 CTR aléatoire). Les autres écrans gardent la SD. v62 : accueil hint conditionnel. v61 : pull BLE (déprécié WS241). */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -658,6 +658,13 @@ static AipAd*      g_aip_ads    = nullptr;   // ps_malloc
 static uint16_t    g_aip_ad_cnt = 0;
 static bool        g_aip_loaded = false;
 static volatile bool g_aip_pull_req = false;   // (A1) armé à la connexion si le boîtier a CHR_AIP et qu'on n'a pas d'AIP → TaskAipPull
+// (2026-06-26) WS241 sans SD : AIP EU EMBARQUÉE dans la flash écran (16 MB S3) → chargée
+// direct au boot, instantanée + persistante + AUCUN transfert BLE (le pull curseur corrompait
+// les données). Auto-gén : tools/gen_aip_header.py → aip_data.h. Les autres écrans gardent la SD.
+#if defined(BOARD_WS241)
+#define AIP_EMBEDDED 1
+#include "aip_data.h"
+#endif
 static lv_obj_t*   r_aip_layer  = nullptr;
 static lv_obj_t*   s_aip_v      = nullptr;
 static lv_obj_t*   s_heli_v     = nullptr;
@@ -1418,9 +1425,14 @@ void p0UpdateAcId(){
             g_ac_reg, g_ac_type, g_ac_hex);
         lv_label_set_text(g_p0_acid,t);
         lv_obj_set_style_text_color(g_p0_acid,TFG(),0);  // (juin 2026) suit le thème (accueil sombre OK)
-    }else{
+    }else if(g_connected && g_status.valid){
+        // Connecté + STATUS reçue mais le boîtier n'a vraiment pas d'identité → warning légitime.
         lv_label_set_text(g_p0_acid,LV_SYMBOL_WARNING " NO AIRCRAFT - SET VIA WIFI SETUP");
         lv_obj_set_style_text_color(g_p0_acid,lv_color_hex(0xD32F2F),0);
+    }else{
+        // PAS encore connecté/STATUS → on ne SAIT pas si l'aéronef est défini (le boîtier
+        // poussera reg via STATUS). Ne PAS afficher le warning rouge envahissant et faux → neutre.
+        lv_label_set_text(g_p0_acid,"");
     }
 }
 
@@ -2762,6 +2774,22 @@ static bool aipLoadFromBuffer(const uint8_t* buf,uint32_t total){
         if(kind==0)_aipLoadCtrBuf(buf+o,L); else if(kind==1)_aipLoadAdBuf(buf+o,L);
         o+=L;}
     return (g_aip_ctr_cnt>0||g_aip_ad_cnt>0);}
+
+#ifdef AIP_EMBEDDED
+// Charge l'AIP depuis la flash écran embarquée (WS241 sans SD) — direct, fiable, instantané.
+// Réutilise les parsers buffer sur chaque bin embarqué (pas de transfert, pas de format flux).
+static void aipLoadEmbedded(){
+    if(!g_aip_lat){g_aip_lat=(int32_t*)ps_malloc(AIP_MAX_PTS*sizeof(int32_t));
+                   g_aip_lon=(int32_t*)ps_malloc(AIP_MAX_PTS*sizeof(int32_t));
+                   g_aip_ads=(AipAd*)ps_malloc(AIP_MAX_AD*sizeof(AipAd));}
+    if(!g_aip_lat||!g_aip_lon||!g_aip_ads){Serial.println("[AIP] PSRAM alloc failed");return;}
+    g_aip_ctr_cnt=0;g_aip_pts_cnt=0;g_aip_ad_cnt=0;
+    for(int i=0;i<AIP_CTR_N;i++) _aipLoadCtrBuf(AIP_CTR[i].data, AIP_CTR[i].len);
+    if(AIP_AERODROMES_LEN) _aipLoadAdBuf(AIP_AERODROMES, AIP_AERODROMES_LEN);
+    g_aip_loaded=(g_aip_ctr_cnt>0||g_aip_ad_cnt>0);
+    Serial.printf("[AIP] embarquée flash → %d CTR (%d pts) / %d AD\n",g_aip_ctr_cnt,g_aip_pts_cnt,g_aip_ad_cnt);
+}
+#endif
 
 // Tâche dédiée du pull AIP (les ~340 lectures BLE bloquantes → cette tâche, JAMAIS la boucle/radar).
 // Handshake : {"cmd":"aip"} → attend STATUS axl>0 → lit CHR_AIP en boucle (curseur boîtier) → PSRAM
@@ -6434,7 +6462,12 @@ void setup(){
     lv_obj_set_scrollbar_mode(lv_scr_act(),LV_SCROLLBAR_MODE_OFF);
     lv_obj_clear_flag(lv_layer_top(),LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(lv_layer_top(),LV_SCROLLBAR_MODE_OFF);
-    cfgLoad();acLoad();unitLoad();if(g_sd_ok)aipLoad();
+    cfgLoad();acLoad();unitLoad();
+#ifdef AIP_EMBEDDED
+    aipLoadEmbedded();            // WS241 : AIP depuis la flash écran (instant, persistant, pas de BLE)
+#else
+    if(g_sd_ok)aipLoad();         // T-RGB/T4/WS216 : AIP depuis la SD
+#endif
     g_dark_theme=g_cfg.dark;
     lv_obj_set_style_bg_color(lv_scr_act(),TBG(),0);
     panelBright(g_cfg.brightness);
