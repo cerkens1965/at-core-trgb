@@ -128,7 +128,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "64"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v64 : AIP_MAX_CTR 1024→2048 (toute l'EU = 1098 zones CTR / 13813 pts mesuré ; 1024 plafonnait). v63 : WS241 AIP EU embarquée flash écran (remplace le pull BLE corrompu). v62 : accueil hint conditionnel. */
+#define VIEW_VERSION  "65"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -2882,16 +2882,29 @@ static void aipDrawCb(lv_event_t*e){
     float cos_lat=cosf(own_lat*(float)M_PI/180.0f);
     float scale_m=(float)g_cfg.scale_nm*1852.0f;
     int   hdg=radarEffHdg();   // north-up auto à l'arrêt, cohérent avec le trafic
+    // (2026-06-27) CULLING GÉOGRAPHIQUE : avec toute l'AIP EU embarquée (1098 CTR + 3500 AD),
+    // dessiner TOUT à chaque frame bloque la boucle (tactile +/- raté). On ne traite que ce qui
+    // est dans la FENÊTRE radar (own ± portée×1.6 de marge coin) → coût ∝ visible (~dizaines),
+    // pas total. Rejet rapide en e6 (comparaisons entières) AVANT la projection trig coûteuse.
+    float dLatDeg=(g_cfg.scale_nm*1.6f)/60.0f;
+    float dLonDeg=dLatDeg/(cos_lat>0.05f?cos_lat:0.05f);
+    int32_t wMnLa=(int32_t)((own_lat-dLatDeg)*1e6f), wMxLa=(int32_t)((own_lat+dLatDeg)*1e6f);
+    int32_t wMnLo=(int32_t)((own_lon-dLonDeg)*1e6f), wMxLo=(int32_t)((own_lon+dLonDeg)*1e6f);
     // CTR polygons
     lv_draw_line_dsc_t ctr_d,atz_d;
     lv_draw_line_dsc_init(&ctr_d);
     ctr_d.color=C_BRAND;ctr_d.width=2;                       // (juin 2026) AIP bleu AeroTrace, trait 2px
     atz_d=ctr_d;atz_d.color=lv_color_hex(0x9fb3cc);          // ATZ : bleu un peu plus clair (width hérité=2)
     for(int c=0;c<g_aip_ctr_cnt;c++){
+        uint16_t st=g_aip_ctr[c].pt_start, end=st+g_aip_ctr[c].n_pts;
+        // bbox de la zone (compares entières, pas chères) → skip si hors fenêtre radar
+        int32_t mnLa=INT32_MAX,mxLa=INT32_MIN,mnLo=INT32_MAX,mxLo=INT32_MIN;
+        for(uint16_t pi=st;pi<end;pi++){ int32_t la=g_aip_lat[pi],lo=g_aip_lon[pi];
+            if(la<mnLa)mnLa=la; if(la>mxLa)mxLa=la; if(lo<mnLo)mnLo=lo; if(lo>mxLo)mxLo=lo; }
+        if(mxLa<wMnLa||mnLa>wMxLa||mxLo<wMnLo||mnLo>wMxLo)continue;   // hors champ → pas de projection/dessin
         lv_draw_line_dsc_t&dsc=(g_aip_ctr[c].type_id==13)?atz_d:ctr_d;
         int psx=0,psy=0;bool pok=false;
-        uint16_t end=g_aip_ctr[c].pt_start+g_aip_ctr[c].n_pts;
-        for(uint16_t pi=g_aip_ctr[c].pt_start;pi<end;pi++){
+        for(uint16_t pi=st;pi<end;pi++){
             int sx,sy;
             bool ok=latlon_to_screen(g_aip_lat[pi],g_aip_lon[pi],
                                      own_lat,own_lon,cos_lat,hdg,scale_m,sx,sy);
@@ -2907,6 +2920,8 @@ static void aipDrawCb(lv_event_t*e){
         uint8_t tid=g_aip_ads[a].type_id;
         // Héliports (7) + hydrobases (10) masqués si ad_heli=OFF
         if(!g_cfg.ad_heli&&(tid==7||tid==10))continue;
+        int32_t ala=g_aip_ads[a].lat_e6, alo=g_aip_ads[a].lon_e6;
+        if(ala<wMnLa||ala>wMxLa||alo<wMnLo||alo>wMxLo)continue;   // hors fenêtre radar → skip
         int sx,sy;
         if(latlon_to_screen(g_aip_ads[a].lat_e6,g_aip_ads[a].lon_e6,
                             own_lat,own_lon,cos_lat,hdg,scale_m,sx,sy)){
