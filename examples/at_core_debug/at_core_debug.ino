@@ -98,8 +98,21 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "29"   /* v29 : refonte Settings — RADAR→CONFIG (V-FILTER poussé à l'ATC pour le VF= SafeSky + decluttering CALLSIGN/VERT DIFF + échelle boot) ; SPEED/DISTANCE retirés (toujours kt/nm) ; DISPLAY = lumi+thème. (v28 fix OTA deinit BLE, v27 héritage creds WiFi.) */
-#define VIEW_VER_STR  "ATV v" VIEW_VERSION "  " __DATE__   // ex "ATV v14  Jun  9 2026"
+#define VIEW_VERSION  "42"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v42 : page UPDATES ligne AT-CORE "up to date" affiche la version lisible (fws "1.2.39-dev", couleur canal) au lieu du build entier. v41 : accueil + throttle tactile. */
+// ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
+// VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
+// Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
+#define VIEW_TRAIN  "1.2"
+#define VIEW_CH     0
+#if   VIEW_CH==0
+  #define VIEW_CH_SUFFIX "-dev"
+#elif VIEW_CH==1
+  #define VIEW_CH_SUFFIX "-rc"
+#else
+  #define VIEW_CH_SUFFIX ""
+#endif
+#define VIEW_VSTR     VIEW_TRAIN "." VIEW_VERSION VIEW_CH_SUFFIX   // ex "1.2.38-dev"
+#define VIEW_VER_STR  "ATV " VIEW_VSTR "  " __DATE__               // boot banner (ex "ATV 1.2.38-dev  Jun 26 2026")
 
 #ifdef BOARD_T4S3
 LilyGo_Class amoled;
@@ -181,7 +194,8 @@ struct StatusData {
     char    wssid[33];   // SSID hotspot enregistré côté boîtier (STATUS "wss") = dernier validé/en mémoire
     uint8_t ota;         // OTA : 0 idle 1 check 2 download 3 OK(reboot) 4 échec 5 à jour
     uint8_t opct;        // OTA download %
-    uint8_t fwv;         // version firmware AT-CORE
+    uint8_t fwv;         // version firmware AT-CORE (BUILD entier)
+    char    fws[16];     // version lisible AT-CORE "1.2.36-dev" (STATUS "fws")
     char    fwd[14];     // date de build AT-CORE (__DATE__)
     uint8_t oav;         // MAJ dispo : version cloud si > fwv, sinon 0
     char    box[8];      // box-id boîtier (STATUS "box", ex "CE276D") → SSID portail ATCORE-SETUP-<box>
@@ -566,7 +580,9 @@ static lv_obj_t* s_menu      = nullptr;  // page d'accueil réglages (grille 6 g
 static lv_obj_t* s_sec[6]    = {};       // conteneurs sections (cachés sauf l'ouvert)
 static lv_obj_t* s_back_btn  = nullptr;  // (juin 2026) cercle « retour » haut-droite (visible en section)
 static int8_t    s_cur_sec   = -1;       // -1 = menu affiché, sinon index section ouverte
-static const char* kSecName[6]={"CONFIG","DISPLAY","TRAFFIC","AIRCRAFT","SYSTEM","ABOUT"};
+static const char* kSecName[6]={"CONFIG","DISPLAY","TRAFFIC","PILOT","SYSTEM","ABOUT"};
+static lv_obj_t* s_set_acval = nullptr;  // (juin 2026) bloc "Active Aircraft" REG/TYP/HEX (en-tête, menu seul)
+static lv_obj_t* s_set_aclbl = nullptr;  //   label "Active Aircraft" associé
 static void settingsShowMenu();          // (fwd) utilisé par switchPage pour reset à l'entrée
 #endif
 
@@ -738,7 +754,16 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     strlcpy(g_status.wssid,d["wss"]|"",sizeof(g_status.wssid));   // SSID hotspot enregistré (boîtier)
     g_status.ota=d["ota"]|0; g_status.opct=d["opct"]|0;
     g_status.fwv=d["fwv"]|0; strlcpy(g_status.fwd,d["fwd"]|"",sizeof(g_status.fwd)); g_status.oav=d["oav"]|0;
+    strlcpy(g_status.fws,d["fws"]|"",sizeof(g_status.fws));   // version lisible ATC "1.2.36-dev"
     strlcpy(g_status.box,d["box"]|"",sizeof(g_status.box));   // box-id → SSID portail (WiFi Setup)
+    // Identité aéronef poussée par l'ATC (saisie au portail web) → l'écran n'a plus de page
+    // AIRCRAFT, il mirrore ces valeurs (bloc "Active Aircraft" + radar own-ship).
+    // Données seules (pas de LVGL ici : callback BLE) → l'affichage est rafraîchi dans
+    // updateAllPages() (main loop) via g_dataUpdated : accueil (p0UpdateAcId) + Active Aircraft.
+    { const char* r=d["reg"]|""; const char* t=d["typ"]|""; const char* h=d["hex"]|"";
+      if(r[0])strlcpy(g_ac_reg,r,sizeof(g_ac_reg));
+      if(t[0])strlcpy(g_ac_type,t,sizeof(g_ac_type));
+      if(h[0])strlcpy(g_ac_hex,h,sizeof(g_ac_hex)); }
     g_status.valid=true;g_dataUpdated=true;}
 void parseFlight(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_flight.gforce_z=d["gf"]|1.0f;g_flight.co_ppm=d["co"]|0;
@@ -1025,7 +1050,7 @@ void cfgLoad(){
     g_cfg.scale_nm  =g_prefs.getUChar("scale",4);
     // brightness = niveau hardware 0-16 (clé bright_lv, défaut 16=max)
     {uint8_t bl=g_prefs.getUChar("bright_lv",16); if(bl>16)bl=16; g_cfg.brightness=bl;}
-    g_cfg.trf_src   =g_prefs.getUChar("trf_src",3);
+    g_cfg.trf_src   =0;   // SOURCE retiré de l'UI : trafic toujours SafeSky (SSKY)
     g_cfg.dist_nm   =g_prefs.getBool("dist_nm",true);
     g_cfg.alt_ft    =g_prefs.getBool("alt_ft",true);
     g_cfg.dark      =g_prefs.getBool("dark",false);   // (juin 2026) défaut LIGHT (aligné maquette)
@@ -1389,10 +1414,11 @@ void buildStatusPage(){
     mkCheckRow(p,CHK_SKY, X,Y0+4*DY,"SafeSky");   // (juin 2026) statut SafeSky sous LTE
     // ADS-B / ADS-L et OGN / FLARM retirés (non poussés pour l'instant).
 
-    // ── Batterie AT-CORE + versions (juin 2026 : ATV + ATC sur UNE ligne, largeur exploitée)
-    r_p0_bat=mkLbl(p,"AT-CORE : ---%",TGREY(),FVER,LV_ALIGN_TOP_MID,0,batY);
-    mkLbl(p,VIEW_VER_STR,TGREY(),FVER,LV_ALIGN_TOP_LEFT,40,verY);      // ATV vX  date — à gauche
-    r_p0_atc=mkLbl(p,"ATC --",TGREY(),FVER,LV_ALIGN_TOP_RIGHT,-40,atcY);  // ATC vX date — à droite
+    // ── Versions ATV (gauche) / ATC (droite), aux bords, colorées par canal.
+    // Batterie AT-CORE retirée (non nécessaire). Date de build retirée ici (trop long → se
+    // chevauchait au milieu ; la date reste sur ABOUT). r_p0_bat reste nullptr (update no-op).
+    mkLbl(p,"ATV " VIEW_VSTR,verColor(VIEW_VSTR),FVER,LV_ALIGN_TOP_LEFT,40,verY);
+    r_p0_atc=mkLbl(p,"ATC --",TGREY(),FVER,LV_ALIGN_TOP_RIGHT,-40,atcY);  // rempli live (g_status.fws)
 }
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
@@ -3594,8 +3620,7 @@ static int      g_vols_n=0;
 static lv_obj_t* g_vols_ov=nullptr;
 static lv_obj_t* g_vols_list=nullptr;
 static lv_obj_t* g_vols_load=nullptr;   // label "Loading..."
-static lv_obj_t* g_vols_xfer=nullptr;   // label du bouton Transferer (N)
-static lv_obj_t* g_vols_wifi=nullptr;   // ligne état WiFi hotspot (SSID + connexion/IP)
+static lv_obj_t* g_vols_wifi=nullptr;   // ligne état WiFi club (SSID + connexion/IP)
 static bool     g_vols_loading=false, g_vols_del_armed=false, g_vols_clean_armed=false;
 static bool     g_vols_xfer_pending=false, g_vols_xfer_seen3=false;  // suivi transfert sur la page
 static uint32_t g_vols_t0=0, g_vols_xfer_t0=0, g_vols_xfer_prog_ms=0;
@@ -3604,7 +3629,7 @@ static uint8_t  g_vols_xfer_lastpct=0, g_vols_xfer_lastph=0xFF;   // anti-stall 
 static void volsClose(){
     if(!g_vols_ov)return;
     lv_obj_del(g_vols_ov);
-    g_vols_ov=nullptr;g_vols_list=nullptr;g_vols_load=nullptr;g_vols_xfer=nullptr;g_vols_wifi=nullptr;
+    g_vols_ov=nullptr;g_vols_list=nullptr;g_vols_load=nullptr;g_vols_wifi=nullptr;
     g_vols_loading=false;g_vols_del_armed=false;g_vols_clean_armed=false;g_vols_xfer_pending=false;g_vols_n=0;}
 
 // Ligne d'état WiFi hotspot (page Flights) : SSID configuré + état de connexion + IP.
@@ -3612,12 +3637,12 @@ static void volsClose(){
 // bien connecté et à quel réseau (cause n°1 d'échec : hotspot iPhone éteint).
 static void volsUpdWifi(){
     if(!g_vols_wifi)return;
-    const char* ss = g_hs_ssid[0]?g_hs_ssid:"(no hotspot)";
+    const char* ss = g_hs_ssid[0]?g_hs_ssid:"(no WiFi)";
     char b[48]; lv_color_t c=TGREY();
     switch(g_status.wst){
         case 1: snprintf(b,sizeof(b),"WiFi: connecting to %s...",ss); c=C_AMBER; break;
         case 2: snprintf(b,sizeof(b),"WiFi OK: %s  %s",ss,g_status.wip); c=C_GREEN; break;
-        case 3: snprintf(b,sizeof(b),"WiFi: %s NOT FOUND (hotspot off?)",ss); c=C_RED; break;
+        case 3: snprintf(b,sizeof(b),"WiFi: %s NOT FOUND (off?)",ss); c=C_RED; break;
         case 4: snprintf(b,sizeof(b),"WiFi: %s connection failed",ss); c=C_RED; break;
         default: snprintf(b,sizeof(b),"WiFi: %s (idle)",ss); c=TGREY(); break;
     }
@@ -3625,16 +3650,7 @@ static void volsUpdWifi(){
     lv_obj_set_style_text_color(g_vols_wifi,c,0);}
 static void _vols_close_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED)volsClose(); }
 
-static void volsUpdXfer(){
-    if(!g_vols_xfer)return;
-    int n=0,unsent=0; for(int i=0;i<g_vols_n;i++){ if(g_vols[i].sel)n++; if(!g_vols[i].up)unsent++; }
-    // Rien coché mais des vols non-envoyés présents → "Upload all" (AT-CORE {"cmd":"uploadall"}
-    // FW v26 : scan SD + transfert auto de tous les non-envoyés). Sinon "Transfer (N)".
-    char b[24];
-    if(n)           snprintf(b,sizeof(b),"Transfer (%d)",n);
-    else if(unsent) snprintf(b,sizeof(b),"Upload all");
-    else            snprintf(b,sizeof(b),"Transfer (0)");
-    lv_label_set_text(g_vols_xfer,b);}
+// (liste en lecture seule depuis la refonte v33 : plus de compteur "Transfer (N)")
 
 // Remplace la liste par un message d'état (transfert/suppression en cours, on reste
 // sur la page). g_vols_load réutilisé comme label, g_vols_n=0 (plus de lignes).
@@ -3648,47 +3664,29 @@ static void volsShowStatus(const char* msg, lv_color_t col){
     // Roue qui tourne — montre que le process tourne en arrière-plan (transfert lent).
     lv_obj_t*sp=lv_spinner_create(g_vols_list,900,55);
     lv_obj_set_size(sp,44,44);
-    lv_obj_set_style_arc_color(sp,col,LV_PART_INDICATOR);
-    volsUpdXfer();}
+    lv_obj_set_style_arc_color(sp,col,LV_PART_INDICATOR);}
 
-static void _vols_row_cb(lv_event_t*e){
+// Arme le suivi de progression d'un transfert (consommé dans le loop : STATUS up_pct/flt_ph).
+static void volsArmXferTracking(){
+    g_vols_xfer_pending=true; g_vols_xfer_seen3=false; g_vols_xfer_t0=millis();
+    g_vols_xfer_prog_ms=millis(); g_vols_xfer_lastpct=0; g_vols_xfer_lastph=0xFF;}
+
+// "Send last" → {"cmd":"upload"} : transfère le vol de la session courante (le dernier volé,
+// exclu de la liste SD tant que TaskSD garde son CSV ouvert).
+static void _vols_sendlast_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
-    int i=(int)(intptr_t)lv_event_get_user_data(e);
-    if(i<0||i>=g_vols_n||g_vols[i].up)return;
-    g_vols[i].sel=!g_vols[i].sel;
-    const char* md=strlen(g_vols[i].d)>=10?g_vols[i].d+5:g_vols[i].d;
-    char r[48]; snprintf(r,sizeof(r),"[%s] %s %s>%s",g_vols[i].sel?"x":" ",md,g_vols[i].s,g_vols[i].e);
-    lv_label_set_text(g_vols[i].lbl,r);
-    lv_obj_set_style_bg_color(g_vols[i].row,g_vols[i].sel?C_BRAND:lv_color_hex(0x21262d),0);
-    volsUpdXfer();}
-
-// Construit {"cmd":"uploadlist","f":[...]} et l'écrit sur CHR_CONTROL (≤200 B → ≤8 fids).
-static void _vols_xfer_cb(lv_event_t*e){
-    if(lv_event_get_code(e)!=LV_EVENT_CLICKED||!g_chrCtl||!g_chrCtl->canWrite())return;
-    char p[200]; int w=snprintf(p,sizeof(p),"{\"cmd\":\"uploadlist\",\"f\":["); int cnt=0;
-    for(int i=0;i<g_vols_n;i++){
-        if(!g_vols[i].sel)continue;
-        int n=snprintf(p+w,sizeof(p)-w,"%s\"%s\"",cnt?",":"",g_vols[i].fid);
-        if(w+n>178)break; w+=n; cnt++;
-    }
-    w+=snprintf(p+w,sizeof(p)-w,"]}");
-    if(cnt){
-        g_chrCtl->writeValue((uint8_t*)p,strlen(p),false);
-        volsShowStatus("Transferring...",C_AMBER);   // on RESTE sur la page (overlay up_pct par-dessus)
-        g_vols_xfer_pending=true; g_vols_xfer_seen3=false; g_vols_xfer_t0=millis();
-        g_vols_xfer_prog_ms=millis(); g_vols_xfer_lastpct=0; g_vols_xfer_lastph=0xFF;
-    } else {
-        // Aucun coché : "Upload all" → transfert AUTO de tous les vols non-envoyés (AT-CORE
-        // v26). Gardé sur ≥1 non-envoyé visible (sinon la commande ne ferait rien et l'overlay
-        // attendrait son timeout). Même suivi de progression que uploadlist (phases STATUS).
-        int unsent=0; for(int i=0;i<g_vols_n;i++) if(!g_vols[i].up)unsent++;
-        if(unsent){
-            sendCtl("uploadall");
-            volsShowStatus("Uploading all...",C_AMBER);
-            g_vols_xfer_pending=true; g_vols_xfer_seen3=false; g_vols_xfer_t0=millis();
-            g_vols_xfer_prog_ms=millis(); g_vols_xfer_lastpct=0; g_vols_xfer_lastph=0xFF;
-        }
-    }
+    sendCtl("upload");
+    volsShowStatus("Sending last flight...",C_AMBER);
+    volsArmXferTracking();
+}
+// "Send all unsent" → {"cmd":"uploadall"} : scan SD + transfert de tous les non-envoyés (AT-CORE v26).
+static void _vols_sendall_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    int unsent=0; for(int i=0;i<g_vols_n;i++) if(!g_vols[i].up)unsent++;
+    if(!unsent){ volsShowStatus("No unsent flights on SD",TGREY()); return; }
+    sendCtl("uploadall");
+    volsShowStatus("Sending all unsent...",C_AMBER);
+    volsArmXferTracking();
 }
 // Suppression des .up (transférés) — double-tap de confirmation.
 static void _vols_del_cb(lv_event_t*e){
@@ -3705,21 +3703,8 @@ static void _vols_del_cb(lv_event_t*e){
     volsShowStatus("Deleting...",C_AMBER);   // reste sur la page + recharge à la fin
     g_status.flt_rdy=0; g_vols_loading=true; g_vols_t0=millis();   // attend le re-scan AT-CORE puis volsBuildList
 }
-// Clean empty : efface les CSV header-seul (0 donnée). Confirm en 2 taps, comme Delete sent.
-static void _vols_clean_cb(lv_event_t*e){
-    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
-    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
-    if(!g_vols_clean_armed){
-        g_vols_clean_armed=true;
-        if(l)lv_label_set_text(l,"Confirm?");
-        lv_obj_set_style_bg_color(b,C_RED,0);
-        return;
-    }
-    sendCtl("cleanempty");   // AT-CORE efface les CSV vides puis re-scanne
-    g_vols_clean_armed=false;
-    volsShowStatus("Cleaning...",C_AMBER);
-    g_status.flt_rdy=0; g_vols_loading=true; g_vols_t0=millis();
-}
+// (Clean empty retiré de l'UI : les CSV header-seul sont déjà masqués de la liste et
+//  nettoyés automatiquement au boot côté AT-CORE — plus de bouton manuel.)
 
 // Lit CHR_FLIGHTS, parse le JSON, construit les lignes.
 static void volsBuildList(){
@@ -3742,40 +3727,58 @@ static void volsBuildList(){
         strlcpy(it.s,o["s"]|"?",sizeof(it.s));
         strlcpy(it.e,o["e"]|"?",sizeof(it.e));
         it.up=o["u"]|0; it.sel=false;
-        lv_obj_t*b=lv_btn_create(g_vols_list);lv_obj_set_size(b,LV_PCT(100),ROWH);   // pleine largeur liste, hauteur board-dépendante (v9/v10)
-        lv_obj_set_style_radius(b,6,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+        // Ligne LECTURE SEULE (plus de sélection) : date + heures, "✓ sent" vert si transféré.
+        lv_obj_t*b=lv_obj_create(g_vols_list);lv_obj_set_size(b,LV_PCT(100),ROWH);   // pleine largeur liste
+        lv_obj_set_style_radius(b,6,0);lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_pad_all(b,0,0);
+        lv_obj_clear_flag(b,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
         lv_obj_set_style_bg_color(b,it.up?lv_color_hex(0x161b22):lv_color_hex(0x21262d),0);
         const char* md=strlen(it.d)>=10?it.d+5:it.d;
         char r[52];
-        if(it.up) snprintf(r,sizeof(r),"%s %s>%s  sent",md,it.s,it.e);
-        else      snprintf(r,sizeof(r),"[ ] %s %s>%s",md,it.s,it.e);
+        if(it.up) snprintf(r,sizeof(r),"%s  %s>%s   " LV_SYMBOL_OK " sent",md,it.s,it.e);
+        else      snprintf(r,sizeof(r),"%s  %s>%s",md,it.s,it.e);
         lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,r);
-        lv_obj_set_style_text_color(l,it.up?lv_color_hex(0x6b7280):lv_color_hex(0xe6edf3),0);
+        lv_obj_set_style_text_color(l,it.up?C_GREEN:lv_color_hex(0xe6edf3),0);
         lv_obj_set_style_text_font(l,RF,0);lv_obj_center(l);
         it.lbl=l; it.row=b;
-        if(!it.up)lv_obj_add_event_cb(b,_vols_row_cb,LV_EVENT_CLICKED,(void*)(intptr_t)g_vols_n);
         g_vols_n++;
     }
     if(g_vols_n==0){
         lv_obj_t*l=lv_label_create(g_vols_list);lv_label_set_text(l,"No flights on SD");
         lv_obj_set_style_text_color(l,TGREY(),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_14,0);
-    }
-    volsUpdXfer();}
+    }}
+
+// Bouton de la page Flights (helper factorisé : 4 boutons identiques sauf libellé/couleur/cb).
+// Couleur d'une version selon son canal : -dev=ambre, -rc=bleu, sinon (client validé)=vert.
+static lv_color_t verColor(const char* s){
+    if(!s||!s[0]) return C_BRAND;
+    if(strstr(s,"-dev")) return C_AMBER;
+    if(strstr(s,"-rc"))  return C_CYAN;
+    return C_GREEN;
+}
+static lv_obj_t* volBtn(lv_obj_t*par,const char*txt,lv_color_t bg,int w,int h,int dx,int y,lv_event_cb_t cb,const lv_font_t*f){
+    lv_obj_t*b=lv_btn_create(par);lv_obj_set_size(b,w,h);lv_obj_align(b,LV_ALIGN_TOP_MID,dx,y);
+    lv_obj_set_style_bg_color(b,bg,0);lv_obj_set_style_radius(b,8,0);
+    lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(b,cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,txt);
+    lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);lv_obj_set_style_text_font(l,f,0);lv_obj_center(l);
+    return b;}
 
 void mkVolsOverlay(){
     if(g_vols_ov)return;
-    // (v10) Géométrie par carte. T4-S3 : page Flights AGRANDIE — liste plus haute, lignes
-    // (cf volsBuildList) + boutons + polices plus gros (lisibilité/tactile cockpit), WiFi
-    // remonté sous le titre pour libérer du vertical. T-RGB rond inchangé.
+    // Géométrie par carte. T4-S3 : liste + 4 boutons (Send last / Send all unsent / Delete sent /
+    // Close) en 2×2. T-RGB rond : empilés (layout à raffiner au port T-RGB).
 #ifdef BOARD_T4S3
-    const int OVW=600, OVX=0,     LSTW=564, LSTH=234, LSTY=78, BTW=360, CLW=178, CLDX=96;
-    // (clip) verticale re-calée : titre à y écran ~9, close bas ~441, pas de chevauchement
-    // titre/WiFi (overlay à UI_OY=-15 → tout y local décalé de -15 à l'écran).
-    const int yTitle=24, yWifi=54, hX=44, yX=318, hB=40, yClean=370, yClose=416;
+    const int OVW=600, OVX=0,     LSTW=564, LSTH=206, LSTY=78;
+    const int yTitle=24, yWifi=54;
+    const int BW=276, BH=46, dxL=-148, dxR=148, yR1=296, yR2=350;   // 2×2 (T4)
+    const int xSL=dxL,ySL=yR1, xSA=dxR,ySA=yR1, xDEL=dxL,yDEL=yR2, xCL=dxR,yCL=yR2;
     const lv_font_t *FTL=&lv_font_montserrat_22, *FBT=&lv_font_montserrat_18, *FB2=&lv_font_montserrat_16;
 #else
-    const int OVW=480, OVX=UI_OX, LSTW=290, LSTH=238, LSTY=56, BTW=210, CLW=103, CLDX=54;
-    const int yTitle=26, yWifi=414, hX=34, yX=302, hB=30, yClean=342, yClose=378;
+    const int OVW=480, OVX=UI_OX, LSTW=290, LSTH=180, LSTY=72;
+    const int yTitle=26, yWifi=50;
+    const int BW=210, BH=32;   // empilés (rond)
+    const int xSL=0,ySL=258, xSA=0,ySA=296, xDEL=0,yDEL=334, xCL=0,yCL=372;
     const lv_font_t *FTL=&lv_font_montserrat_20, *FBT=&lv_font_montserrat_14, *FB2=&lv_font_montserrat_14;
 #endif
     g_vols_ov=lv_obj_create(lv_scr_act());
@@ -3784,7 +3787,7 @@ void mkVolsOverlay(){
     lv_obj_set_style_border_width(g_vols_ov,0,0);lv_obj_set_style_radius(g_vols_ov,0,0);
     lv_obj_set_style_pad_all(g_vols_ov,0,0);lv_obj_clear_flag(g_vols_ov,LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t*tl=lv_label_create(g_vols_ov);lv_label_set_text(tl,"FLIGHTS (UTC)");
+    lv_obj_t*tl=lv_label_create(g_vols_ov);lv_label_set_text(tl,"FlightLogs (UTC)");
     lv_obj_set_style_text_color(tl,C_AMBER,0);lv_obj_set_style_text_font(tl,FTL,0);
     lv_obj_align(tl,LV_ALIGN_TOP_MID,0,yTitle);
 
@@ -3796,41 +3799,13 @@ void mkVolsOverlay(){
     g_vols_load=lv_label_create(g_vols_list);lv_label_set_text(g_vols_load,"Loading...");
     lv_obj_set_style_text_color(g_vols_load,TGREY(),0);lv_obj_set_style_text_font(g_vols_load,FB2,0);
 
-    // Boutons
-    lv_obj_t*bx=lv_btn_create(g_vols_ov);lv_obj_set_size(bx,BTW,hX);lv_obj_align(bx,LV_ALIGN_TOP_MID,0,yX);
-    lv_obj_set_style_bg_color(bx,C_GREEN,0);lv_obj_set_style_radius(bx,8,0);
-    lv_obj_set_style_border_width(bx,0,0);lv_obj_set_style_shadow_opa(bx,LV_OPA_TRANSP,0);
-    lv_obj_add_event_cb(bx,_vols_xfer_cb,LV_EVENT_CLICKED,NULL);
-    g_vols_xfer=lv_label_create(bx);lv_label_set_text(g_vols_xfer,"Transfer (0)");
-    lv_obj_set_style_text_color(g_vols_xfer,lv_color_hex(0xffffff),0);
-    lv_obj_set_style_text_font(g_vols_xfer,FBT,0);lv_obj_center(g_vols_xfer);
+    // Boutons : Send last (vol courant) · Send all unsent (scan SD) · Delete sent (.up, 2-tap) · Close
+    volBtn(g_vols_ov,"Send last",      C_GREEN,                BW,BH,xSL, ySL, _vols_sendlast_cb,FBT);
+    volBtn(g_vols_ov,"Send all unsent",C_BRAND,                BW,BH,xSA, ySA, _vols_sendall_cb, FBT);
+    volBtn(g_vols_ov,"Delete sent",    lv_color_hex(0x4b5563), BW,BH,xDEL,yDEL,_vols_del_cb,     FB2);
+    volBtn(g_vols_ov,"Close",          lv_color_hex(0x30363d), BW,BH,xCL, yCL, _vols_close_cb,   FB2);
 
-    // Ligne cleanup : Delete sent (efface les .up transférés) | Clean empty (efface les CSV vides)
-    lv_obj_t*bd=lv_btn_create(g_vols_ov);lv_obj_set_size(bd,CLW,hB);lv_obj_align(bd,LV_ALIGN_TOP_MID,-CLDX,yClean);
-    lv_obj_set_style_bg_color(bd,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bd,8,0);
-    lv_obj_set_style_border_width(bd,0,0);lv_obj_set_style_shadow_opa(bd,LV_OPA_TRANSP,0);
-    lv_obj_add_event_cb(bd,_vols_del_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(bd);lv_label_set_text(l,"Delete sent");
-     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
-     lv_obj_set_style_text_font(l,FB2,0);lv_obj_center(l);}
-
-    lv_obj_t*bcl=lv_btn_create(g_vols_ov);lv_obj_set_size(bcl,CLW,hB);lv_obj_align(bcl,LV_ALIGN_TOP_MID,CLDX,yClean);
-    lv_obj_set_style_bg_color(bcl,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(bcl,8,0);
-    lv_obj_set_style_border_width(bcl,0,0);lv_obj_set_style_shadow_opa(bcl,LV_OPA_TRANSP,0);
-    lv_obj_add_event_cb(bcl,_vols_clean_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(bcl);lv_label_set_text(l,"Clean empty");
-     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
-     lv_obj_set_style_text_font(l,FB2,0);lv_obj_center(l);}
-
-    lv_obj_t*bc=lv_btn_create(g_vols_ov);lv_obj_set_size(bc,BTW,hB);lv_obj_align(bc,LV_ALIGN_TOP_MID,0,yClose);
-    lv_obj_set_style_bg_color(bc,lv_color_hex(0x30363d),0);lv_obj_set_style_radius(bc,8,0);
-    lv_obj_set_style_border_width(bc,0,0);lv_obj_set_style_shadow_opa(bc,LV_OPA_TRANSP,0);
-    lv_obj_add_event_cb(bc,_vols_close_cb,LV_EVENT_CLICKED,NULL);
-    {lv_obj_t*l=lv_label_create(bc);lv_label_set_text(l,"Close");
-     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
-     lv_obj_set_style_text_font(l,FB2,0);lv_obj_center(l);}
-
-    // Ligne d'état WiFi hotspot — visibilité connexion pendant le transfert (sous le titre sur T4).
+    // Ligne d'état WiFi club — visibilité connexion pendant le transfert (sous le titre sur T4).
     g_vols_wifi=lv_label_create(g_vols_ov);
     lv_obj_set_style_text_font(g_vols_wifi,&lv_font_montserrat_14,0);
     lv_obj_align(g_vols_wifi,LV_ALIGN_TOP_MID,0,yWifi);
@@ -3932,6 +3907,133 @@ static void _maint_atvota_cb(lv_event_t*e){
     atvCloudOta();
 }
 
+// ── Page UPDATES (SYSTEM) : versions ATC/ATV + MAJ contextuelle ──────────────────
+// ATC : bouton [Update] affiché SEULEMENT si une MAJ cloud existe (g_status.oav>fwv),
+//       sinon ligne grise "up to date". ATV : bouton toujours présent (auto-check à
+//       l'exécution → "Already up to date" si rien de neuf ; le check version ATV côté
+//       écran viendra avec la Phase D). MAJ = single tap (l'OTA self-check, no-op si à jour).
+static lv_obj_t* g_upd_ov=nullptr;
+static lv_obj_t* g_upd_checkbtn=nullptr;   // bouton "Check now" (relabel pendant le check)
+static uint8_t   g_upd_shown_oav=0;        // oav au moment du build de la page → rebuild si change
+static bool      g_upd_checking=false; static uint32_t g_upd_check_t0=0;
+static void showUpdatesPage();             // fwd (rebuild auto depuis updateAllPages)
+static void _upd_close_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED&&g_upd_ov){g_upd_checking=false;lv_obj_del(g_upd_ov);g_upd_ov=nullptr;g_upd_checkbtn=nullptr;} }
+static void _upd_atc_cb(lv_event_t*e){ if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return; g_upd_checking=false; if(g_upd_ov){lv_obj_del(g_upd_ov);g_upd_ov=nullptr;g_upd_checkbtn=nullptr;} sendCtl("otaupdate"); }
+static void _upd_atv_cb(lv_event_t*e){ if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return; g_upd_checking=false; if(g_upd_ov){lv_obj_del(g_upd_ov);g_upd_ov=nullptr;g_upd_checkbtn=nullptr;} atvCloudOta(); }
+// "Check now" → force le boîtier à re-vérifier Storage ({"cmd":"otacheck"}) → oav rafraîchi en
+// ~5-10 s (WiFi club + GET) → la page se rebuild auto (updateAllPages) quand oav change.
+static void _upd_check_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    sendCtl("otacheck");
+    g_upd_checking=true; g_upd_check_t0=millis();
+    lv_obj_t*b=lv_event_get_target(e),*l=lv_obj_get_child(b,0);
+    if(l)lv_label_set_text(l,"Checking..."); lv_obj_set_style_bg_color(b,C_AMBER,0);
+}
+static void showUpdatesPage(){
+    if(g_upd_ov)return;
+    g_upd_ov=lv_obj_create(lv_scr_act());
+    g_upd_shown_oav=g_status.oav; g_upd_checking=false;   // suivi rebuild auto (Check now)
+#ifdef BOARD_T4S3
+    lv_obj_set_size(g_upd_ov,600,480);lv_obj_set_pos(g_upd_ov,0,UI_OY);
+    const lv_font_t *TF=&lv_font_montserrat_22,*LF=&lv_font_montserrat_20,*BF=&lv_font_montserrat_18;
+    const int xLbl=70,xVal=250,bDx=185,BW=150,BH=46,yATC=148,yATV=222;
+    const int xCHK=-130,yCHK=400, xCL=130,yCL=400;   // Check now (gauche) · Close (droite)
+#else
+    lv_obj_set_size(g_upd_ov,480,480);lv_obj_set_pos(g_upd_ov,UI_OX,UI_OY);
+    const lv_font_t *TF=&lv_font_montserrat_18,*LF=&lv_font_montserrat_16,*BF=&lv_font_montserrat_14;
+    const int xLbl=50,xVal=175,bDx=150,BW=120,BH=40,yATC=148,yATV=210;
+    const int xCHK=0,yCHK=334, xCL=0,yCL=378;        // empilés (rond)
+#endif
+    lv_obj_set_style_bg_color(g_upd_ov,TBG(),0);lv_obj_set_style_bg_opa(g_upd_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(g_upd_ov,0,0);lv_obj_set_style_radius(g_upd_ov,0,0);
+    lv_obj_set_style_pad_all(g_upd_ov,0,0);lv_obj_clear_flag(g_upd_ov,LV_OBJ_FLAG_SCROLLABLE);
+    mkLbl(g_upd_ov,"UPDATES",C_AMBER,TF,LV_ALIGN_TOP_MID,0,44);
+
+    // AT-CORE — contextuel (oav>fwv)
+    mkLblP(g_upd_ov,"AT-CORE",TFG(),LF,xLbl,yATC+8);
+    char ab[40];
+    if(g_status.valid && g_status.oav>g_status.fwv){
+        snprintf(ab,sizeof(ab),"v%d " LV_SYMBOL_RIGHT " v%d",g_status.fwv,g_status.oav);
+        mkLblP(g_upd_ov,ab,C_AMBER,LF,xVal,yATC+8);
+        volBtn(g_upd_ov,"Update",C_BRAND,BW,BH,bDx,yATC,_upd_atc_cb,BF);
+    }else{
+        if(g_status.valid && g_status.fws[0]) snprintf(ab,sizeof(ab),"%s  up to date",g_status.fws);
+        else if(g_status.valid)               snprintf(ab,sizeof(ab),"v%d  up to date",g_status.fwv);
+        else                                  strlcpy(ab,"v--  (offline)",sizeof(ab));
+        mkLblP(g_upd_ov,ab,(g_status.valid&&g_status.fws[0])?verColor(g_status.fws):TGREY(),LF,xVal,yATC+8);
+    }
+
+    // AT-VIEW — bouton toujours présent (auto-check à l'exécution)
+    mkLblP(g_upd_ov,"AT-VIEW",TFG(),LF,xLbl,yATV+8);
+    mkLblP(g_upd_ov,VIEW_VSTR,verColor(VIEW_VSTR),LF,xVal,yATV+8);
+    volBtn(g_upd_ov,"Update",C_BRAND,BW,BH,bDx,yATV,_upd_atv_cb,BF);
+
+    // Check now (force re-check Storage côté ATC) + Close
+    g_upd_checkbtn=volBtn(g_upd_ov,"Check now",lv_color_hex(0x1f4068),BW,BH,xCHK,yCHK,_upd_check_cb,BF);
+    volBtn(g_upd_ov,"Close",lv_color_hex(0x4b5563),BW,BH,xCL,yCL,_upd_close_cb,BF);
+}
+static void _open_updates_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) showUpdatesPage(); }
+
+// ── Page DIAGNOSTIC (SYSTEM) : état WiFi club/SD + Test WiFi / Reboot box ──
+// Reboot box = 2-tap (destructif). Test WiFi = single tap (état visible sur la ligne WiFi live).
+// (AP écran retiré : push navigateur legacy, remplacé par le cloud-pull "Update ATV" + USB.)
+static lv_obj_t* g_diag_ov=nullptr,*g_diag_wst=nullptr;
+static bool g_diag_reboot_armed=false;
+static void diagWifiStatus(){
+    if(!g_diag_wst)return;
+    char b[80]; lv_color_t c;
+    const char* ssid=(g_status.valid&&g_status.wssid[0])?g_status.wssid:(g_hs_ssid[0]?g_hs_ssid:"");
+    if(!g_status.valid){ strcpy(b,"box offline (no BLE)"); c=TGREY(); }
+    else if(!ssid[0]){ strcpy(b,"No club WiFi configured"); c=TGREY(); }
+    else switch(g_status.wst){
+        case 1: snprintf(b,sizeof(b),"%s : connecting...",ssid); c=C_AMBER; break;
+        case 2: snprintf(b,sizeof(b),"%s : connected (%s)",ssid,g_status.wip[0]?g_status.wip:"?"); c=C_GREEN; break;
+        case 3: snprintf(b,sizeof(b),"%s : not found",ssid); c=C_RED; break;
+        case 4: snprintf(b,sizeof(b),"%s : connect failed",ssid); c=C_RED; break;
+        default: snprintf(b,sizeof(b),"club WiFi: %s",ssid); c=TGREY(); break;
+    }
+    lv_label_set_text(g_diag_wst,b); lv_obj_set_style_text_color(g_diag_wst,c,0);
+}
+static void _diag_close_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED&&g_diag_ov){lv_obj_del(g_diag_ov);g_diag_ov=nullptr;g_diag_wst=nullptr;} }
+static void _diag_test_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("wifitest"); }
+static void _diag_reboot_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
+    if(!g_diag_reboot_armed){ g_diag_reboot_armed=true; if(l)lv_label_set_text(l,"Confirm?"); lv_obj_set_style_bg_color(b,C_AMBER,0); return; }
+    g_diag_reboot_armed=false; if(l)lv_label_set_text(l,"Reboot box"); lv_obj_set_style_bg_color(b,C_ORANGE,0);
+    sendCtl("reboot");
+}
+static void showDiagPage(){
+    if(g_diag_ov)return;
+    g_diag_ov=lv_obj_create(lv_scr_act());
+#ifdef BOARD_T4S3
+    lv_obj_set_size(g_diag_ov,600,480);lv_obj_set_pos(g_diag_ov,0,UI_OY);
+    const lv_font_t *TF=&lv_font_montserrat_22,*LF=&lv_font_montserrat_18,*BF=&lv_font_montserrat_18;
+    const int BW=240,BH=48,yWifi=120,ySD=164;
+    const int xTEST=-130,yTEST=232, xREB=130,yREB=232, xCL=0,yCL=300;
+#else
+    lv_obj_set_size(g_diag_ov,480,480);lv_obj_set_pos(g_diag_ov,UI_OX,UI_OY);
+    const lv_font_t *TF=&lv_font_montserrat_18,*LF=&lv_font_montserrat_14,*BF=&lv_font_montserrat_14;
+    const int BW=200,BH=36,yWifi=100,ySD=140;
+    const int xTEST=0,yTEST=196, xREB=0,yREB=240, xCL=0,yCL=284;
+#endif
+    lv_obj_set_style_bg_color(g_diag_ov,TBG(),0);lv_obj_set_style_bg_opa(g_diag_ov,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(g_diag_ov,0,0);lv_obj_set_style_radius(g_diag_ov,0,0);
+    lv_obj_set_style_pad_all(g_diag_ov,0,0);lv_obj_clear_flag(g_diag_ov,LV_OBJ_FLAG_SCROLLABLE);
+    mkLbl(g_diag_ov,"DIAGNOSTIC",C_AMBER,TF,LV_ALIGN_TOP_MID,0,44);
+
+    g_diag_wst=lv_label_create(g_diag_ov);lv_obj_set_style_text_font(g_diag_wst,LF,0);
+    lv_obj_align(g_diag_wst,LV_ALIGN_TOP_MID,0,yWifi); diagWifiStatus();
+
+    char sd[24]; if(g_sd_ok)snprintf(sd,sizeof(sd),"SD card: %u GB",g_sd_gb);else strlcpy(sd,"SD card: NO CARD",sizeof(sd));
+    mkLbl(g_diag_ov,sd,g_sd_ok?C_GREEN:C_RED,LF,LV_ALIGN_TOP_MID,0,ySD);
+
+    volBtn(g_diag_ov,"Test WiFi",lv_color_hex(0x1f4068),BW,BH,xTEST,yTEST,_diag_test_cb,BF);
+    volBtn(g_diag_ov,"Reboot box",C_ORANGE,BW,BH,xREB,yREB,_diag_reboot_cb,BF);
+    volBtn(g_diag_ov,"Close",lv_color_hex(0x4b5563),BW,BH,xCL,yCL,_diag_close_cb,BF);
+}
+static void _open_diag_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) showDiagPage(); }
+
 // OTA cloud-pull : double-tap de confirmation (action destructive = reflash + reboot).
 static bool g_maint_ota_armed=false;
 static void _maint_ota_cb(lv_event_t*e){
@@ -3975,6 +4077,17 @@ static lv_obj_t* g_wifisetup_ov=nullptr;
 static void _wifisetup_close_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
     if(g_wifisetup_ov){lv_obj_del(g_wifisetup_ov);g_wifisetup_ov=nullptr;}}
+// "Open portal" (single tap) → ouvre le SoftAP ATCORE-SETUP-<box> du boîtier ({"cmd":"portal"}).
+// Non destructif (le boîtier ne reboote qu'après Save côté web) → pas de confirm : feedback
+// immédiat (bouton vert "Portal open") puis le BLE tombe quand le boîtier passe en AP.
+static void _wifisetup_portal_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
+    if(!g_connected){ if(l)lv_label_set_text(l,"Box not connected"); lv_obj_set_style_bg_color(b,C_RED,0); return; }   // sinon la commande part dans le vide
+    sendCtl("portal");
+    if(l)lv_label_set_text(l,"Portal requested");
+    lv_obj_set_style_bg_color(b,C_GREEN,0);
+}
 static void showWifiSetupInfo(){
     if(g_wifisetup_ov)return;
     g_wifisetup_ov=lv_obj_create(lv_scr_act());
@@ -3993,18 +4106,24 @@ static void showWifiSetupInfo(){
     char ssid[28];
     snprintf(ssid,sizeof(ssid),"ATCORE-SETUP-%s",
              (g_status.valid&&g_status.box[0])?g_status.box:"----");
-    mkLbl(g_wifisetup_ov,"WiFi SETUP",C_AMBER,TF,LV_ALIGN_TOP_MID,0,44);
-    mkLbl(g_wifisetup_ov,"On your phone, join this WiFi:",TGREY(),BF,LV_ALIGN_TOP_MID,0,100);
-    mkLbl(g_wifisetup_ov,ssid,C_GREEN,BF,LV_ALIGN_TOP_MID,0,128);
-    mkLbl(g_wifisetup_ov,"password:  atcore-setup",TFG(),BF,LV_ALIGN_TOP_MID,0,156);
-    mkLbl(g_wifisetup_ov,"Then open in a browser:",TGREY(),BF,LV_ALIGN_TOP_MID,0,200);
-    mkLbl(g_wifisetup_ov,"http://192.168.4.1",C_CYAN,BF,LV_ALIGN_TOP_MID,0,228);
-    mkLbl(g_wifisetup_ov,"Edit callsign / type / hex,",TFG(),BF,LV_ALIGN_TOP_MID,0,272);
-    mkLbl(g_wifisetup_ov,"hotspot, or flash firmware.",TFG(),BF,LV_ALIGN_TOP_MID,0,300);
-    mkLbl(g_wifisetup_ov,"The box reboots after Save.",TGREY(),BF,LV_ALIGN_TOP_MID,0,328);
-    // Close
-    lv_obj_t*b=lv_btn_create(g_wifisetup_ov);lv_obj_set_size(b,180,48);
-    lv_obj_align(b,LV_ALIGN_BOTTOM_MID,0,-30);
+    mkLbl(g_wifisetup_ov,"WiFi SETUP",C_AMBER,TF,LV_ALIGN_TOP_MID,0,40);
+    mkLbl(g_wifisetup_ov,"1. Tap 'Open portal' below.",TFG(),BF,LV_ALIGN_TOP_MID,0,92);
+    mkLbl(g_wifisetup_ov,"2. On your phone, join (~10 s):",TGREY(),BF,LV_ALIGN_TOP_MID,0,132);
+    mkLbl(g_wifisetup_ov,ssid,C_GREEN,BF,LV_ALIGN_TOP_MID,0,160);
+    mkLbl(g_wifisetup_ov,"password:  ebby-atc",TFG(),BF,LV_ALIGN_TOP_MID,0,188);
+    mkLbl(g_wifisetup_ov,"3. Open  http://192.168.4.1",C_CYAN,BF,LV_ALIGN_TOP_MID,0,228);
+    mkLbl(g_wifisetup_ov,"Edit callsign / type / hex + club WiFi.",TFG(),BF,LV_ALIGN_TOP_MID,0,268);
+    mkLbl(g_wifisetup_ov,"The box reboots after Save.",TGREY(),BF,LV_ALIGN_TOP_MID,0,296);
+    // [Open portal] (single tap → {"cmd":"portal"}) + [Close]
+    lv_obj_t*bp=lv_btn_create(g_wifisetup_ov);lv_obj_set_size(bp,210,52);
+    lv_obj_align(bp,LV_ALIGN_BOTTOM_MID,-112,-30);
+    lv_obj_set_style_bg_color(bp,C_BRAND,0);lv_obj_set_style_radius(bp,10,0);
+    lv_obj_set_style_border_width(bp,0,0);lv_obj_set_style_shadow_opa(bp,LV_OPA_TRANSP,0);
+    lv_obj_add_event_cb(bp,_wifisetup_portal_cb,LV_EVENT_CLICKED,NULL);
+    {lv_obj_t*l=lv_label_create(bp);lv_label_set_text(l,"Open portal");
+     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);lv_obj_set_style_text_font(l,BF,0);lv_obj_center(l);}
+    lv_obj_t*b=lv_btn_create(g_wifisetup_ov);lv_obj_set_size(b,150,52);
+    lv_obj_align(b,LV_ALIGN_BOTTOM_MID,118,-30);
     lv_obj_set_style_bg_color(b,lv_color_hex(0x4b5563),0);lv_obj_set_style_radius(b,10,0);
     lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(b,_wifisetup_close_cb,LV_EVENT_CLICKED,NULL);
@@ -4025,8 +4144,11 @@ static void _maint_portal_cb(lv_event_t*e){
     g_maint_portal_armed=false;
     if(l)lv_label_set_text(l,"WiFi Setup");
     lv_obj_set_style_bg_color(b,C_BRAND,0);
-    sendCtl("portal");        // boîtier ouvre son SoftAP ATCORE-SETUP-<box>
-    showWifiSetupInfo();      // guide le pilote (SSID/pass/URL)
+    showWifiSetupInfo();      // page WiFi Setup (instructions + bouton "Open portal" intégré)
+}
+// Ligne SYSTEM → ouvre la page WiFi Setup (dédiée, instructions + déclencheur portail).
+static void _open_wifisetup_cb(lv_event_t*e){
+    if(lv_event_get_code(e)==LV_EVENT_CLICKED) showWifiSetupInfo();
 }
 
 // ── (v21) Relais "Update both" — flasher ATC + ATV sur un seul réseau WiFi ──────
@@ -4036,7 +4158,7 @@ static void _maint_portal_cb(lv_event_t*e){
 // (GET /atv?ip=&v=) → la page portail du boîtier affiche un lien vers l'updater de
 // l'AT-VIEW. Un seul téléphone sur l'AP flashe les deux. Machine d'état pilotée par
 // relayTick() dans loop() (WiFi.begin non bloquant en boucle).
-#define ATC_PORTAL_PASS "atcore-setup"   // = PORTAL_PASS côté AT-CORE (constante compilée)
+#define ATC_PORTAL_PASS "ebby-atc"   // = PORTAL_PASS côté AT-CORE (constante compilée)
 enum { RLY_IDLE=0, RLY_WAIT_AP, RLY_JOINING, RLY_UP, RLY_FAIL };
 static uint8_t  g_relay_state=RLY_IDLE;
 static uint32_t g_relay_t0=0;
@@ -4085,7 +4207,7 @@ static void showRelayOverlay(){
     g_relay_status_lbl=mkLbl(g_relay_ov,"",C_AMBER,BF,LV_ALIGN_TOP_MID,0,82);
     mkLbl(g_relay_ov,"On your phone, join this WiFi:",TGREY(),BF,LV_ALIGN_TOP_MID,0,124);
     mkLbl(g_relay_ov,ssid,C_GREEN,BF,LV_ALIGN_TOP_MID,0,150);
-    mkLbl(g_relay_ov,"password:  atcore-setup",TFG(),BF,LV_ALIGN_TOP_MID,0,176);
+    mkLbl(g_relay_ov,"password:  ebby-atc",TFG(),BF,LV_ALIGN_TOP_MID,0,176);
     mkLbl(g_relay_ov,"Open  http://192.168.4.1",C_CYAN,BF,LV_ALIGN_TOP_MID,0,212);
     mkLbl(g_relay_ov,"Flash AT-CORE on that page,",TFG(),BF,LV_ALIGN_TOP_MID,0,248);
     mkLbl(g_relay_ov,"then tap 'Open AT-VIEW updater'",TFG(),BF,LV_ALIGN_TOP_MID,0,274);
@@ -4512,6 +4634,10 @@ static void settingsShowMenu(){
     for(int i=0;i<6;i++) if(s_sec[i]) lv_obj_add_flag(s_sec[i],LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_menu,LV_OBJ_FLAG_HIDDEN);
     if(s_back_btn) lv_obj_add_flag(s_back_btn,LV_OBJ_FLAG_HIDDEN);   // pas de retour sur le menu
+    if(s_set_aclbl){ lv_obj_clear_flag(s_set_aclbl,LV_OBJ_FLAG_HIDDEN); }   // bloc Active Aircraft visible (menu)
+    if(s_set_acval){ char ac[40]; snprintf(ac,sizeof(ac),"%s / %s / %s",
+                       g_ac_reg[0]?g_ac_reg:"---", g_ac_type[0]?g_ac_type:"---", g_ac_hex[0]?g_ac_hex:"------");
+                     lv_label_set_text(s_set_acval,ac); lv_obj_clear_flag(s_set_acval,LV_OBJ_FLAG_HIDDEN); }
     if(s_set_title) lv_label_set_text(s_set_title,"SETTINGS");
     if(s_set_uline&&s_set_title){ lv_obj_update_layout(s_set_title); lv_obj_set_width(s_set_uline,lv_obj_get_width(s_set_title)); }
 }
@@ -4522,6 +4648,8 @@ static void settingsOpenSection(int i){
     for(int k=0;k<6;k++) if(s_sec[k]) lv_obj_add_flag(s_sec[k],LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(s_sec[i],LV_OBJ_FLAG_HIDDEN);
     if(s_back_btn) lv_obj_clear_flag(s_back_btn,LV_OBJ_FLAG_HIDDEN);   // (juin 2026) cercle retour visible en section
+    if(s_set_aclbl) lv_obj_add_flag(s_set_aclbl,LV_OBJ_FLAG_HIDDEN);   // bloc Active Aircraft caché en section (cercle retour à sa place)
+    if(s_set_acval) lv_obj_add_flag(s_set_acval,LV_OBJ_FLAG_HIDDEN);
     if(s_set_title) lv_label_set_text(s_set_title,kSecName[i]);        // titre épuré (le retour est le cercle à droite)
     if(s_set_uline&&s_set_title){ lv_obj_update_layout(s_set_title); lv_obj_set_width(s_set_uline,lv_obj_get_width(s_set_title)); }
 }
@@ -4557,7 +4685,7 @@ void buildSettingsPageT4(lv_obj_t*p){
     g_seg_n=0; g_segn_n=0; g_pop_n=0; s_cur_sec=-1;
     s_scale_v=nullptr;s_vfilt_v=nullptr;s_dist_v=nullptr;s_alt_v=nullptr;s_spd_v=nullptr;
     s_bright_v=nullptr;s_src_v=nullptr;s_theme_v=nullptr;s_grnd_v=nullptr;s_icon_sz_v=nullptr;
-    s_ac_v=nullptr;s_wifi_v=nullptr;s_sd_v=nullptr;
+    s_ac_v=nullptr;s_wifi_v=nullptr;s_sd_v=nullptr;s_set_aclbl=nullptr;s_set_acval=nullptr;
 
     // En-tête : logo + titre (appui long titre = debug). Le RETOUR se fait par le cercle
     // en haut-droite (maquette juin 2026). Titre un peu plus haut → plus d'air sous lui.
@@ -4572,6 +4700,21 @@ void buildSettingsPageT4(lv_obj_t*p){
     lv_obj_set_style_bg_color(s_set_uline,C_BRAND,0);lv_obj_set_style_bg_opa(s_set_uline,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(s_set_uline,0,0);lv_obj_set_style_pad_all(s_set_uline,0,0);lv_obj_set_style_radius(s_set_uline,1,0);
     lv_obj_clear_flag(s_set_uline,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+
+    // Bloc « Active Aircraft » à droite du titre (menu seul ; caché en section, où le
+    // cercle retour prend la place). 2 lignes : libellé + REG / TYP / HEX (identité NVS,
+    // éditée via le web — plus de page AIRCRAFT). Aligné à droite, marge 40.
+    s_set_aclbl=lv_label_create(p);lv_label_set_text(s_set_aclbl,"Active Aircraft");
+    lv_obj_set_style_text_color(s_set_aclbl,lv_color_hex(0x4b5563),0);
+    lv_obj_set_style_text_font(s_set_aclbl,&lv_font_montserrat_14,0);
+    lv_obj_align(s_set_aclbl,LV_ALIGN_TOP_RIGHT,-40,28);
+    s_set_acval=lv_label_create(p);
+    lv_obj_set_style_text_color(s_set_acval,C_BRAND,0);
+    lv_obj_set_style_text_font(s_set_acval,&lv_font_montserrat_20,0);
+    {char ac[40];snprintf(ac,sizeof(ac),"%s / %s / %s",
+        g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---",g_ac_hex[0]?g_ac_hex:"------");
+     lv_label_set_text(s_set_acval,ac);}
+    lv_obj_align(s_set_acval,LV_ALIGN_TOP_RIGHT,-40,46);
 
     // Cercle « retour » haut-droite (bleu, ‹) — gros, accessible
     s_back_btn=lv_btn_create(p);
@@ -4624,36 +4767,39 @@ void buildSettingsPageT4(lv_obj_t*p){
      mkBigBrightRow(sp,"BRIGHTNESS",Y0+0*DY,g_cfg.brightness);
      mkSegRow(sp,"THEME",Y0+1*DY,"LIGHT","DARK",&g_cfg.dark,false);}
 
-    // 2) TRAFFIC : SOURCE · GROUNDED · ICONS · AIP · HELIPORT
+    // 2) TRAFFIC : GROUNDED · ICONS · AIP · HELIPORT  (SOURCE retiré : trafic toujours SafeSky)
     {lv_obj_t*sp=s_sec[2]; const int Y0=8,DY=72;
-     mkSegRowN(sp,"SOURCE",Y0+0*DY,kSrcNames,4,&g_cfg.trf_src,0);
-     mkSegRow (sp,"GROUNDED",Y0+1*DY,"OFF","ON",&g_cfg.show_grnd,false);
-     mkSegRowN(sp,"ICONS",Y0+2*DY,kIconSzNames,3,&g_cfg.icon_sz,1);
-     mkSegRow (sp,"AIP",Y0+3*DY,"OFF","ON",&g_cfg.aip_en,false);
-     mkSegRow (sp,"HELIPORT",Y0+4*DY,"OFF","ON",&g_cfg.ad_heli,false);}
+     mkSegRow (sp,"GROUNDED",Y0+0*DY,"OFF","ON",&g_cfg.show_grnd,false);
+     mkSegRowN(sp,"ICONS",Y0+1*DY,kIconSzNames,3,&g_cfg.icon_sz,1);
+     mkSegRow (sp,"AIP",Y0+2*DY,"OFF","ON",&g_cfg.aip_en,false);
+     mkSegRow (sp,"HELIPORT",Y0+3*DY,"OFF","ON",&g_cfg.ad_heli,false);}
 
-    // 3) AIRCRAFT : identité (EDIT → overlay aircraft) + hex
+    // 3) PILOT : réservé (réactivé plus tard). L'identité aéronef se configure désormais
+    //    via le portail web (champ "Active Aircraft" affiché à droite du menu) → page AIRCRAFT retirée.
     {lv_obj_t*sp=s_sec[3];
-     char t[24];snprintf(t,sizeof(t),"%s  %s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");
-     s_ac_v=mkBigBtnRow(sp,"AIRCRAFT",8,t,"EDIT",_open_aircraft_cb);
-     char h[20];snprintf(h,sizeof(h),"HEX  %s",g_ac_hex[0]?g_ac_hex:"------");
-     mkLblP(sp,h,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,8+72+15);}
+     mkLblP(sp,"PILOT",TFG(),&lv_font_montserrat_24,40,8);
+     mkLblP(sp,"Coming soon",lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,8+44);}
 
-    // 4) SYSTEM : WIFI AP · MAINTENANCE · TEST · SD CARD
-    {lv_obj_t*sp=s_sec[4]; const int Y0=8,DY=72;
-     mkSegRow(sp,"WIFI AP",Y0+0*DY,"OFF","ON",&g_cfg.wifi_en,false);
-     mkBigBtnRow(sp,"MAINTENANCE",Y0+1*DY,"","OPEN",_open_maintenance_cb);
-     mkBigBtnRow(sp,"TEST",Y0+2*DY,"","OPEN",_open_test_cb);   // QA : simuler cycle vol (Phase A)
+    // 4) SYSTEM : WIFI SETUP · MAINTENANCE · TEST · SD CARD
+    //    (WIFI SETUP = portail boîtier pour config identité + WiFi club ; remplace l'ancien
+    //     toggle WIFI AP écran, qui repassera dans DIAGNOSTIC. MAINTENANCE garde UPDATES/diag
+    //     en attendant leur migration en pages dédiées.)
+    {lv_obj_t*sp=s_sec[4]; const int Y0=6,DY=60;
+     mkBigBtnRow(sp,"WIFI SETUP",Y0+0*DY,"","OPEN",_open_wifisetup_cb);
+     mkBigBtnRow(sp,"FlightLogs",Y0+1*DY,"","OPEN",_open_vols_cb);          // liste + Send last/all + Delete sent
+     mkBigBtnRow(sp,"UPDATES",Y0+2*DY,"","OPEN",_open_updates_cb);         // versions ATC/ATV + MAJ contextuelle
+     mkBigBtnRow(sp,"DIAGNOSTIC",Y0+3*DY,"","OPEN",_open_diag_cb);         // WiFi club/SD + Test WiFi/Reboot/AP écran (ex-Maintenance)
+     mkBigBtnRow(sp,"TEST",Y0+4*DY,"","OPEN",_open_test_cb);   // QA : simuler cycle vol (Phase A)
      char sd[14]; if(g_sd_ok)snprintf(sd,sizeof(sd),"%u GB",g_sd_gb);else strlcpy(sd,"NO CARD",sizeof(sd));
-     mkLblP(sp,"SD CARD",lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,Y0+3*DY+15);
-     s_sd_v=mkLblP(sp,sd,g_sd_ok?C_GREEN:lv_color_hex(0x4b5563),&lv_font_montserrat_20,360,Y0+3*DY+15);}
+     mkLblP(sp,"SD CARD",lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,Y0+5*DY+6);
+     s_sd_v=mkLblP(sp,sd,g_sd_ok?C_GREEN:lv_color_hex(0x4b5563),&lv_font_montserrat_20,360,Y0+5*DY+6);}
 
     // 5) ABOUT : versions & batteries (lecture seule, live BLE)
     {lv_obj_t*sp=s_sec[5]; const lv_color_t kcol=lv_color_hex(0x4b5563); const int X2=320,DYr=40;
      mkLblP(sp,"AT-VIEW",kcol,&lv_font_montserrat_20,40,8+0*DYr);
-     mkLblP(sp,"v" VIEW_VERSION "  " __DATE__,C_BRAND,&lv_font_montserrat_20,X2,8+0*DYr);
+     mkLblP(sp,VIEW_VSTR,verColor(VIEW_VSTR),&lv_font_montserrat_20,X2,8+0*DYr);   // "1.2.38-dev" coloré par canal
      mkLblP(sp,"AT-CORE",kcol,&lv_font_montserrat_20,40,8+1*DYr);
-     s_sys_atcver=mkLblP(sp,"v--",C_BRAND,&lv_font_montserrat_20,X2,8+1*DYr);
+     s_sys_atcver=mkLblP(sp,"v--",C_BRAND,&lv_font_montserrat_20,X2,8+1*DYr);   // rempli live (g_status.fws) dans updateAllPages
      mkLblP(sp,"AT-CORE BATT",kcol,&lv_font_montserrat_20,40,8+2*DYr);
      s_sys_atcbat=mkLblP(sp,"---%",C_BRAND,&lv_font_montserrat_20,X2,8+2*DYr);
      mkLblP(sp,"AT-VIEW BATT",kcol,&lv_font_montserrat_20,40,8+3*DYr);
@@ -4966,6 +5112,7 @@ void updateRadarDR(){
                           :(dr_dist<1000?C_RED:dr_dist<3000?C_AMBER:TFG());
             if(e.type!=r_trf_last_type[i]){
                 lv_img_set_src(r_trf_img[i],getAircraftIcon(e.type));
+                lv_img_set_zoom(r_trf_img[i],kIconZoom[g_cfg.icon_sz]); // (fix) set_src réinit le zoom → ré-appliquer la taille S/M/L (sinon retour M à l'apparition d'une cible, ex. alerte)
                 r_trf_last_type[i]=e.type;}
             // Objet img = 48px, pivot (24,24). On centre TOUJOURS sur (sx,sy) via -24
             // (sinon en taille S/M le centre visuel dérive et le trait paraît décalé).
@@ -5311,30 +5458,51 @@ void updateAllPages(){
     updFlightState();   // bannière FLIGHT STARTED / chip Start flight / overlay arrêt
     updOtaOverlay();    // overlay MAJ firmware (OTA cloud, progression)
     updOtaAvailPrompt(); // (Phase B) prompt "MAJ dispo" au boot : Update now / Later
+    // Page UPDATES ouverte : "Check now" → oav rafraîchi par l'ATC → rebuild auto ; sinon timeout.
+    if(g_upd_ov){
+        if(g_status.oav != g_upd_shown_oav){
+            lv_obj_del(g_upd_ov); g_upd_ov=nullptr; g_upd_checkbtn=nullptr; showUpdatesPage();
+        } else if(g_upd_checking && millis()-g_upd_check_t0>12000){
+            g_upd_checking=false;
+            if(g_upd_checkbtn){ lv_obj_t*l=lv_obj_get_child(g_upd_checkbtn,0); if(l)lv_label_set_text(l,"Up to date");
+                lv_obj_set_style_bg_color(g_upd_checkbtn,lv_color_hex(0x1f4068),0); }
+        }
+    }
     if(g_vols_ov) volsUpdWifi();   // ligne état WiFi hotspot dans la page Flights
+    p0UpdateAcId();                // accueil : ligne REG/TYPE/HEX (live depuis STATUS ATC)
+#ifdef BOARD_T4S3
+    if(s_set_acval){ char ac[40]; snprintf(ac,sizeof(ac),"%s / %s / %s",
+        g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---",g_ac_hex[0]?g_ac_hex:"------");
+        lv_label_set_text(s_set_acval,ac); }   // Active Aircraft (Settings) — même source
+#endif
     // Version firmware AT-CORE + date de build — bas page radar (l'annonce de MAJ est dans Maintenance)
     if(r_radar_ver||r_p0_atc){
         char vb[40];
         if(g_status.valid && g_status.fwv) snprintf(vb,sizeof(vb),"CORE v%d  %s",g_status.fwv,g_status.fwd);
         else strcpy(vb,"CORE --");
         if(r_radar_ver) lv_label_set_text(r_radar_ver,vb);
-        // Même info en page #01, format "ATC vN  date" (sous la ligne ATV)
+        // Accueil (page #01) : "ATC 1.2.38-dev" SANS date (bords, coloré par canal)
         if(r_p0_atc){
-            char ab[40];
-            if(g_status.valid&&g_status.fwv) snprintf(ab,sizeof(ab),"ATC v%d  %s",g_status.fwv,g_status.fwd);
+            char ab[24];
+            if(g_status.valid&&g_status.fws[0]) snprintf(ab,sizeof(ab),"ATC %s",g_status.fws);
+            else if(g_status.valid&&g_status.fwv) snprintf(ab,sizeof(ab),"ATC v%d",g_status.fwv);
             else strcpy(ab,"ATC --");
             lv_label_set_text(r_p0_atc,ab);
+            lv_obj_set_style_text_color(r_p0_atc, g_status.fws[0]?verColor(g_status.fws):TGREY(), 0);
         }
     }
-    // Page System (T4) : version AT-CORE live (label « AT-CORE » → valeur « vN date »)
+    // Page ABOUT (T4) : version AT-CORE live "1.2.36-dev  date", couleur par canal
     if(s_sys_atcver){
-        char ab[40];
-        if(g_status.valid&&g_status.fwv) snprintf(ab,sizeof(ab),"v%d  %s",g_status.fwv,g_status.fwd);
+        char ab[44];
+        if(g_status.valid&&g_status.fws[0]) snprintf(ab,sizeof(ab),"%s  %s",g_status.fws,g_status.fwd);
+        else if(g_status.valid&&g_status.fwv) snprintf(ab,sizeof(ab),"v%d  %s",g_status.fwv,g_status.fwd);
         else strcpy(ab,"v--");
         lv_label_set_text(s_sys_atcver,ab);
+        lv_obj_set_style_text_color(s_sys_atcver, g_status.fws[0]?verColor(g_status.fws):C_BRAND, 0);
     }
     // Annonce de MAJ firmware + état WiFi → page Maintenance (live tant qu'ouverte)
     if(g_maint_ov){ maintUpdAnnounce(); maintWifiStatus(); }
+    if(g_diag_ov) diagWifiStatus();   // page DIAGNOSTIC ouverte → état WiFi club live (Test WiFi)
     // Refresh live de la ligne diagnostique DB sur page #02 (si auth en cours)
     if(g_auth_ov && g_auth_diag){
         char dbg[48];
@@ -5889,7 +6057,11 @@ void loop(){
         pairOverlayHide();   // devenu lié (post-bind) → ferme l'overlay
     }
     if(g_rebuildPages){g_rebuildPages=false;rebuildAllPages();}
-    if(g_dataUpdated){g_dataUpdated=false;updateAllPages();}
+    // Throttle du refresh UI : le BLE met g_dataUpdated à chaque STATUS/FLIGHT/TRAFFIC (≈1 Hz
+    // chacun → plusieurs fois/s). Sans frein, la boucle passe son temps à redessiner toutes les
+    // pages → lv_timer_handler échantillonne le tactile par à-coups (boutons ratés). 120 ms = œil OK.
+    {static uint32_t s_lastUI=0;
+     if(g_dataUpdated && now-s_lastUI>=120){g_dataUpdated=false;s_lastUI=now;updateAllPages();}}
     bool alert=hasAlert();
     {static uint8_t s_prevScale=4;
      if(alert&&!g_alertForced&&!g_inDebug){
