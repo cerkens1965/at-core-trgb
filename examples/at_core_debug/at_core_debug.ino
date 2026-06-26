@@ -59,7 +59,6 @@
 // Pitch/Roll). Interprétation/seuils = dashboard après le vol. cf mémoire imu_mouchard_g_attitude.
 #if defined(BOARD_WS216) || defined(BOARD_WS241)
 #define HAS_IMU 1
-#define IMU_BLE_PUSH 0   // 0 = push BLE désactivé (isolation : la write Bluedroid figeait le radar). 1 = ré-activé.
 #include <SensorQMI8658.hpp>
 #ifdef BOARD_WS241
 #define IMU_SDA 47
@@ -129,7 +128,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "59"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v59 : ISOLATION push IMU BLE désactivé (IMU_BLE_PUSH 0) — la write Bluedroid bloquait la boucle ~1-2 s sous charge trafic (mesuré : [IMU] 1 Hz avec trous de 2 s) → radar figé / trafic lent. Test : radar doit être fluide. Mouchard à re-câbler en non-bloquant. v58 : imuTick allégé (insuffisant). v57 : fix clobber identité bind. */
+#define VIEW_VERSION  "60"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v60 : mouchard RÉ-ACTIVÉ proprement — push IMU dans une TÂCHE FreeRTOS dédiée (core 0, prio basse) : la write Bluedroid bloquante n'affame plus la boucle/radar (core 1). imuTick (boucle) snapshot 1 Hz → tâche écrit. v59 : push désactivé (isolation, radar OK). v58 : allègement (insuffisant). */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -6187,6 +6186,10 @@ static float g_d0[3]={0,0,1}, g_fwd0[3]={1,0,0}, g_right0[3]={0,1,0};
 static volatile float g_imu_nz=1.0f, g_imu_lat=0, g_imu_lon=0, g_imu_pitch=0, g_imu_roll=0;
 // Peak-hold entre 2 pushes (capte les pics G entre deux lignes CSV 4 Hz).
 static float g_imu_nz_max=1.0f, g_imu_nz_min=1.0f, g_imu_lat_pk=0, g_imu_gyr_pk=0;
+// Snapshot 1 Hz vers la TÂCHE de push BLE (la write Bluedroid bloque ~1-2 s sous charge trafic :
+// on la sort de la boucle → elle bloque la tâche, JAMAIS le radar). cf mémoire imu_mouchard.
+static volatile float g_imu_tx_nz=1, g_imu_tx_lat=0, g_imu_tx_pitch=0, g_imu_tx_roll=0;
+static volatile bool  g_imu_tx_ready=false;
 
 static inline float v3dot(const float*a,const float*b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];}
 static inline void  v3cross(const float*a,const float*b,float*o){
@@ -6246,23 +6249,32 @@ static void imuTick(){
     // pics G entre 2 lignes CSV), pitch/roll = instantané. Reset du peak-hold après envoi.
     static uint32_t pushT=0;
     if(now-pushT>=1000){pushT=now;
-        // ISOLATION (v59) : push BLE DÉSACTIVÉ — la write Bluedroid bloquait la boucle ~1-2 s
-        // sous charge trafic → radar figé. On garde l'échantillonnage + peak-hold local pour
-        // mesurer la cadence boucle ([IMU] log). À ré-activer via un mécanisme non bloquant.
-        #if IMU_BLE_PUSH
-        if(g_connected && g_chrImu && g_chrImu->canWrite()){
-            float nzx=(fabsf(g_imu_nz_max-1.f)>=fabsf(g_imu_nz_min-1.f))?g_imu_nz_max:g_imu_nz_min;
-            char p[80];
-            int k=snprintf(p,sizeof(p),"{\"nz\":%.2f,\"lat\":%.2f,\"p\":%.1f,\"r\":%.1f}",
-                           nzx,g_imu_lat_pk,pitch,roll);
-            if(k>0) g_chrImu->writeValue((uint8_t*)p,k,false);
-        }
-        #endif
+        // Snapshot 1 Hz pour la tâche de push (PAS de write BLE ici → boucle/radar jamais bloqués).
+        // nz/lat = extrême peak-hold de l'intervalle (pics G captés), pitch/roll = instantané.
+        float nzx=(fabsf(g_imu_nz_max-1.f)>=fabsf(g_imu_nz_min-1.f))?g_imu_nz_max:g_imu_nz_min;
+        g_imu_tx_nz=nzx; g_imu_tx_lat=g_imu_lat_pk; g_imu_tx_pitch=pitch; g_imu_tx_roll=roll;
+        g_imu_tx_ready=true;
         g_imu_nz_max=g_imu_nz_min=nz; g_imu_lat_pk=0; g_imu_gyr_pk=0;   // ré-arme l'intervalle
     }
     static uint32_t logT=0; if(now-logT>1000){logT=now;
         Serial.printf("[IMU] nz=%.2f lat=%.2f pitch=%.0f roll=%.0f%s\n",
             nz,lat,pitch,roll,(g_connected&&g_chrImu)?" >ATC":"");}
+}
+
+// Tâche dédiée du push IMU BLE — la write Bluedroid peut bloquer ~1-2 s sous charge trafic ;
+// isolée ici, elle ne bloque QUE cette tâche (prio basse, core 0), jamais la boucle/radar (core 1).
+// Lit les globals snapshotés par imuTick (boucle). Aucune I2C/LVGL ici → pas de conflit ressource.
+static void TaskImuPush(void* pv){
+    char p[80];
+    for(;;){
+        if(g_imu_tx_ready && g_connected && g_chrImu && g_chrImu->canWrite()){
+            g_imu_tx_ready=false;
+            int k=snprintf(p,sizeof(p),"{\"nz\":%.2f,\"lat\":%.2f,\"p\":%.1f,\"r\":%.1f}",
+                           g_imu_tx_nz,g_imu_tx_lat,g_imu_tx_pitch,g_imu_tx_roll);
+            if(k>0) g_chrImu->writeValue((uint8_t*)p,k,false);   // peut bloquer → bloque CETTE tâche
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 }
 #endif // HAS_IMU
 
@@ -6309,6 +6321,9 @@ void setup(){
     }else{Serial.println("[SD] No card");}
 #ifdef HAS_IMU
     imuInit();   // QMI8658 sur le bus I2C déjà ouvert par panel.begin()
+    // Push IMU dans une tâche dédiée (core 0, prio basse) → la write BLE bloquante n'affame
+    // jamais la boucle/radar (core 1). cf TaskImuPush + mémoire imu_mouchard.
+    if(g_imu_ok) xTaskCreatePinnedToCore(TaskImuPush,"imupush",4096,nullptr,1,nullptr,0);
 #endif
 #if defined(BOARD_T4S3) && !defined(PANEL_WS241)
     // (juin 2026) RÉACTIVITÉ TACTILE — cause racine : beginLvglHelper (non-DMA) alloue un
