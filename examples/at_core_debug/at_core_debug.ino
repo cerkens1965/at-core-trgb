@@ -128,7 +128,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "60"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v60 : mouchard RÉ-ACTIVÉ proprement — push IMU dans une TÂCHE FreeRTOS dédiée (core 0, prio basse) : la write Bluedroid bloquante n'affame plus la boucle/radar (core 1). imuTick (boucle) snapshot 1 Hz → tâche écrit. v59 : push désactivé (isolation, radar OK). v58 : allègement (insuffisant). */
+#define VIEW_VERSION  "61"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v61 : AIP 2b/2c — pull AIP depuis le boîtier (CHR_AIP) dans TaskAipPull (tâche dédiée, lectures BLE hors boucle/radar) → PSRAM → parsers buffer → aipLoadFromBuffer → rendu. Armé à la connexion si CHR_AIP présent & !g_aip_loaded (WS241 sans SD ; boards à SD gardent leur AIP SD). v60 : mouchard tâche non bloquante. */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -193,6 +193,7 @@ static inline void panelBright(uint8_t v){ panel.setBrightness(v); }
 #define BLE_CHR_FLIGHTS "6E40000B-B5A3-F393-E0A9-E50E24DCCA9E"  // read  : liste vols SD (WP8)
 #define BLE_CHR_WIFICRED "6E40000C-B5A3-F393-E0A9-E50E24DCCA9E" // read  : creds WiFi club {s,p} hérités du boîtier (brique 0)
 #define BLE_CHR_IMU     "6E40000D-B5A3-F393-E0A9-E50E24DCCA9E"  // write : mouchard G/assiette (IMU écran) → CSV boîtier
+#define BLE_CHR_AIP     "6E40000E-B5A3-F393-E0A9-E50E24DCCA9E"  // read  : transfert AIP EU (flash boîtier S3) → RAM écran, chunké (A1)
 // ── Bypass auth pilote (temporaire) ───────────────────────────────────────────
 // 1 = on saute la page #02 "Select your name" / #03 welcome : dès que la machine
 // est appairée (BLE) + GPS fix, on file direct au radar. L'appairage machine
@@ -231,6 +232,7 @@ struct StatusData {
     uint8_t upload_pct;  // 0..100 (tâche D)
     uint8_t flt_rdy;     // WP8 : 1=liste vols prête à lire (CHR_FLIGHTS)
     uint8_t flt_st;      // cycle de vol : 0=sol (pas démarré) 1=en vol 2=arrêt imminent
+    uint32_t aip_xfer_len; // (A1) longueur du flux AIP prêt côté boîtier (STATUS "axl", 0=pas prêt)
     uint8_t wst;         // WiFi : 0 idle 1 connexion 2 OK 3 SSID absent 4 échec
     char    wip[16];     // dernière IP WiFi (proof de connexion)
     char    wssid[33];   // SSID hotspot enregistré côté boîtier (STATUS "wss") = dernier validé/en mémoire
@@ -321,7 +323,8 @@ static BLERemoteCharacteristic *g_chrS=nullptr,*g_chrF=nullptr,
                                 *g_chrCtl=nullptr, // CONTROL write (6E40000A) — binding bind/unpair
                                 *g_chrFl=nullptr,  // FLIGHTS read (6E40000B) — liste vols SD (WP8)
                                 *g_chrWc=nullptr,  // WIFICRED read (6E40000C) — creds WiFi club hérités (brique 0)
-                                *g_chrImu=nullptr; // IMU write (6E40000D) — mouchard G/assiette → CSV boîtier
+                                *g_chrImu=nullptr, // IMU write (6E40000D) — mouchard G/assiette → CSV boîtier
+                                *g_chrAip=nullptr; // AIP read (6E40000E) — transfert AIP EU boîtier S3 → RAM écran
 // Pilot list BLE reassembly buffer
 static char    g_prx_buf[4096] = {};
 static int     g_prx_len       = 0;
@@ -654,6 +657,7 @@ struct AipAd { char icao[5]; int32_t lat_e6,lon_e6; uint8_t type_id; };
 static AipAd*      g_aip_ads    = nullptr;   // ps_malloc
 static uint16_t    g_aip_ad_cnt = 0;
 static bool        g_aip_loaded = false;
+static volatile bool g_aip_pull_req = false;   // (A1) armé à la connexion si le boîtier a CHR_AIP et qu'on n'a pas d'AIP → TaskAipPull
 static lv_obj_t*   r_aip_layer  = nullptr;
 static lv_obj_t*   s_aip_v      = nullptr;
 static lv_obj_t*   s_heli_v     = nullptr;
@@ -801,6 +805,7 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.flarm_ok=d["flarm"]|false;g_status.adsb_ok=d["adsb"]|false;
     g_status.charging=d["chg"]|false;
     g_status.flt_phase=d["flt_ph"]|0;g_status.upload_pct=d["up_pct"]|0;g_status.flt_rdy=d["flt_rdy"]|0;g_status.flt_st=d["flt_st"]|0;
+    g_status.aip_xfer_len=d["axl"]|0u;   // (A1) longueur du flux AIP prêt (handshake pull)
     g_status.wst=d["wst"]|0; strlcpy(g_status.wip,d["wip"]|"",sizeof(g_status.wip));
     strlcpy(g_status.wssid,d["wss"]|"",sizeof(g_status.wssid));   // SSID hotspot enregistré (boîtier)
     g_status.ota=d["ota"]|0; g_status.opct=d["opct"]|0;
@@ -952,7 +957,7 @@ bool connectBLE(){
     // fenêtre de connexion voit g_chrCtl=null → sendCtl no-op sûr), puis découverte propre.
     if(g_client){ delete g_client; g_client=nullptr; }   // destructeur libère le cache services ; gattc_if déjà désenregistré à la déconnexion
     g_svc=nullptr;
-    g_chrS=g_chrF=g_chrT=g_chrA=g_chrD=g_chrW=g_chrP=g_chrCfg=g_chrCtl=g_chrFl=g_chrWc=g_chrImu=nullptr;
+    g_chrS=g_chrF=g_chrT=g_chrA=g_chrD=g_chrW=g_chrP=g_chrCfg=g_chrCtl=g_chrFl=g_chrWc=g_chrImu=g_chrAip=nullptr;
     static ATCCB s_cb;   // instance unique (l'ancien new ATCCB() fuyait à chaque reconnexion)
     g_client=BLEDevice::createClient(); g_client->setClientCallbacks(&s_cb);
     if(!g_client->connect(g_target))return false;
@@ -977,6 +982,7 @@ bool connectBLE(){
     g_chrFl =g_svc->getCharacteristic(BLE_CHR_FLIGHTS);
     g_chrWc =g_svc->getCharacteristic(BLE_CHR_WIFICRED);
     g_chrImu=g_svc->getCharacteristic(BLE_CHR_IMU);   // mouchard G/assiette (peut être absent si boîtier < CHR_IMU)
+    g_chrAip=g_svc->getCharacteristic(BLE_CHR_AIP);   // transfert AIP (absent si boîtier non-S3 / sans AIP)
     if(g_chrS&&g_chrS->canNotify())g_chrS->registerForNotify(notifyS);
     if(g_chrF&&g_chrF->canNotify())g_chrF->registerForNotify(notifyF);
     if(g_chrT&&g_chrT->canNotify())g_chrT->registerForNotify(notifyT);
@@ -1012,6 +1018,9 @@ bool connectBLE(){
         }
     }
     sendVfilt(g_cfg.vfilt_ft);   // (CONFIG) sync le VF= SafeSky du boîtier sur la valeur écran
+    // (A1) AIP : si le boîtier expose CHR_AIP (S3 avec AIP embarquée) ET qu'on n'a pas déjà
+    // d'AIP (pas de SD chargée → WS241), on arme le pull (TaskAipPull, hors boucle → radar ok).
+    if(g_chrAip && !g_aip_loaded) g_aip_pull_req=true;
     return true;}
 // (juin 2026) SCAN BLE ASYNCHRONE — cause racine du tactile « lent/fastidieux » :
 // l'ancien `s->start(5,false)` BLOQUAIT la boucle 5 s (mesuré loopMax=5007ms) → tous
@@ -2713,6 +2722,79 @@ void aipLoad(){
     dir.close();
     g_aip_loaded=(g_aip_ctr_cnt>0||g_aip_ad_cnt>0);
     Serial.printf("[AIP] %d CTR/ATZ (%d pts), %d aerodromes\n",g_aip_ctr_cnt,g_aip_pts_cnt,g_aip_ad_cnt);}
+
+// ── AIP depuis RAM (A1) : transfert BLE boîtier→écran ─────────────────────────
+// Parsers buffer (mêmes formats que les versions File : CTR "CTR\0", aérodromes "ADP2").
+// memcpy pour les int32 (buffer byte-packé → potentiellement non aligné).
+static void _aipLoadCtrBuf(const uint8_t* p,uint32_t len){
+    if(len<6||memcmp(p,"CTR\0",4)!=0)return;
+    uint32_t o=4; uint16_t cnt; memcpy(&cnt,p+o,2); o+=2;
+    for(int i=0;i<cnt&&g_aip_ctr_cnt<AIP_MAX_CTR&&o<len;i++){
+        uint8_t nlen=p[o++]; o+=nlen;                 // skip nom
+        uint8_t tid=p[o++];
+        uint16_t npts; memcpy(&npts,p+o,2); o+=2;
+        if(g_aip_pts_cnt+npts>AIP_MAX_PTS){o+=(uint32_t)npts*8;continue;}
+        g_aip_ctr[g_aip_ctr_cnt]={g_aip_pts_cnt,npts,tid}; g_aip_ctr_cnt++;
+        for(int j=0;j<npts;j++){
+            int32_t la,lo; memcpy(&la,p+o,4);o+=4; memcpy(&lo,p+o,4);o+=4;
+            g_aip_lat[g_aip_pts_cnt]=la; g_aip_lon[g_aip_pts_cnt]=lo; g_aip_pts_cnt++;}}}
+static void _aipLoadAdBuf(const uint8_t* p,uint32_t len){
+    if(len<6||memcmp(p,"ADP2",4)!=0)return;
+    uint32_t o=4; uint16_t cnt; memcpy(&cnt,p+o,2); o+=2;
+    for(int i=0;i<cnt&&g_aip_ad_cnt<AIP_MAX_AD&&o+13<=len;i++){
+        memcpy(g_aip_ads[g_aip_ad_cnt].icao,p+o,4); g_aip_ads[g_aip_ad_cnt].icao[4]=0; o+=4;
+        int32_t la,lo; memcpy(&la,p+o,4);o+=4; memcpy(&lo,p+o,4);o+=4;
+        uint8_t tid=p[o++];
+        g_aip_ads[g_aip_ad_cnt].lat_e6=la; g_aip_ads[g_aip_ad_cnt].lon_e6=lo; g_aip_ads[g_aip_ad_cnt].type_id=tid;
+        g_aip_ad_cnt++;}}
+// Parse le flux concaténé [uint16 nfiles] + ([u8 kind 0=ctr/1=aero][u32 len][len o])×n.
+static bool aipLoadFromBuffer(const uint8_t* buf,uint32_t total){
+    if(!g_aip_lat){g_aip_lat=(int32_t*)ps_malloc(AIP_MAX_PTS*sizeof(int32_t));
+                   g_aip_lon=(int32_t*)ps_malloc(AIP_MAX_PTS*sizeof(int32_t));
+                   g_aip_ads=(AipAd*)ps_malloc(AIP_MAX_AD*sizeof(AipAd));}
+    if(!g_aip_lat||!g_aip_lon||!g_aip_ads){Serial.println("[AIP] PSRAM alloc failed");return false;}
+    g_aip_ctr_cnt=0;g_aip_pts_cnt=0;g_aip_ad_cnt=0;
+    if(total<2)return false;
+    uint32_t o=0; uint16_t nfiles; memcpy(&nfiles,buf+o,2); o+=2;
+    for(int i=0;i<nfiles&&o+5<=total;i++){
+        uint8_t kind=buf[o++]; uint32_t L; memcpy(&L,buf+o,4); o+=4;
+        if(o+L>total)break;
+        if(kind==0)_aipLoadCtrBuf(buf+o,L); else if(kind==1)_aipLoadAdBuf(buf+o,L);
+        o+=L;}
+    return (g_aip_ctr_cnt>0||g_aip_ad_cnt>0);}
+
+// Tâche dédiée du pull AIP (les ~340 lectures BLE bloquantes → cette tâche, JAMAIS la boucle/radar).
+// Handshake : {"cmd":"aip"} → attend STATUS axl>0 → lit CHR_AIP en boucle (curseur boîtier) → PSRAM
+// → aipLoadFromBuffer. g_aip_loaded gate le rendu (false pendant le parse).
+static void TaskAipPull(void* pv){
+    for(;;){
+        if(g_aip_pull_req && g_connected && g_chrAip){
+            g_aip_pull_req=false;
+            sendCtl("aip");                                  // demande au boîtier de bâtir le flux
+            uint32_t total=0,t0=millis();
+            while(millis()-t0<8000 && g_connected){ if(g_status.aip_xfer_len>0){total=g_status.aip_xfer_len;break;} vTaskDelay(pdMS_TO_TICKS(150)); }
+            if(total && g_connected && g_chrAip){
+                uint8_t* buf=(uint8_t*)ps_malloc(total);
+                if(buf){
+                    uint32_t got=0; int fails=0;
+                    while(got<total && g_connected && g_chrAip && fails<6){
+                        std::string v=bleStr(g_chrAip->readValue());
+                        if(v.empty()){fails++; vTaskDelay(pdMS_TO_TICKS(20)); continue;}
+                        uint32_t n=v.size(); if(got+n>total)n=total-got;
+                        memcpy(buf+got,v.data(),n); got+=n; fails=0;}
+                    if(got>=total){
+                        g_aip_loaded=false;                  // gate le rendu pendant le parse
+                        bool ok=aipLoadFromBuffer(buf,total);
+                        g_aip_loaded=ok;
+                        Serial.printf("[AIP] pull %u o → %d CTR / %d AD (%s)\n",total,g_aip_ctr_cnt,g_aip_ad_cnt,ok?"OK":"vide");
+                    }else Serial.printf("[AIP] pull incomplet %u/%u\n",got,total);
+                    free(buf);
+                }else Serial.println("[AIP] PSRAM transfert alloc FAIL");
+            }else Serial.println("[AIP] pull: pas de axl (boîtier sans AIP?)");
+        }
+        vTaskDelay(pdMS_TO_TICKS(300));
+    }
+}
 
 // ── AIP overlay draw ──────────────────────────────────────────────────────────
 static inline bool latlon_to_screen(int32_t lat_e6,int32_t lon_e6,
@@ -6325,6 +6407,9 @@ void setup(){
     // jamais la boucle/radar (core 1). cf TaskImuPush + mémoire imu_mouchard.
     if(g_imu_ok) xTaskCreatePinnedToCore(TaskImuPush,"imupush",4096,nullptr,1,nullptr,0);
 #endif
+    // (A1) Pull AIP dans une tâche dédiée (core 0, prio basse) : les lectures BLE bloquantes
+    // n'affament jamais la boucle/radar (core 1). Idle tant que g_aip_pull_req non armé.
+    xTaskCreatePinnedToCore(TaskAipPull,"aippull",6144,nullptr,1,nullptr,0);
 #if defined(BOARD_T4S3) && !defined(PANEL_WS241)
     // (juin 2026) RÉACTIVITÉ TACTILE — cause racine : beginLvglHelper (non-DMA) alloue un
     // buffer PLEIN ÉCRAN de ~540 KB en PSRAM (lente) + flush SYNCHRONE bloquant (pushColors)
