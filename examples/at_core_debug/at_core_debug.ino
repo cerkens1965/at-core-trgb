@@ -98,7 +98,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "44"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v44 : override MODE ALERTE 3-états (AUTO/CIRC/RTE) — Settings TRAFFIC + chip toggle rapide sur le radar (cycle au tap, couleur=état effectif), persistant NVS. v43 : moteur alerte anticollision. */
+#define VIEW_VERSION  "45"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v45 : T-RGB — ALERT MODE override (AUTO/CIRC/RTE) ajouté dans l'onglet TRAFFIC (alignement fonctionnel sur le T4 ; port UI rond complet = session dédiée). v44 : override + chip radar (T4). */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -566,6 +566,7 @@ static lv_obj_t* g_ac_search_disp = nullptr;
 
 // ── Widget refs — Settings (page 2) ───────────────────────────────────────────
 static lv_obj_t *s_scale_v,*s_vfilt_v,*s_dist_v,*s_alt_v,*s_spd_v,*s_bright_v,*s_src_v,*s_theme_v,*s_grnd_v,*s_icon_sz_v;
+static lv_obj_t *s_circ_v=nullptr;   // (T-RGB) valeur ALERT MODE (AUTO/CIRC/RTE) dans l'onglet TRAFFIC
 static lv_obj_t *s_ac_v,*s_wifi_v,*s_sd_v;
 #define S_NPG 3                        // sous-pages Settings : Radar / Traffic / System
 static lv_obj_t *s_pg[S_NPG] = {};
@@ -3195,6 +3196,7 @@ void updSetPage(){
     updSegs(); updSegNs();   // refresh des segmented (toggles + multi-options)
 #endif
     if(s_icon_sz_v)lv_label_set_text(s_icon_sz_v,kIconSzNames[g_cfg.icon_sz]);
+    if(s_circ_v)lv_label_set_text(s_circ_v,kCircNames[g_cfg.circuit_ovr]);
     if(s_wifi_v)lv_label_set_text(s_wifi_v,g_wifi_active?"192.168.4.1":g_cfg.wifi_en?"ON":"OFF");
     if(s_aip_v)lv_label_set_text(s_aip_v,!g_aip_loaded?"NO DATA":g_cfg.aip_en?"ON":"OFF");
     if(s_heli_v)lv_label_set_text(s_heli_v,g_cfg.ad_heli?"ON":"OFF");
@@ -3226,6 +3228,8 @@ static void cbSetBtn(lv_event_t*e){
         case 22:case 23:g_cfg.ad_heli=!g_cfg.ad_heli;
             if(r_aip_layer)lv_obj_invalidate(r_aip_layer);break;
         case 24:case 25:g_cfg.spd_kt=!g_cfg.spd_kt;break;  // tâche F : unité vitesse
+        case 26:g_cfg.circuit_ovr=(g_cfg.circuit_ovr+2)%3;break;  // ALERT MODE prev (AUTO/CIRC/RTE)
+        case 27:g_cfg.circuit_ovr=(g_cfg.circuit_ovr+1)%3;break;  // ALERT MODE next
     }
     cfgSave();
     if(!g_rebuildPages)updSetPage();}
@@ -4941,7 +4945,8 @@ void buildSettingsPage(){
     s_icon_sz_v=mkSetRow(sp,"ICONS SIZE",88,kIconSzNames[g_cfg.icon_sz],16,17);
     {const char*aip_v=!g_aip_loaded?"NO DATA":g_cfg.aip_en?"ON":"OFF";
     s_aip_v=mkSetRow(sp,"AIP",114,aip_v,20,21);}
-    s_heli_v=mkSetRow(sp,"HELIPORT",140,g_cfg.ad_heli?"ON":"OFF",22,23);}
+    s_heli_v=mkSetRow(sp,"HELIPORT",140,g_cfg.ad_heli?"ON":"OFF",22,23);
+    s_circ_v=mkSetRow(sp,"ALERT MODE",166,kCircNames[g_cfg.circuit_ovr],26,27);}  // override anticollision (AUTO/CIRC/RTE)
 #endif
 
     // ── Sub-page 2: SYSTEM (+ ABOUT : versions & batteries, live BLE) ─────────
