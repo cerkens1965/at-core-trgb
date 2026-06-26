@@ -98,7 +98,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "42"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v42 : page UPDATES ligne AT-CORE "up to date" affiche la version lisible (fws "1.2.39-dev", couleur canal) au lieu du build entier. v41 : accueil + throttle tactile. */
+#define VIEW_VERSION  "44"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v44 : override MODE ALERTE 3-états (AUTO/CIRC/RTE) — Settings TRAFFIC + chip toggle rapide sur le radar (cycle au tap, couleur=état effectif), persistant NVS. v43 : moteur alerte anticollision. */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -214,9 +214,10 @@ struct DebugData    {
 static const uint8_t kScaleOpts[]={1,2,4,8,10,20,40};
 static const char*   kSrcNames[] ={"SSKY","FLRM","ADSB","ALL"};
 static const char*   kIconSzNames[]={"S","M","L"};
+static const char*   kCircNames[]  ={"AUTO","CIRC","RTE"};   // override mode alerte (0 auto / 1 circuit / 2 route)
 static const uint16_t kIconZoom[]={320,384,448};  // zoom for 60/72/84 px from 48px base (L=84px = 1.5× — visibilité vol 2026-06-08)
 static const int8_t  kIconHalf[]={30,36,42};
-struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd,wifi_en,aip_en,ad_heli,spd_kt; int16_t vfilt_ft; uint8_t icon_sz; bool show_cs,show_vdiff; };
+struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd,wifi_en,aip_en,ad_heli,spd_kt; int16_t vfilt_ft; uint8_t icon_sz; bool show_cs,show_vdiff; uint8_t circuit_ovr; };  // circuit_ovr : 0=AUTO 1=CIRCUIT(forcé) 2=ROUTE(forcé) — override alerte (en fin de struct → init agrégat inchangé, défaut 0)
 // NB : l'init historique {…,false,2000,2} décalait les champs (le 2000 tombait sur le
 // bool spd_kt → true, vfilt_ft recevait 2, icon_sz défaut 0). Core 3.x refuse le narrowing
 // 2000→bool ; on fige ici EXACTEMENT les valeurs que core 2.x calculait (spd_kt=true,
@@ -419,6 +420,7 @@ static lv_obj_t *r_trf_img[MAX_TRF],*r_trf_vect[MAX_TRF];
 static lv_point_t r_vect_pts[MAX_TRF][2];
 static int r_trf_last_type[MAX_TRF];
 static lv_obj_t *r_alert_overlay, *r_aov_text;
+static lv_obj_t *r_circ_lbl=nullptr;   // chip "AUTO/CIRC/RTE" sur le radar (override mode alerte, tap = cycle)
 // Jauge CO : capteur pas câblé → UI compilée out (remettre 1 au montage du capteur).
 #define UI_CO_EN 0
 static lv_obj_t *r_co_val, *r_co_ball, *r_co_text;
@@ -1060,6 +1062,7 @@ void cfgLoad(){
     g_cfg.ad_heli   =g_prefs.getBool("ad_heli",false);
     g_cfg.vfilt_ft  =g_prefs.getShort("vfilt",2000);
     g_cfg.icon_sz   =g_prefs.getUChar("icon_sz",2);
+    g_cfg.circuit_ovr=g_prefs.getUChar("circ_ovr",0);   // 0=AUTO 1=CIRCUIT 2=ROUTE
     g_cfg.spd_kt    =g_prefs.getBool("spd_kt",true);    // toujours kt (toggle retiré) — défaut conservé
     g_cfg.dist_nm   =true;                              // (CONFIG) distance radar toujours NM (toggle retiré)
     g_cfg.show_cs   =g_prefs.getBool("show_cs",true);   // decluttering : afficher le callsign
@@ -1080,6 +1083,7 @@ void cfgSave(){
     g_prefs.putBool("ad_heli",g_cfg.ad_heli);
     g_prefs.putShort("vfilt",g_cfg.vfilt_ft);
     g_prefs.putUChar("icon_sz",g_cfg.icon_sz);
+    g_prefs.putUChar("circ_ovr",g_cfg.circuit_ovr);
     g_prefs.putBool("spd_kt",g_cfg.spd_kt);
     g_prefs.putBool("show_cs",g_cfg.show_cs);
     g_prefs.putBool("show_vdiff",g_cfg.show_vdiff);
@@ -3155,6 +3159,18 @@ void buildRadarPage(){
      lv_obj_t* gl=lv_label_create(gear);lv_label_set_text(gl,LV_SYMBOL_SETTINGS);
      lv_obj_set_style_text_color(gl,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(gl,&lv_font_montserrat_28,0);lv_obj_center(gl);}
+
+    // Toggle rapide MODE ALERTE (au-dessus de l'engrenage) : tap = cycle AUTO→CIRC→RTE.
+    // Couleur = état effectif (refresh dans updateRadarDR). Usage opérationnel (bascule en vol).
+    {lv_obj_t* cc=lv_btn_create(p);
+     lv_obj_set_size(cc,64,36);lv_obj_set_pos(cc,12,450-64-12-44);
+     lv_obj_set_style_radius(cc,8,0);
+     lv_obj_set_style_bg_color(cc,lv_color_hex(0x1f2937),0);lv_obj_set_style_bg_opa(cc,LV_OPA_COVER,0);
+     lv_obj_set_style_border_width(cc,0,0);lv_obj_set_style_shadow_opa(cc,LV_OPA_TRANSP,0);
+     lv_obj_set_ext_click_area(cc,8);
+     lv_obj_add_event_cb(cc,[](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED){ g_cfg.circuit_ovr=(g_cfg.circuit_ovr+1)%3; cfgSave(); } },LV_EVENT_CLICKED,NULL);
+     r_circ_lbl=lv_label_create(cc);lv_label_set_text(r_circ_lbl,kCircNames[g_cfg.circuit_ovr]);
+     lv_obj_set_style_text_font(r_circ_lbl,&lv_font_montserrat_16,0);lv_obj_center(r_circ_lbl);}
 #endif
 }
 
@@ -4767,12 +4783,13 @@ void buildSettingsPageT4(lv_obj_t*p){
      mkBigBrightRow(sp,"BRIGHTNESS",Y0+0*DY,g_cfg.brightness);
      mkSegRow(sp,"THEME",Y0+1*DY,"LIGHT","DARK",&g_cfg.dark,false);}
 
-    // 2) TRAFFIC : GROUNDED · ICONS · AIP · HELIPORT  (SOURCE retiré : trafic toujours SafeSky)
-    {lv_obj_t*sp=s_sec[2]; const int Y0=8,DY=72;
+    // 2) TRAFFIC : GROUNDED · ICONS · AIP · HELIPORT · ALERT MODE (override circuit)
+    {lv_obj_t*sp=s_sec[2]; const int Y0=8,DY=66;
      mkSegRow (sp,"GROUNDED",Y0+0*DY,"OFF","ON",&g_cfg.show_grnd,false);
      mkSegRowN(sp,"ICONS",Y0+1*DY,kIconSzNames,3,&g_cfg.icon_sz,1);
      mkSegRow (sp,"AIP",Y0+2*DY,"OFF","ON",&g_cfg.aip_en,false);
-     mkSegRow (sp,"HELIPORT",Y0+3*DY,"OFF","ON",&g_cfg.ad_heli,false);}
+     mkSegRow (sp,"HELIPORT",Y0+3*DY,"OFF","ON",&g_cfg.ad_heli,false);
+     mkSegRowN(sp,"ALERT MODE",Y0+4*DY,kCircNames,3,&g_cfg.circuit_ovr,0);}  // AUTO / CIRCUIT forcé / ROUTE forcé
 
     // 3) PILOT : réservé (réactivé plus tard). L'identité aéronef se configure désormais
     //    via le portail web (champ "Active Aircraft" affiché à droite du menu) → page AIRCRAFT retirée.
@@ -5032,7 +5049,93 @@ void createSwipeHandlers(){
 // Traffic e.spd_kt = knots (AT-CORE clé "s"). Own g_status.spd = km/h (AT-CORE
 // clé "spd" = kt*1.852). Donc conversions différentes : own /3.6, trafic *0.5144.
 // Capped at 10s to avoid runaway extrapolation on BLE dropout.
+// ── Moteur d'alerte anticollision (écran) — CPA + bulle proximité, circuit-aware ──
+// Modèle TCAS : seuil TEMPS (tCPA = time-to-closest-approach) + DMOD (bulle de proximité).
+// Tout gaté par l'écart vertical |Δalt|. En circuit (auto-détecté) : rouge-only + bulle 0,3 nm
+// (l'espacement normal du tour de piste <1 nm sinon = alarme permanente). Sort un payload
+// {level,clock,dist,Δalt,closing} prêt pour l'audio casque futur.
+enum { THREAT_NONE=0, THREAT_ORANGE=1, THREAT_RED=2 };
+struct ThreatInfo { uint8_t level; int clock; int dist_m; int dalt_ft; int closing_kt; bool valid; char cs[9]; };
+static ThreatInfo g_threat = {};
+static uint8_t    g_trf_threat[MAX_TRF] = {};   // niveau par cible (couleur icône radar), index aligné g_traffic.t
+static bool       g_circuit_mode = false;
+static float      g_field_elev_m = -99999.0f;   // élévation terrain (capture sol) pour l'AGL
+
+// Distance horizontale (nm) à l'aérodrome AIP le plus proche (near-field gate du mode circuit).
+static float aipNearestAdNm(){
+    if(!g_aip_ads || g_aip_ad_cnt==0 || !g_status.gps_fix) return 9999.0f;
+    float best=9999.0f, lat=g_status.lat, lon=g_status.lon, cl=cosf(lat*(float)M_PI/180.0f);
+    for(int i=0;i<g_aip_ad_cnt;i++){
+        float dlat=(g_aip_ads[i].lat_e6/1e6f-lat)*60.0f;
+        float dlon=(g_aip_ads[i].lon_e6/1e6f-lon)*60.0f*cl;
+        float d=sqrtf(dlat*dlat+dlon*dlon);
+        if(d<best)best=d;
+    }
+    return best;
+}
+
+void alertEngineTick(){
+    g_threat = {};
+    for(int i=0;i<MAX_TRF;i++) g_trf_threat[i]=THREAT_NONE;
+    if(!g_status.valid || !g_status.gps_fix) return;
+
+    float ownGS_kt = g_status.spd/1.852f;            // km/h → kt
+    if(ownGS_kt < 5.0f) g_field_elev_m = g_status.alt;   // capture élévation terrain au sol (suit le terrain courant)
+
+    float agl_ft = (g_field_elev_m>-90000.0f) ? ((float)g_status.alt - g_field_elev_m)*3.28084f : 99999.0f;
+    bool autoDet = aipNearestAdNm() < 5.0f && agl_ft < 1500.0f && ownGS_kt > 40.0f && ownGS_kt < 160.0f;
+    // Override manuel (Settings/radar) : 1=CIRCUIT forcé · 2=ROUTE forcé · 0=AUTO (auto-détection)
+    g_circuit_mode = (g_cfg.circuit_ovr==1) ? true : (g_cfg.circuit_ovr==2) ? false : autoDet;
+    bool circ = g_circuit_mode;
+
+    const float NM = 1852.0f;
+    float vOrg=500.0f,        vRed=circ?300.0f:400.0f;          // gate vertical (ft)
+    float tOrg=60.0f,         tRed=circ?25.0f:30.0f;            // tCPA (s)
+    float dOrg=1.0f*NM,       dRed=circ?0.3f*NM:0.5f*NM;        // dCPA miss (m)
+    float bOrg=1.0f*NM,       bRed=circ?0.3f*NM:0.5f*NM;        // bulle proximité (m)
+
+    float ot=g_status.hdg*(float)M_PI/180.0f, ogs=g_status.spd/3.6f;   // own m/s
+    float ovx=ogs*sinf(ot), ovy=ogs*cosf(ot);
+
+    for(int i=0;i<g_traffic.count && i<MAX_TRF;i++){
+        TrafficEntry&e=g_traffic.t[i];
+        if(!e.visible) continue;
+        float dalt=fabsf((float)e.alt_m*100.0f);                // |Δalt| ft (alt_m = centaines de ft)
+        float br=e.bear_deg*(float)M_PI/180.0f;
+        float Rx=e.dist_m*sinf(br), Ry=e.dist_m*cosf(br);       // position relative (m, est/nord)
+        float tt=e.hdg_deg*(float)M_PI/180.0f, tgs=e.spd_kt*0.514444f;
+        float vrx=tgs*sinf(tt)-ovx, vry=tgs*cosf(tt)-ovy;       // vitesse relative
+        float vr2=vrx*vrx+vry*vry;
+        float tcpa=(vr2>0.05f)?-(Rx*vrx+Ry*vry)/vr2:-1.0f;      // <=0 → s'éloigne/parallèle
+        float dcpa=e.dist_m;
+        if(tcpa>0){ float cx=Rx+vrx*tcpa, cy=Ry+vry*tcpa; dcpa=sqrtf(cx*cx+cy*cy); }
+        int closing=(int)(sqrtf(vr2)/0.514444f);                // kt
+
+        uint8_t lvl=THREAT_NONE;
+        if(!circ && dalt<=vOrg && tcpa>0 && tcpa<=tOrg && dcpa<=dOrg) lvl=THREAT_ORANGE;     // règle TEMPS
+        if(dalt<=vRed && tcpa>0 && tcpa<=tRed && dcpa<=dRed)          lvl=THREAT_RED;
+        if(!circ && dalt<=vOrg && e.dist_m<=bOrg && lvl<THREAT_ORANGE) lvl=THREAT_ORANGE;    // bulle PROXIMITÉ
+        if(dalt<=vRed && e.dist_m<=bRed)                              lvl=THREAT_RED;
+
+        g_trf_threat[i]=lvl;
+        if(lvl>g_threat.level){
+            int clk=((e.bear_deg-g_status.hdg)%360+360)%360;
+            int hr=((clk+15)/30)%12; if(hr==0)hr=12;            // position horaire relative au nez
+            g_threat.level=lvl; g_threat.clock=hr; g_threat.dist_m=e.dist_m;
+            g_threat.dalt_ft=e.alt_m*100; g_threat.closing_kt=closing;
+            g_threat.valid=true; strlcpy(g_threat.cs,e.cs,9);
+        }
+    }
+}
+
 void updateRadarDR(){
+    // Chip MODE ALERTE : texte + couleur = état EFFECTIF (CIRC/RTE forcé, ou AUTO actif/inactif).
+    if(r_circ_lbl){
+        lv_label_set_text(r_circ_lbl,kCircNames[g_cfg.circuit_ovr]);
+        lv_color_t cc=g_cfg.circuit_ovr==1?C_CYAN:g_cfg.circuit_ovr==2?C_AMBER
+                      :(g_circuit_mode?C_CYAN:lv_color_hex(0x9ca3af));
+        lv_obj_set_style_text_color(r_circ_lbl,cc,0);
+    }
     if(!g_traffic.valid||!g_status.valid)return;
     // Vieillissement signal (2026-06-06) : ss=false (>10 s sans échange UDP côté
     // boîtier) → trafic GRIS MOYEN, le dead reckoning continue de l'extrapoler
@@ -5107,9 +5210,12 @@ void updateRadarDR(){
             int rel_hdg=((e.hdg_deg-radarEffHdg())%360+360)%360;
             float hr=(float)rel_hdg*(float)M_PI/180.0f;
             float cs=cosf(hr),sn=sinf(hr);
-            // Perte signal → gris moyen uniforme (icône + labels), sinon code distance
+            // Perte signal → gris moyen uniforme ; sinon couleur = NIVEAU DE MENACE (moteur
+            // anticollision) au lieu de la distance brute : rouge/ambre seulement si vraie menace
+            // (CPA/bulle, gaté vertical), gris-clair sinon → l'œil va droit au danger.
             lv_color_t col=ssStale?lv_color_hex(0x9ca3af)
-                          :(dr_dist<1000?C_RED:dr_dist<3000?C_AMBER:TFG());
+                          :(g_trf_threat[i]==THREAT_RED?C_RED
+                           :g_trf_threat[i]==THREAT_ORANGE?C_AMBER:TFG());
             if(e.type!=r_trf_last_type[i]){
                 lv_img_set_src(r_trf_img[i],getAircraftIcon(e.type));
                 lv_img_set_zoom(r_trf_img[i],kIconZoom[g_cfg.icon_sz]); // (fix) set_src réinit le zoom → ré-appliquer la taille S/M/L (sinon retour M à l'apparition d'une cible, ex. alerte)
@@ -5720,14 +5826,21 @@ void updateAllPages(){
         lv_obj_set_style_text_color(r_co_text,lv_color_hex(0x000000),0);
         lv_label_set_text(r_co_val,"");}
 #endif
-    // Alert overlay
-    if(g_alert.valid){
-        bool any=g_alert.co||g_alert.gforce||g_alert.rpm||g_alert.traffic;
-        if(any){char ab[48]="";
-            if(g_alert.co)strcat(ab,"CO  ");if(g_alert.gforce)strcat(ab,"G-FORCE  ");
-            if(g_alert.rpm)strcat(ab,"RPM  ");if(g_alert.traffic)strcat(ab,"TRAFFIC");
-            lv_label_set_text(r_aov_text,ab);lv_obj_clear_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);
-        }else{lv_obj_add_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);}}
+    // Alert overlay : menace trafic (moteur écran, prioritaire), sinon alertes ATC (CO/g/rpm).
+    if(g_threat.level!=THREAT_NONE){
+        char tb[52]; float dnm=g_threat.dist_m/1852.0f;
+        snprintf(tb,sizeof(tb),"TFC %dh  %.1fnm  %+dft  clos %dkt",
+                 g_threat.clock,dnm,g_threat.dalt_ft,g_threat.closing_kt);
+        lv_label_set_text(r_aov_text,tb);
+        lv_obj_set_style_bg_color(r_alert_overlay,g_threat.level==THREAT_RED?C_RED:C_AMBER,0);
+        lv_obj_clear_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);
+    }else if(g_alert.valid&&(g_alert.co||g_alert.gforce||g_alert.rpm)){
+        char ab[48]="";
+        if(g_alert.co)strcat(ab,"CO  ");if(g_alert.gforce)strcat(ab,"G-FORCE  ");if(g_alert.rpm)strcat(ab,"RPM");
+        lv_label_set_text(r_aov_text,ab);
+        lv_obj_set_style_bg_color(r_alert_overlay,C_RED,0);
+        lv_obj_clear_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);
+    }else{lv_obj_add_flag(r_alert_overlay,LV_OBJ_FLAG_HIDDEN);}
     // Debug
     if(g_debug.valid&&g_dbgPage){
         const char*modes[4]={"PRE","FLT","POST","SLP"};
@@ -5752,7 +5865,7 @@ void updateAllPages(){
         lv_obj_set_style_text_color(r_adsbr,g_debug.adsb_rx>0?C_GREEN:TGREY(),0);
         lv_label_set_text(r_flt,g_debug.fid);}}
 
-bool hasAlert(){return g_alert.valid&&(g_alert.co||g_alert.gforce||g_alert.rpm||g_alert.traffic);}
+bool hasAlert(){return g_alert.valid&&(g_alert.co||g_alert.gforce||g_alert.rpm);}  // trafic = moteur écran (g_threat), pas l'ATC
 
 // ── WiFi AP — handlers & control ─────────────────────────────────────────────
 static String sdFileListHtml(){
@@ -6062,7 +6175,7 @@ void loop(){
     // pages → lv_timer_handler échantillonne le tactile par à-coups (boutons ratés). 120 ms = œil OK.
     {static uint32_t s_lastUI=0;
      if(g_dataUpdated && now-s_lastUI>=120){g_dataUpdated=false;s_lastUI=now;updateAllPages();}}
-    bool alert=hasAlert();
+    bool alert=(g_threat.level==THREAT_RED)||hasAlert();   // menace trafic ROUGE force le radar (orange = discret)
     {static uint8_t s_prevScale=4;
      if(alert&&!g_alertForced&&!g_inDebug){
          g_prevPage=g_page;g_alertForced=true;
@@ -6089,8 +6202,10 @@ void loop(){
             if(!hadName)showWelcome(g_session.name, s_instr_name[0]?s_instr_name:nullptr);
             g_dataUpdated=true;}}
     static uint32_t drLast=0;
-    if(g_page==1&&now-drLast>=200){drLast=now;updateRadarDR();
-        if(g_cfg.aip_en&&r_aip_layer&&g_status.valid)lv_obj_invalidate(r_aip_layer);}
+    if(now-drLast>=200){drLast=now;
+        alertEngineTick();                       // moteur anticollision : toutes pages (force le radar même hors radar)
+        if(g_page==1){updateRadarDR();
+            if(g_cfg.aip_en&&r_aip_layer&&g_status.valid)lv_obj_invalidate(r_aip_layer);}}
     relayTick();   // (v21) machine d'état du relais "Update both" (STA-join + annonce)
     if(g_wifi_active&&g_webserver)g_webserver->handleClient();
     if(g_ota_reboot_ms&&millis()-g_ota_reboot_ms>1200){Serial.println("[OTA] reboot");delay(200);ESP.restart();}
