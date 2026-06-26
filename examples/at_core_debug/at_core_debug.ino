@@ -98,7 +98,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "45"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v45 : T-RGB — ALERT MODE override (AUTO/CIRC/RTE) ajouté dans l'onglet TRAFFIC (alignement fonctionnel sur le T4 ; port UI rond complet = session dédiée). v44 : override + chip radar (T4). */
+#define VIEW_VERSION  "50"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v50 : port rond — ‹ retour passé au PREMIER PLAN (move_foreground) : en bas-centre il était SOUS la section → tap inactif. v49 position bas-centre. */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -577,16 +577,21 @@ static lv_obj_t *s_set_uline = nullptr; // fine ligne bleue sous le titre (large
 static lv_obj_t *s_sys_atcver= nullptr; // page System : version AT-CORE (live BLE)
 static lv_obj_t *s_sys_atcbat= nullptr; // page System : batterie AT-CORE (live BLE)
 static const char* kSetTab[S_NPG] = {"RADAR","TRAFFIC","SYSTEM"};
-#ifdef BOARD_T4S3
-// ── (juin 2026) Settings T4 refondu : menu en grille → 6 sections → popups ──────
+// ── Settings refondu (menu grille → 6 sections → popups) — board-INDÉPENDANT depuis le
+//    port T-RGB (2026-06-27) : T4 (600×450 rect) ET T-RGB (480×480 rond) via géométrie SETW. ──
 static lv_obj_t* s_menu      = nullptr;  // page d'accueil réglages (grille 6 gros boutons)
 static lv_obj_t* s_sec[6]    = {};       // conteneurs sections (cachés sauf l'ouvert)
-static lv_obj_t* s_back_btn  = nullptr;  // (juin 2026) cercle « retour » haut-droite (visible en section)
+static lv_obj_t* s_back_btn  = nullptr;  // cercle « retour » haut-droite (visible en section)
 static int8_t    s_cur_sec   = -1;       // -1 = menu affiché, sinon index section ouverte
 static const char* kSecName[6]={"CONFIG","DISPLAY","TRAFFIC","PILOT","SYSTEM","ABOUT"};
-static lv_obj_t* s_set_acval = nullptr;  // (juin 2026) bloc "Active Aircraft" REG/TYP/HEX (en-tête, menu seul)
+static lv_obj_t* s_set_acval = nullptr;  // bloc "Active Aircraft" REG/TYP/HEX (en-tête, menu seul)
 static lv_obj_t* s_set_aclbl = nullptr;  //   label "Active Aircraft" associé
 static void settingsShowMenu();          // (fwd) utilisé par switchPage pour reset à l'entrée
+// Largeur de la zone Settings (coords écran) — pilote la géométrie board-aware des helpers.
+#ifdef BOARD_T4S3
+  #define SETW 600   // T4-S3 : rectangle plein écran 600 px
+#else
+  #define SETW 480   // T-RGB : rond 480 px (rows/contrôles centrés dans la bande médiane)
 #endif
 
 // ── SD card (AT-VIEW local) ───────────────────────────────────────────────────
@@ -3318,7 +3323,7 @@ static lv_obj_t* mkSetSliderRow(lv_obj_t*p,const char*k,int y,uint8_t val){
     return vl;
 }
 
-#ifdef BOARD_T4S3
+// (port T-RGB 2026-06-27) Helpers segment/stepper/popup board-INDÉPENDANTS (étaient T4-only) :
 // ════════════════════════════════════════════════════════════════════════════
 // SETTINGS T4-S3 — contrôles tactiles agrandis (page 1 « fondamentaux »)
 // Demande Christophe 2026-06-07 : réglages exploitables AU DOIGT sur l'AMOLED.
@@ -3363,7 +3368,7 @@ static void mkSegRow(lv_obj_t*p,const char*k,int y,const char*a,const char*b,
                      bool*val,bool aIsTrue){
     if(g_seg_n>=8)return;
     mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
-    const int TW=224,TH=52,TX=600-40-TW,HW=(TW-6)/2;   // track à droite (plein 600), 3px pad bords
+    const int TW=224,TH=52,TX=SETW-40-TW,HW=(TW-6)/2;   // track à droite (board-aware SETW), 3px pad bords
     lv_obj_t*tr=lv_obj_create(p);
     lv_obj_set_size(tr,TW,TH);lv_obj_set_pos(tr,TX,y);
     lv_obj_set_style_radius(tr,14,0);
@@ -3392,16 +3397,16 @@ static void mkSegRow(lv_obj_t*p,const char*k,int y,const char*a,const char*b,
 static lv_obj_t* mkBigStepRow(lv_obj_t*p,const char*k,int y,const char*v,int idn,int idup){
     mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
     lv_color_t bg=lv_color_hex(0xeef2f6); const int BW=64,BH=52;
-    // Bande contrôle commune 336..560 (alignée aux segmented/slider du dessous).
-    lv_obj_t*bd=lv_btn_create(p);lv_obj_set_size(bd,BW,BH);lv_obj_set_pos(bd,336,y);
+    // Bande contrôle commune (board-aware) : alignée aux segmented/slider du dessous.
+    lv_obj_t*bd=lv_btn_create(p);lv_obj_set_size(bd,BW,BH);lv_obj_set_pos(bd,SETW-264,y);
     lv_obj_set_style_bg_color(bd,bg,0);lv_obj_set_style_radius(bd,12,0);
     lv_obj_set_style_shadow_opa(bd,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(bd,0,0);lv_obj_set_style_pad_all(bd,0,0);
     lv_obj_add_event_cb(bd,cbSetBtn,LV_EVENT_CLICKED,(void*)(intptr_t)idn);
     lv_obj_t*ld=lv_label_create(bd);lv_label_set_text(ld,"-");
     lv_obj_set_style_text_color(ld,lv_color_hex(0x0f172a),0);lv_obj_set_style_text_font(ld,&lv_font_montserrat_24,0);lv_obj_center(ld);
-    lv_obj_t*vl=mkLblP(p,v,C_BRAND,&lv_font_montserrat_20,400,y+15);
+    lv_obj_t*vl=mkLblP(p,v,C_BRAND,&lv_font_montserrat_20,SETW-200,y+15);
     lv_obj_set_width(vl,96);lv_obj_set_style_text_align(vl,LV_TEXT_ALIGN_CENTER,0);
-    lv_obj_t*bu=lv_btn_create(p);lv_obj_set_size(bu,BW,BH);lv_obj_set_pos(bu,496,y);
+    lv_obj_t*bu=lv_btn_create(p);lv_obj_set_size(bu,BW,BH);lv_obj_set_pos(bu,SETW-104,y);
     lv_obj_set_style_bg_color(bu,bg,0);lv_obj_set_style_radius(bu,12,0);
     lv_obj_set_style_shadow_opa(bu,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(bu,0,0);lv_obj_set_style_pad_all(bu,0,0);
     lv_obj_add_event_cb(bu,cbSetBtn,LV_EVENT_CLICKED,(void*)(intptr_t)idup);
@@ -3414,7 +3419,7 @@ static lv_obj_t* mkBigStepRow(lv_obj_t*p,const char*k,int y,const char*v,int idn
 static void mkBigBrightRow(lv_obj_t*p,const char*k,int y,uint8_t val){
     mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
     lv_obj_t*sl=lv_slider_create(p);
-    lv_obj_set_size(sl,224,14);lv_obj_set_pos(sl,336,y+19);   // bande 336..560 (alignée seg/stepper)
+    lv_obj_set_size(sl,224,14);lv_obj_set_pos(sl,SETW-264,y+19);   // bande board-aware (alignée seg/stepper)
     lv_slider_set_range(sl,0,16);lv_slider_set_value(sl,val,LV_ANIM_OFF);
     lv_obj_set_style_bg_color(sl,lv_color_hex(0xe5e7eb),LV_PART_MAIN);
     lv_obj_set_style_bg_opa(sl,LV_OPA_COVER,LV_PART_MAIN);lv_obj_set_style_radius(sl,7,LV_PART_MAIN);
@@ -3452,7 +3457,7 @@ static void cbSegN(lv_event_t*e){
 static void mkSegRowN(lv_obj_t*p,const char*k,int y,const char*const*opts,int n,uint8_t*val,uint8_t kind){
     if(g_segn_n>=2||n>4)return;
     mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
-    const int TW=224,TH=52,TX=600-40-TW,pad=3,cw=(TW-2*pad)/n;
+    const int TW=224,TH=52,TX=SETW-40-TW,pad=3,cw=(TW-2*pad)/n;
     lv_obj_t*tr=lv_obj_create(p);
     lv_obj_set_size(tr,TW,TH);lv_obj_set_pos(tr,TX,y);
     lv_obj_set_style_radius(tr,14,0);
@@ -3479,7 +3484,7 @@ static lv_obj_t* mkBigBtnRow(lv_obj_t*p,const char*k,int y,const char*v,const ch
     lv_obj_t*vl=nullptr;
     if(v&&v[0]){ vl=mkLblP(p,v,lv_color_hex(0x0f172a),&lv_font_montserrat_20,200,y+15);
                  lv_obj_set_width(vl,150); }
-    const int BW=150,BH=52,BX=600-40-BW;
+    const int BW=150,BH=52,BX=SETW-40-BW;
     lv_obj_t*b=lv_btn_create(p);lv_obj_set_size(b,BW,BH);lv_obj_set_pos(b,BX,y);
     lv_obj_set_style_bg_color(b,C_BRAND,0);lv_obj_set_style_radius(b,12,0);
     lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(b,0,0);lv_obj_set_style_pad_all(b,0,0);
@@ -3488,7 +3493,6 @@ static lv_obj_t* mkBigBtnRow(lv_obj_t*p,const char*k,int y,const char*v,const ch
     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);lv_obj_set_style_text_font(l,&lv_font_montserrat_20,0);lv_obj_center(l);
     return vl;
 }
-#endif // BOARD_T4S3
 
 // ── Maintenance overlay (Modèle 1 : hotspot + transfert vol) ──────────────────
 static lv_obj_t* g_maint_scanlist;   // fwd : annulé ici aussi (enfant de l'overlay)
@@ -4515,7 +4519,7 @@ static void _open_maintenance_cb(lv_event_t*e){
 // commandes CHR_CONTROL existent toujours côté firmware. Cette page expose Start/Stop/
 // Continue (+ WiFi test / Upload all) pour SIMULER un cycle SANS mouvement au banc :
 // Start → attendre qq s → Stop = "atterrissage" → FLT_CLOSED → upload auto (Phase A).
-#ifdef BOARD_T4S3
+// (port T-RGB 2026-06-27) board-indépendant (géométrie T4 ; sur rond = brut, outil QA).
 static lv_obj_t* g_test_ov=nullptr;
 static void mkTestOverlay(){
     if(g_test_ov)return;
@@ -4552,11 +4556,10 @@ static void mkTestOverlay(){
 static void _open_test_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
     if(!g_test_ov)mkTestOverlay();}
-#endif // BOARD_T4S3 — page TEST (sous-page SYSTEM)
 
-#ifdef BOARD_T4S3
 // ════════════════════════════════════════════════════════════════════════════
-// (juin 2026) SETTINGS T4-S3 — menu en GRILLE → 6 sections → POPUPS de choix
+// SETTINGS — menu en GRILLE → 6 sections → POPUPS de choix (board-aware via SETW :
+// T4 600×450 rect / T-RGB 480×480 rond — port T-RGB 2026-06-27)
 //   Page 3 maquette : grille de gros boutons (RADAR/DISPLAY/TRAFFIC/AIRCRAFT/
 //   SYSTEM/ABOUT). Page 4 : les choix énumérés (SCALE/V-FILTER/SPEED) ouvrent
 //   un popup de gros boutons faciles à cliquer. SCALE = échelle par défaut au
@@ -4635,7 +4638,7 @@ static lv_obj_t* mkPopRow(lv_obj_t*p,const char*k,int y,const char*curval,
     if(g_pop_n>=6) return nullptr;
     int pi=g_pop_n;
     g_pop[pi].title=title; g_pop[pi].opts=opts; g_pop[pi].n=n; g_pop[pi].idx=idx; g_pop[pi].apply=apply;
-    const int BW=224,BH=52,BX=600-40-BW;
+    const int BW=224,BH=52,BX=SETW-40-BW;
     lv_obj_t*bt=lv_btn_create(p);lv_obj_set_size(bt,BW,BH);lv_obj_set_pos(bt,BX,y);
     lv_obj_set_style_bg_color(bt,lv_color_hex(0xeef2f6),0);lv_obj_set_style_radius(bt,14,0);
     lv_obj_set_style_border_width(bt,0,0);lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(bt,0,0);
@@ -4679,7 +4682,12 @@ static void _sec_back_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKE
 // Gros bouton de la grille menu (contour bleu, rempli au press).
 static void mkMenuBtn(lv_obj_t*parent,int i,int x,int y){
     lv_obj_t*bt=lv_btn_create(parent);
-    lv_obj_set_size(bt,252,80);lv_obj_set_pos(bt,x,y);
+#ifdef BOARD_T4S3
+    lv_obj_set_size(bt,252,80);const lv_font_t*MF=&lv_font_montserrat_24;
+#else
+    lv_obj_set_size(bt,180,64);const lv_font_t*MF=&lv_font_montserrat_18;   // rond : boutons + petits (tiennent dans le cercle)
+#endif
+    lv_obj_set_pos(bt,x,y);
     lv_obj_set_style_bg_color(bt,TBG(),0);lv_obj_set_style_bg_opa(bt,LV_OPA_COVER,0);
     lv_obj_set_style_border_color(bt,C_BRAND,0);lv_obj_set_style_border_width(bt,2,0);
     lv_obj_set_style_radius(bt,16,0);lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0);
@@ -4687,7 +4695,7 @@ static void mkMenuBtn(lv_obj_t*parent,int i,int x,int y){
     lv_obj_add_event_cb(bt,_menu_btn_cb,LV_EVENT_CLICKED,(void*)(intptr_t)i);
     lv_obj_t*l=lv_label_create(bt);lv_label_set_text(l,kSecName[i]);
     lv_obj_set_style_text_color(l,C_BRAND,0);
-    lv_obj_set_style_text_font(l,&lv_font_montserrat_24,0);lv_obj_center(l);
+    lv_obj_set_style_text_font(l,MF,0);lv_obj_center(l);
 }
 
 // (juin 2026) FIX swipe : propage EVENT_BUBBLE à TOUS les descendants (boutons, cellules
@@ -4707,66 +4715,82 @@ void buildSettingsPageT4(lv_obj_t*p){
     s_bright_v=nullptr;s_src_v=nullptr;s_theme_v=nullptr;s_grnd_v=nullptr;s_icon_sz_v=nullptr;
     s_ac_v=nullptr;s_wifi_v=nullptr;s_sd_v=nullptr;s_set_aclbl=nullptr;s_set_acval=nullptr;
 
-    // En-tête : logo + titre (appui long titre = debug). Le RETOUR se fait par le cercle
-    // en haut-droite (maquette juin 2026). Titre un peu plus haut → plus d'air sous lui.
-    // En-tête (coords écran réelles, page à (0,0)). Air en haut + cercle « retour » accessible.
+    // En-tête + géométrie BOARD-AWARE (T4 600×450 rect / T-RGB 480×480 rond — la grille et
+    // les contrôles tiennent dans le cercle). Le RETOUR = cercle bleu ; sur rond il est placé
+    // plus bas/centré (les coins du cercle sont clippés).
+#ifdef BOARD_T4S3
+    const int hLogoX=40,hLogoY=26, hTitX=112,hTitY=38, ulineY=70, SCRH=450, CY=94;
+    const int col0=44,col1=304,r0=29,dyr=109;
+#else
+    const int hLogoX=30,hLogoY=10, hTitX=100,hTitY=14, ulineY=42, SCRH=480, CY=86;
+    const int col0=50,col1=250,r0=20,dyr=92;     // rond : 2×3 boutons 180×64 centrés dans le cercle
+#endif
+    const int CH=SCRH-CY;
     lv_obj_t*lA=lv_img_create(p);lv_img_set_src(lA,&img_logo_a);
-    lv_obj_align(lA,LV_ALIGN_TOP_LEFT,40,26);
-    s_set_title=mkLblP(p,"SETTINGS",TFG(),&lv_font_montserrat_24,40+56+16,38);
+    lv_obj_align(lA,LV_ALIGN_TOP_LEFT,hLogoX,hLogoY);
+    s_set_title=mkLblP(p,"SETTINGS",TFG(),&lv_font_montserrat_24,hTitX,hTitY);
     lv_obj_add_flag(s_set_title,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(s_set_title,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(s_set_title,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);
-    s_set_uline=lv_obj_create(p);lv_obj_set_size(s_set_uline,120,2);lv_obj_set_pos(s_set_uline,40+56+16,70);
+    s_set_uline=lv_obj_create(p);lv_obj_set_size(s_set_uline,120,2);lv_obj_set_pos(s_set_uline,hTitX,ulineY);
     lv_obj_set_style_bg_color(s_set_uline,C_BRAND,0);lv_obj_set_style_bg_opa(s_set_uline,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(s_set_uline,0,0);lv_obj_set_style_pad_all(s_set_uline,0,0);lv_obj_set_style_radius(s_set_uline,1,0);
     lv_obj_clear_flag(s_set_uline,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
 
-    // Bloc « Active Aircraft » à droite du titre (menu seul ; caché en section, où le
-    // cercle retour prend la place). 2 lignes : libellé + REG / TYP / HEX (identité NVS,
-    // éditée via le web — plus de page AIRCRAFT). Aligné à droite, marge 40.
+    // Bloc « Active Aircraft » (menu seul ; caché en section). T4 = à droite du titre ;
+    // rond = centré sous le titre (les coins sont clippés).
     s_set_aclbl=lv_label_create(p);lv_label_set_text(s_set_aclbl,"Active Aircraft");
     lv_obj_set_style_text_color(s_set_aclbl,lv_color_hex(0x4b5563),0);
     lv_obj_set_style_text_font(s_set_aclbl,&lv_font_montserrat_14,0);
-    lv_obj_align(s_set_aclbl,LV_ALIGN_TOP_RIGHT,-40,28);
     s_set_acval=lv_label_create(p);
     lv_obj_set_style_text_color(s_set_acval,C_BRAND,0);
     lv_obj_set_style_text_font(s_set_acval,&lv_font_montserrat_20,0);
     {char ac[40];snprintf(ac,sizeof(ac),"%s / %s / %s",
         g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---",g_ac_hex[0]?g_ac_hex:"------");
      lv_label_set_text(s_set_acval,ac);}
+#ifdef BOARD_T4S3
+    lv_obj_align(s_set_aclbl,LV_ALIGN_TOP_RIGHT,-40,28);
     lv_obj_align(s_set_acval,LV_ALIGN_TOP_RIGHT,-40,46);
+#else
+    // Rond : titre CENTRÉ (coin haut-gauche clippé par le cercle), logo + soulignement
+    // masqués (coins clippés), Active Aircraft centré dessous.
+    lv_obj_align(s_set_title,LV_ALIGN_TOP_MID,0,14);
+    lv_obj_add_flag(lA,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(s_set_uline,LV_OBJ_FLAG_HIDDEN);
+    lv_obj_align(s_set_aclbl,LV_ALIGN_TOP_MID,0,50);
+    lv_obj_align(s_set_acval,LV_ALIGN_TOP_MID,0,66);
+#endif
 
-    // Cercle « retour » haut-droite (bleu, ‹) — gros, accessible
+    // Cercle « retour » bleu (‹)
     s_back_btn=lv_btn_create(p);
-    lv_obj_set_size(s_back_btn,62,62);lv_obj_set_pos(s_back_btn,600-40-62,24);
     lv_obj_set_style_radius(s_back_btn,LV_RADIUS_CIRCLE,0);
     lv_obj_set_style_bg_color(s_back_btn,C_BRAND,0);lv_obj_set_style_shadow_opa(s_back_btn,LV_OPA_TRANSP,0);
     lv_obj_set_style_border_width(s_back_btn,0,0);
     lv_obj_add_event_cb(s_back_btn,_sec_back_cb,LV_EVENT_CLICKED,NULL);
+#ifdef BOARD_T4S3
+    lv_obj_set_size(s_back_btn,62,62);lv_obj_set_pos(s_back_btn,600-40-62,24);
+#else
+    lv_obj_set_size(s_back_btn,56,56);lv_obj_align(s_back_btn,LV_ALIGN_BOTTOM_MID,0,-14);  // rond : tout en bas centré (sous le contenu, zone large du cercle)
+#endif
     {lv_obj_t*l=lv_label_create(s_back_btn);lv_label_set_text(l,LV_SYMBOL_LEFT);
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
      lv_obj_set_style_text_font(l,&lv_font_montserrat_28,0);lv_obj_center(l);}
     lv_obj_add_flag(s_back_btn,LV_OBJ_FLAG_HIDDEN);
 
-    const int CY=94, CH=450-94;     // (juin 2026) zone contenu (écran réel)
-
-    // ── Menu : grille 2×3 de gros boutons ───────────────────────────────────
+    // ── Menu : grille 2×3 ────────────────────────────────────────────────────
     s_menu=lv_obj_create(p);
-    lv_obj_set_size(s_menu,600,CH);lv_obj_set_pos(s_menu,0,CY);
+    lv_obj_set_size(s_menu,SETW,CH);lv_obj_set_pos(s_menu,0,CY);
     lv_obj_set_style_bg_opa(s_menu,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(s_menu,0,0);
     lv_obj_set_style_pad_all(s_menu,0,0);lv_obj_clear_flag(s_menu,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(s_menu,swipeCb,LV_EVENT_ALL,NULL);   // swipe horizontal (nav page) conservé
-    // (juin 2026) marges ÉGALES (haut=bas=inter-rangées=29) : CH=356, btn 252×80, pitch 109.
-    // Colonnes centrées : 44..296 / 304..556 (marges latérales 44 chacune).
-    {const int col0=44,col1=304,r0=29,dyr=109;
-     mkMenuBtn(s_menu,0,col0,r0);        mkMenuBtn(s_menu,3,col1,r0);
+    {mkMenuBtn(s_menu,0,col0,r0);        mkMenuBtn(s_menu,3,col1,r0);
      mkMenuBtn(s_menu,1,col0,r0+dyr);    mkMenuBtn(s_menu,4,col1,r0+dyr);
      mkMenuBtn(s_menu,2,col0,r0+2*dyr);  mkMenuBtn(s_menu,5,col1,r0+2*dyr);}
 
     // ── 6 conteneurs sections (cachés au départ) ────────────────────────────
     for(int i=0;i<6;i++){
         s_sec[i]=lv_obj_create(p);
-        lv_obj_set_size(s_sec[i],600,CH);lv_obj_set_pos(s_sec[i],0,CY);
+        lv_obj_set_size(s_sec[i],SETW,CH);lv_obj_set_pos(s_sec[i],0,CY);
         lv_obj_set_style_bg_opa(s_sec[i],LV_OPA_TRANSP,0);lv_obj_set_style_border_width(s_sec[i],0,0);
         lv_obj_set_style_pad_all(s_sec[i],0,0);lv_obj_clear_flag(s_sec[i],LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_add_event_cb(s_sec[i],swipeCb,LV_EVENT_ALL,NULL);
@@ -4830,28 +4854,29 @@ void buildSettingsPageT4(lv_obj_t*p){
     bubbleAll(s_menu);
     for(int s=0;s<6;s++) bubbleAll(s_sec[s]);
 
+    // Le ‹ retour doit être AU-DESSUS des conteneurs de sections (créés après lui) — sinon,
+    // placé dans la zone d'une section (cas rond bas-centre), la section intercepte le tap.
+    lv_obj_move_foreground(s_back_btn);
+
     settingsShowMenu();   // démarre sur la grille
 }
-#endif // BOARD_T4S3 (settings refondu)
 
 void buildSettingsPage(){
-    lv_obj_t*p=g_pages[2]; char b[16];
+    lv_obj_t*p=g_pages[2]; char b[16]; (void)b;
     s_pg_idx=0;
-
-    // (juin 2026) Thème GLOBAL : la page réglages suit LIGHT/DARK (avant : blanc forcé)
     lv_obj_set_style_bg_color(p,TBG(),0);
     lv_obj_set_style_bg_opa(p,LV_OPA_COVER,0);
+    // Settings UNIFIÉ (grille → sections → popups), board-aware via SETW : T4 ET T-RGB y passent.
 #ifdef BOARD_T4S3
-    // T4-S3 : page Settings plein écran (600×480) + refonte juin 2026 (menu grille →
-    // sections → popups). On délègue à buildSettingsPageT4 et on sort : le reste de
-    // cette fonction est le layout T-RGB d'origine (inchangé, non atteint sur T4).
-    // (juin 2026) PLEIN ÉCRAN (0,0)/450 comme le radar → coords = écran (avant : y=-15 →
-    // tout collait au bord haut + marges du bas fausses).
     lv_obj_set_size(p,600,450);lv_obj_set_pos(p,0,0);
+#else
+    lv_obj_set_size(p,480,480);lv_obj_set_pos(p,0,0);
+#endif
     lv_obj_set_scrollbar_mode(p,LV_SCROLLBAR_MODE_OFF);
     buildSettingsPageT4(p);
     return;
-#endif
+    // ⚠️ Legacy round s_pg ci-dessous : INATTEIGNABLE (à supprimer après validation du port rond).
+#if 0
 
     // ── Logo A bleu + titre SETTINGS
     lv_obj_t*lA=lv_img_create(p);
@@ -5022,6 +5047,7 @@ void buildSettingsPage(){
     lv_obj_set_style_bg_opa(ver,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(ver,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);
 #endif
+#endif // #if 0 — legacy round s_pg (remplacé par buildSettingsPageT4 unifié)
     }
 
 // ── Debug page (hidden) ───────────────────────────────────────────────────────
@@ -5088,7 +5114,15 @@ void alertEngineTick(){
     if(ownGS_kt < 5.0f) g_field_elev_m = g_status.alt;   // capture élévation terrain au sol (suit le terrain courant)
 
     float agl_ft = (g_field_elev_m>-90000.0f) ? ((float)g_status.alt - g_field_elev_m)*3.28084f : 99999.0f;
-    bool autoDet = aipNearestAdNm() < 5.0f && agl_ft < 1500.0f && ownGS_kt > 40.0f && ownGS_kt < 160.0f;
+    // (port T-RGB) Le scan AIP (jusqu'à 5500 aérodromes × sqrt) est LOURD : appelé à 5 Hz sur
+    // toutes les pages il affamait le DMA du panneau RGB (lignes horizontales). On le CACHE
+    // (≤ tous les 2 s) et on le GATE (uniquement quand un circuit est plausible : bas + vitesse
+    // modérée). En croisière haute/au sol → pas de scan, valeur "loin".
+    static float s_nearAdNm=9999.0f; static uint32_t s_nearAdT=0;
+    bool maybeCircuit = (agl_ft < 2000.0f) && ownGS_kt > 30.0f && ownGS_kt < 170.0f;
+    if(maybeCircuit){ if(millis()-s_nearAdT > 2000){ s_nearAdT=millis(); s_nearAdNm=aipNearestAdNm(); } }
+    else s_nearAdNm=9999.0f;
+    bool autoDet = s_nearAdNm < 5.0f && agl_ft < 1500.0f && ownGS_kt > 40.0f && ownGS_kt < 160.0f;
     // Override manuel (Settings/radar) : 1=CIRCUIT forcé · 2=ROUTE forcé · 0=AUTO (auto-détection)
     g_circuit_mode = (g_cfg.circuit_ovr==1) ? true : (g_cfg.circuit_ovr==2) ? false : autoDet;
     bool circ = g_circuit_mode;
