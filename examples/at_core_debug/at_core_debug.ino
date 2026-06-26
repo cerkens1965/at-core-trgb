@@ -6,11 +6,24 @@
  * Christophe — 2026-05-04
  */
 
+// Waveshare 2.41" (RM690B0 450×600 portrait → paysage 600×450) : réutilise TOUT
+// le layout T4 (→ #define BOARD_T4S3) mais panneau/touch/lvgl par son shim Arduino_GFX
+// (→ PANEL_WS241 garde tous les appels spécifiques LilyGo). 4ᵉ cible AT-VIEW.
+#ifdef BOARD_WS241
+#define BOARD_T4S3
+#define PANEL_WS241
+#endif
+
 #ifdef BOARD_T4S3            // ── Port test LilyGo T4-S3 AMOLED 2.41" (600×450 rect) ──
+#ifdef PANEL_WS241
+#include "ws241_shim.h"      // Arduino_GFX RM690B0 + SensorLib FT6336 + beginLvglHelper maison
+#define SD_MMC SD            // SD en SPI (fs::FS partagé) — best-effort sur la 2.41
+#else
 #include <LilyGo_AMOLED.h>   // lib LilyGo-AMOLED-Series : RM690B0 QSPI + touch CST226SE
 #include <LV_Helper.h>       // LV_Helper fourni par la lib AMOLED (même pattern beginLvglHelper)
 #include <SD.h>              // SD en SPI sur T4-S3 (pas de slot SD_MMC)
 #define SD_MMC SD            // quick&dirty : SDFS et SDMMCFS partagent l'API fs::FS
+#endif
 #elif defined(BOARD_WS216)   // ── Waveshare ESP32-S3-Touch-AMOLED-2.16 (carré 480×480) ──
 #include "ws216_shim.h"      // Arduino_GFX CO5300 + SensorLib CST9220 + beginLvglHelper maison
 #define SD_MMC SD            // SD en SPI (comme T4) — fs::FS partagé
@@ -38,6 +51,24 @@
 #include "img_flarm.h"
 #include "img_logos.h"
 #include <string>
+
+// ── IMU 6 axes — mouchard G + assiettes (WS216/WS241 seulement) ───────────────────
+// Le QMI8658 n'existe QUE sur les Waveshare 2.16/2.41 (ni T4-S3 ni T-RGB) → feature gardée.
+// Lit accel+gyro, calcule facteur de charge / G latéral / pitch / roll relatifs au repos
+// (auto-zéro au sol), et pousse au boîtier par BLE → écrit dans le CSV du vol (NormAc/LatAc/
+// Pitch/Roll). Interprétation/seuils = dashboard après le vol. cf mémoire imu_mouchard_g_attitude.
+#if defined(BOARD_WS216) || defined(BOARD_WS241)
+#define HAS_IMU 1
+#define IMU_BLE_PUSH 0   // 0 = push BLE désactivé (isolation : la write Bluedroid figeait le radar). 1 = ré-activé.
+#include <SensorQMI8658.hpp>
+#ifdef BOARD_WS241
+#define IMU_SDA 47
+#define IMU_SCL 48
+#else   // BOARD_WS216
+#define IMU_SDA 15
+#define IMU_SCL 14
+#endif
+#endif
 
 // ── Compat BLE core 2.x / 3.x ────────────────────────────────────────────────────
 // Les getters BLE (getManufacturerData / getAddress().toString() / readValue()) renvoient
@@ -98,7 +129,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "50"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v50 : port rond — ‹ retour passé au PREMIER PLAN (move_foreground) : en bas-centre il était SOUS la section → tap inactif. v49 position bas-centre. */
+#define VIEW_VERSION  "59"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v59 : ISOLATION push IMU BLE désactivé (IMU_BLE_PUSH 0) — la write Bluedroid bloquait la boucle ~1-2 s sous charge trafic (mesuré : [IMU] 1 Hz avec trous de 2 s) → radar figé / trafic lent. Test : radar doit être fluide. Mouchard à re-câbler en non-bloquant. v58 : imuTick allégé (insuffisant). v57 : fix clobber identité bind. */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -115,6 +146,16 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 #define VIEW_VER_STR  "ATV " VIEW_VSTR "  " __DATE__               // boot banner (ex "ATV 1.2.38-dev  Jun 26 2026")
 
 #ifdef BOARD_T4S3
+#ifdef PANEL_WS241
+WS241_Panel panel;           // shim Arduino_GFX/SensorLib RM690B0 paysage (ws241_shim.h)
+static inline void panelBright(uint8_t v){ panel.setBrightness(v>=16?255:v*17); }
+#define lv_font_montserrat_10 lv_font_montserrat_12
+// Paysage 600×450 ; canvas UI 480×480 centré. La dalle RM690B0 de la 2.41 affiche
+// le contenu ~3 px plus haut que le T4 (N collait en haut) → on descend le canvas de
+// 3 px (UI_OY -15 → -12) pour rééquilibrer marge haut/bas. (Validé HW 2026-06-26.)
+#define UI_OX  60
+#define UI_OY  (-12)
+#else
 LilyGo_Class amoled;
 #define panel amoled         // les call-sites panel.* (begin via setup dédié) pointent sur l'AMOLED
 // Brightness : T-RGB = 16 niveaux hardware, AMOLED = 0-255 → mapping ×17 ici
@@ -125,6 +166,7 @@ static inline void panelBright(uint8_t v){ amoled.setBrightness(v>=16?255:v*17);
 // 60 px à gauche/droite, 15 px rognés en haut et en bas (UI circulaire : perte négligeable)
 #define UI_OX  60
 #define UI_OY  (-15)
+#endif
 #elif defined(BOARD_WS216)
 WS216_Panel panel;           // shim Arduino_GFX/SensorLib (ws216_shim.h)
 // CO5300 = brightness 0-255 → mapping ×17 depuis l'échelle config 0-16 (comme AMOLED T4)
@@ -151,6 +193,7 @@ static inline void panelBright(uint8_t v){ panel.setBrightness(v); }
 #define BLE_CHR_CONTROL "6E40000A-B5A3-F393-E0A9-E50E24DCCA9E"  // write : binding {"cmd":"bind"|"unpair"}
 #define BLE_CHR_FLIGHTS "6E40000B-B5A3-F393-E0A9-E50E24DCCA9E"  // read  : liste vols SD (WP8)
 #define BLE_CHR_WIFICRED "6E40000C-B5A3-F393-E0A9-E50E24DCCA9E" // read  : creds WiFi club {s,p} hérités du boîtier (brique 0)
+#define BLE_CHR_IMU     "6E40000D-B5A3-F393-E0A9-E50E24DCCA9E"  // write : mouchard G/assiette (IMU écran) → CSV boîtier
 // ── Bypass auth pilote (temporaire) ───────────────────────────────────────────
 // 1 = on saute la page #02 "Select your name" / #03 welcome : dès que la machine
 // est appairée (BLE) + GPS fix, on file direct au radar. L'appairage machine
@@ -278,7 +321,8 @@ static BLERemoteCharacteristic *g_chrS=nullptr,*g_chrF=nullptr,
                                 *g_chrCfg=nullptr, // CONFIG write (6E400009) — identité aéronef
                                 *g_chrCtl=nullptr, // CONTROL write (6E40000A) — binding bind/unpair
                                 *g_chrFl=nullptr,  // FLIGHTS read (6E40000B) — liste vols SD (WP8)
-                                *g_chrWc=nullptr;  // WIFICRED read (6E40000C) — creds WiFi club hérités (brique 0)
+                                *g_chrWc=nullptr,  // WIFICRED read (6E40000C) — creds WiFi club hérités (brique 0)
+                                *g_chrImu=nullptr; // IMU write (6E40000D) — mouchard G/assiette → CSV boîtier
 // Pilot list BLE reassembly buffer
 static char    g_prx_buf[4096] = {};
 static int     g_prx_len       = 0;
@@ -909,7 +953,7 @@ bool connectBLE(){
     // fenêtre de connexion voit g_chrCtl=null → sendCtl no-op sûr), puis découverte propre.
     if(g_client){ delete g_client; g_client=nullptr; }   // destructeur libère le cache services ; gattc_if déjà désenregistré à la déconnexion
     g_svc=nullptr;
-    g_chrS=g_chrF=g_chrT=g_chrA=g_chrD=g_chrW=g_chrP=g_chrCfg=g_chrCtl=g_chrFl=g_chrWc=nullptr;
+    g_chrS=g_chrF=g_chrT=g_chrA=g_chrD=g_chrW=g_chrP=g_chrCfg=g_chrCtl=g_chrFl=g_chrWc=g_chrImu=nullptr;
     static ATCCB s_cb;   // instance unique (l'ancien new ATCCB() fuyait à chaque reconnexion)
     g_client=BLEDevice::createClient(); g_client->setClientCallbacks(&s_cb);
     if(!g_client->connect(g_target))return false;
@@ -933,6 +977,7 @@ bool connectBLE(){
     g_chrCtl=g_svc->getCharacteristic(BLE_CHR_CONTROL);
     g_chrFl =g_svc->getCharacteristic(BLE_CHR_FLIGHTS);
     g_chrWc =g_svc->getCharacteristic(BLE_CHR_WIFICRED);
+    g_chrImu=g_svc->getCharacteristic(BLE_CHR_IMU);   // mouchard G/assiette (peut être absent si boîtier < CHR_IMU)
     if(g_chrS&&g_chrS->canNotify())g_chrS->registerForNotify(notifyS);
     if(g_chrF&&g_chrF->canNotify())g_chrF->registerForNotify(notifyF);
     if(g_chrT&&g_chrT->canNotify())g_chrT->registerForNotify(notifyT);
@@ -945,11 +990,12 @@ bool connectBLE(){
     // Cérémonie de pairing : connecté au candidat → l'AT-CORE passe LED fixe.
     // On demande la confirmation visuelle avant d'écrire {"cmd":"bind"}.
     if(g_binding){g_bind_confirm=true;return true;}
-    // Auto-push identité aéronef (reg/type/hex24) dès la connexion : un AT-CORE
-    // au NVS vide (carte neuve / réinitialisée) repartait sinon sur son fallback
-    // compilé (OO-E07) tant qu'on n'éditait pas l'écran Aircraft. acPushBLE no-op
-    // si l'identité locale n'est pas renseignée ou si CHR_CONFIG non inscriptible.
-    acPushBLE();
+    // (2026-06) NE PLUS pousser l'identité aéronef à la connexion. L'identité est
+    // désormais saisie au PORTAIL WEB du boîtier (source de vérité), et le boîtier la
+    // pousse à l'écran via STATUS (reg/typ/hex). L'ancien acPushBLE() ici ÉCRASAIT la
+    // valeur du portail par la valeur (souvent périmée) du NVS écran à chaque connexion
+    // → « REG/TYP/HEX pas mis à jour après le portail ». Le push écran→boîtier est retiré.
+    // (acPushBLE conservée mais plus appelée sur ce chemin ; l'écran n'édite plus l'identité.)
     // (brique 0) Hériter les creds WiFi club du boîtier (CHR_WIFICRED, READ) → zéro saisie
     // côté écran. On lit à la connexion ; si différents du NVS écran, on sauve (g_hs_ssid/pass).
     // → l'OTA "Update ATV" et le wifitest marchent sans re-taper le hotspot.
@@ -1203,7 +1249,10 @@ static void cbPairConfirm(lv_event_t*e){
     g_binding=false;g_bind_confirm=false;
     Serial.printf("[PAIR] lié → %s\n",g_paired_mac);
     pairOverlayHide();
-    acPushBLE();}
+    // (2026-06) NE PLUS pousser l'identité au bind : l'écran n'est plus source de l'identité
+    // (saisie au portail boîtier). Avant, acPushBLE() ici ÉCRASAIT l'identité du boîtier par
+    // celle (vide/périmée) de l'écran à chaque appairage → c'était le clobber principal.
+}
 
 // Annulation : on se déconnecte du candidat et on revient à la liste.
 static void cbPairCancel(lv_event_t*e){
@@ -1362,7 +1411,7 @@ void p0UpdateAcId(){
         lv_label_set_text(g_p0_acid,t);
         lv_obj_set_style_text_color(g_p0_acid,TFG(),0);  // (juin 2026) suit le thème (accueil sombre OK)
     }else{
-        lv_label_set_text(g_p0_acid,LV_SYMBOL_WARNING " APPAREIL NON CONFIGURE");
+        lv_label_set_text(g_p0_acid,LV_SYMBOL_WARNING " NO AIRCRAFT - SET VIA WIFI SETUP");
         lv_obj_set_style_text_color(g_p0_acid,lv_color_hex(0xD32F2F),0);
     }
 }
@@ -3160,7 +3209,7 @@ void buildRadarPage(){
      lv_obj_set_style_radius(gear,LV_RADIUS_CIRCLE,0);
      lv_obj_set_style_bg_color(gear,C_BRAND,0);lv_obj_set_style_bg_opa(gear,LV_OPA_COVER,0);
      lv_obj_set_style_border_width(gear,0,0);lv_obj_set_style_shadow_opa(gear,LV_OPA_TRANSP,0);
-     lv_obj_set_ext_click_area(gear,10);
+     lv_obj_set_ext_click_area(gear,20);   // cible élargie (bouton Settings souvent raté)
      lv_obj_add_event_cb(gear,[](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED){ g_navPage=2; g_navPending=true; } },LV_EVENT_CLICKED,NULL);
      lv_obj_t* gl=lv_label_create(gear);lv_label_set_text(gl,LV_SYMBOL_SETTINGS);
      lv_obj_set_style_text_color(gl,lv_color_hex(0xffffff),0);
@@ -4027,19 +4076,43 @@ static void _diag_reboot_cb(lv_event_t*e){
     g_diag_reboot_armed=false; if(l)lv_label_set_text(l,"Reboot box"); lv_obj_set_style_bg_color(b,C_ORANGE,0);
     sendCtl("reboot");
 }
+// Unpair box (2-tap) : casse le lien BLE écran↔boîtier. Si connecté → {"cmd":"unpair"}
+// ré-arme le pairing côté boîtier (sinon il refuserait un nouveau lien), puis on oublie
+// la MAC côté écran + reboot → cérémonie de pairing. Si boîtier hors-ligne, on ne peut
+// que l'oublier localement (le boîtier reste lié/pairable=0 → power-cycle requis) :
+// feedback honnête plutôt que laisser croire que c'est fait des 2 côtés.
+static bool g_diag_unpair_armed=false;
+static void _diag_unpair_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,0);
+    if(!g_diag_unpair_armed){ g_diag_unpair_armed=true; if(l)lv_label_set_text(l,"Confirm unpair?"); lv_obj_set_style_bg_color(b,C_AMBER,0); return; }
+    g_diag_unpair_armed=false;
+    if(g_connected){
+        sendCtl("unpair");                              // ré-arme le pairing boîtier
+        if(l)lv_label_set_text(l,"Unpairing - reboot");
+        delay(200);
+    }else{
+        if(l)lv_label_set_text(l,"Box offline - local only");
+        lv_obj_set_style_bg_color(b,C_RED,0);
+        lv_refr_now(NULL); delay(1400);                 // laisse lire l'avertissement
+    }
+    unitForgetMac();                                    // efface paired_mac côté écran
+    delay(400); ESP.restart();
+}
 static void showDiagPage(){
+    g_diag_reboot_armed=false; g_diag_unpair_armed=false;   // ré-arme propre à chaque ouverture
     if(g_diag_ov)return;
     g_diag_ov=lv_obj_create(lv_scr_act());
 #ifdef BOARD_T4S3
     lv_obj_set_size(g_diag_ov,600,480);lv_obj_set_pos(g_diag_ov,0,UI_OY);
     const lv_font_t *TF=&lv_font_montserrat_22,*LF=&lv_font_montserrat_18,*BF=&lv_font_montserrat_18;
     const int BW=240,BH=48,yWifi=120,ySD=164;
-    const int xTEST=-130,yTEST=232, xREB=130,yREB=232, xCL=0,yCL=300;
+    const int xTEST=-130,yTEST=232, xREB=130,yREB=232, xUNP=-130,yUNP=300, xCL=130,yCL=300;
 #else
     lv_obj_set_size(g_diag_ov,480,480);lv_obj_set_pos(g_diag_ov,UI_OX,UI_OY);
     const lv_font_t *TF=&lv_font_montserrat_18,*LF=&lv_font_montserrat_14,*BF=&lv_font_montserrat_14;
-    const int BW=200,BH=36,yWifi=100,ySD=140;
-    const int xTEST=0,yTEST=196, xREB=0,yREB=240, xCL=0,yCL=284;
+    const int BW=200,BH=36,yWifi=96,ySD=132;
+    const int xTEST=0,yTEST=176, xREB=0,yREB=216, xUNP=0,yUNP=256, xCL=0,yCL=296;
 #endif
     lv_obj_set_style_bg_color(g_diag_ov,TBG(),0);lv_obj_set_style_bg_opa(g_diag_ov,LV_OPA_COVER,0);
     lv_obj_set_style_border_width(g_diag_ov,0,0);lv_obj_set_style_radius(g_diag_ov,0,0);
@@ -4054,6 +4127,7 @@ static void showDiagPage(){
 
     volBtn(g_diag_ov,"Test WiFi",lv_color_hex(0x1f4068),BW,BH,xTEST,yTEST,_diag_test_cb,BF);
     volBtn(g_diag_ov,"Reboot box",C_ORANGE,BW,BH,xREB,yREB,_diag_reboot_cb,BF);
+    volBtn(g_diag_ov,"Unpair box",lv_color_hex(0x7c3aed),BW,BH,xUNP,yUNP,_diag_unpair_cb,BF);
     volBtn(g_diag_ov,"Close",lv_color_hex(0x4b5563),BW,BH,xCL,yCL,_diag_close_cb,BF);
 }
 static void _open_diag_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) showDiagPage(); }
@@ -6103,10 +6177,105 @@ static void relayTick(){
         }
     }}
 
+// ── IMU mouchard (QMI8658, WS216/WS241) ───────────────────────────────────────
+#ifdef HAS_IMU
+static SensorQMI8658 g_qmi;
+static bool  g_imu_ok=false, g_imu_cal=false;
+// Repère "repos" auto-zéroté au sol (frame capteur) : d0=verticale(bas), fwd0=avant, right0=droite.
+static float g_d0[3]={0,0,1}, g_fwd0[3]={1,0,0}, g_right0[3]={0,1,0};
+// Sorties courantes (poussées BLE → CSV boîtier).
+static volatile float g_imu_nz=1.0f, g_imu_lat=0, g_imu_lon=0, g_imu_pitch=0, g_imu_roll=0;
+// Peak-hold entre 2 pushes (capte les pics G entre deux lignes CSV 4 Hz).
+static float g_imu_nz_max=1.0f, g_imu_nz_min=1.0f, g_imu_lat_pk=0, g_imu_gyr_pk=0;
+
+static inline float v3dot(const float*a,const float*b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2];}
+static inline void  v3cross(const float*a,const float*b,float*o){
+    o[0]=a[1]*b[2]-a[2]*b[1];o[1]=a[2]*b[0]-a[0]*b[2];o[2]=a[0]*b[1]-a[1]*b[0];}
+static inline float v3norm(float*a){float m=sqrtf(v3dot(a,a));if(m>1e-6f){a[0]/=m;a[1]/=m;a[2]/=m;}return m;}
+
+// Fige le repère repos à partir du vecteur gravité mesuré au sol (mount-agnostique).
+static void imuCalibrate(const float*a){
+    float d[3]={a[0],a[1],a[2]}; if(v3norm(d)<0.5f) return;
+    g_d0[0]=d[0];g_d0[1]=d[1];g_d0[2]=d[2];
+    // avant = projection de l'axe capteur +X sur le plan horizontal (⊥ d0) ; fallback +Y si dégénéré
+    float X[3]={1,0,0}; float k=v3dot(X,g_d0);
+    float f[3]={X[0]-k*g_d0[0],X[1]-k*g_d0[1],X[2]-k*g_d0[2]};
+    if(v3norm(f)<0.2f){float Y[3]={0,1,0};k=v3dot(Y,g_d0);
+        f[0]=Y[0]-k*g_d0[0];f[1]=Y[1]-k*g_d0[1];f[2]=Y[2]-k*g_d0[2];v3norm(f);}
+    g_fwd0[0]=f[0];g_fwd0[1]=f[1];g_fwd0[2]=f[2];
+    v3cross(g_d0,g_fwd0,g_right0); v3norm(g_right0);
+    if(!g_imu_cal){g_imu_cal=true;Serial.println("[IMU] auto-zéro (repère repos figé au sol)");}
+}
+
+static void imuInit(){
+    if(!g_qmi.begin(Wire,QMI8658_L_SLAVE_ADDRESS,IMU_SDA,IMU_SCL) &&
+       !g_qmi.begin(Wire,QMI8658_H_SLAVE_ADDRESS,IMU_SDA,IMU_SCL)){
+        Serial.println("[IMU] QMI8658 absent (begin FAIL)");return;}
+    g_qmi.configAccelerometer(SensorQMI8658::ACC_RANGE_8G, SensorQMI8658::ACC_ODR_250Hz);
+    g_qmi.configGyroscope(SensorQMI8658::GYR_RANGE_256DPS, SensorQMI8658::GYR_ODR_224_2Hz);
+    g_qmi.enableAccelerometer(); g_qmi.enableGyroscope();
+    g_imu_ok=true;
+    Serial.println("[IMU] QMI8658 OK (acc ±8g / gyro ±256dps)");
+}
+
+static void imuTick(){
+    if(!g_imu_ok) return;
+    uint32_t now=millis();
+    static uint32_t lastS=0; if(now-lastS<40) return; lastS=now;   // ~25 Hz (allégé : ne pas affamer le radar/trafic)
+    float ax,ay,az,gx=0,gy=0,gz=0;
+    if(!g_qmi.getAccelerometer(ax,ay,az)) return;
+    g_qmi.getGyroscope(gx,gy,gz);
+    float a[3]={ax,ay,az};
+    float gmag=sqrtf(gx*gx+gy*gy+gz*gz);                 // rotation totale (°/s)
+    float amag=sqrtf(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);     // module accel (g)
+    // Auto-zéro CONTINU tant qu'au sol + stable → suit le mount, fige dès qu'on bouge/vole.
+    bool onGround=(!g_status.valid)||(g_status.flt_st==0);
+    if(onGround && gmag<3.0f && fabsf(amag-1.0f)<0.08f) imuCalibrate(a);
+    if(!g_imu_cal) return;
+    float nz=v3dot(a,g_d0);                              // facteur de charge vertical (g)
+    float ah[3]={a[0]-nz*g_d0[0],a[1]-nz*g_d0[1],a[2]-nz*g_d0[2]};
+    float lat=v3dot(ah,g_right0), lon=v3dot(ah,g_fwd0);  // G latéral / longitudinal (g)
+    float d[3]={a[0],a[1],a[2]}; v3norm(d);
+    float pitch=asinf(constrain(-v3dot(d,g_fwd0),-1.f,1.f))*57.2958f;   // accel-only (v1)
+    float roll =asinf(constrain( v3dot(d,g_right0),-1.f,1.f))*57.2958f;
+    g_imu_nz=nz; g_imu_lat=lat; g_imu_lon=lon; g_imu_pitch=pitch; g_imu_roll=roll;
+    if(nz>g_imu_nz_max)g_imu_nz_max=nz; if(nz<g_imu_nz_min)g_imu_nz_min=nz;
+    if(fabsf(lat)>fabsf(g_imu_lat_pk))g_imu_lat_pk=lat;
+    if(gmag>g_imu_gyr_pk)g_imu_gyr_pk=gmag;
+    // Push 4 Hz au boîtier (CHR_IMU) : nz/lat = EXTRÊME peak-hold de l'intervalle (capte les
+    // pics G entre 2 lignes CSV), pitch/roll = instantané. Reset du peak-hold après envoi.
+    static uint32_t pushT=0;
+    if(now-pushT>=1000){pushT=now;
+        // ISOLATION (v59) : push BLE DÉSACTIVÉ — la write Bluedroid bloquait la boucle ~1-2 s
+        // sous charge trafic → radar figé. On garde l'échantillonnage + peak-hold local pour
+        // mesurer la cadence boucle ([IMU] log). À ré-activer via un mécanisme non bloquant.
+        #if IMU_BLE_PUSH
+        if(g_connected && g_chrImu && g_chrImu->canWrite()){
+            float nzx=(fabsf(g_imu_nz_max-1.f)>=fabsf(g_imu_nz_min-1.f))?g_imu_nz_max:g_imu_nz_min;
+            char p[80];
+            int k=snprintf(p,sizeof(p),"{\"nz\":%.2f,\"lat\":%.2f,\"p\":%.1f,\"r\":%.1f}",
+                           nzx,g_imu_lat_pk,pitch,roll);
+            if(k>0) g_chrImu->writeValue((uint8_t*)p,k,false);
+        }
+        #endif
+        g_imu_nz_max=g_imu_nz_min=nz; g_imu_lat_pk=0; g_imu_gyr_pk=0;   // ré-arme l'intervalle
+    }
+    static uint32_t logT=0; if(now-logT>1000){logT=now;
+        Serial.printf("[IMU] nz=%.2f lat=%.2f pitch=%.0f roll=%.0f%s\n",
+            nz,lat,pitch,roll,(g_connected&&g_chrImu)?" >ATC":"");}
+}
+#endif // HAS_IMU
+
 // ── Setup ─────────────────────────────────────────────────────────────────────
 void setup(){
     Serial.begin(115200);
-#ifdef BOARD_T4S3
+#if defined(BOARD_T4S3) && defined(PANEL_WS241)
+    // Waveshare 2.41 : init RM690B0 + touch FT6336 paysage via le shim (ws241_shim.h)
+    if(!panel.begin()){while(1){Serial.println("Panel FAIL");delay(1000);}}
+    Serial.printf("Touch: %s\n",panel.getTouchModelName());
+    delay(50); // card power-on stabilization
+    g_sd_ok=panel.installSD();   // SD best-effort (pins 2.41 à câbler)
+#elif defined(BOARD_T4S3)
     // T4-S3 : init AMOLED explicite (pas d'auto-détect), SD différée pour passer par installSD()
     // (true, true) = SD différée (installSD() ci-dessous) + LED STAT du PMU SY6970
     // ÉTEINTE (clignotait rouge en permanence sans batterie — feedback vol 2026-06-05).
@@ -6138,7 +6307,10 @@ void setup(){
         if(!SD_MMC.exists("/aip"))SD_MMC.mkdir("/aip");
         Serial.printf("[SD] OK %uGB\n",g_sd_gb);
     }else{Serial.println("[SD] No card");}
-#ifdef BOARD_T4S3
+#ifdef HAS_IMU
+    imuInit();   // QMI8658 sur le bus I2C déjà ouvert par panel.begin()
+#endif
+#if defined(BOARD_T4S3) && !defined(PANEL_WS241)
     // (juin 2026) RÉACTIVITÉ TACTILE — cause racine : beginLvglHelper (non-DMA) alloue un
     // buffer PLEIN ÉCRAN de ~540 KB en PSRAM (lente) + flush SYNCHRONE bloquant (pushColors)
     // → la boucle reste figée pendant chaque rendu/transition, le tactile paraît lent/raté.
@@ -6146,12 +6318,15 @@ void setup(){
     // ASYNCHRONE (pushColorsDMA) → la boucle n'est plus bloquée par le push pixels. C'est
     // la voie « perf » prévue par LilyGo (exemples factory T4). Geometry/rounder inchangés.
     beginLvglHelperDMA(panel);
-    // En complément : échantillonnage tactile 30→12 ms (lecture du touch plus fréquente).
+#else
+    beginLvglHelper(panel);   // T-RGB / WS-216 / WS-241 (shim Arduino_GFX)
+#endif
+    // RÉACTIVITÉ TACTILE — TOUTES cartes : période d'échantillonnage du/des input devices
+    // 30 ms (défaut LVGL) → 12 ms. Avant, seul le T4 (branche DMA) l'avait → WS241/WS216/
+    // T-RGB restaient à 30 ms → petites cibles (bouton engrenage Settings) ratant des taps
+    // quand la boucle est chargée (radar/AIP/alertes). Hors-DMA en bénéficie aussi.
     for(lv_indev_t* d=lv_indev_get_next(NULL); d; d=lv_indev_get_next(d))
         if(d->driver && d->driver->read_timer) lv_timer_set_period(d->driver->read_timer,12);
-#else
-    beginLvglHelper(panel);
-#endif
     // Le canvas 480×480 décalé (UI_OY<0 sur T4-S3) déborde de l'écran → sans ceci,
     // LVGL rend l'écran scrollable et dessine une scrollbar verticale grise au bord
     // droit (pleine hauteur). Toujours OFF : l'UI ne doit jamais scroller l'écran.
@@ -6179,10 +6354,11 @@ void setup(){
     // Auth — load DB + restore cached session; popup shown when BLE+GPS ready
     pilotDBLoad();
     checkOwnerNVS();
-    // FORCE encodage appareil : sans immat+type+hex, on ouvre d'office la page
-    // AIRCRAFT et on interdit sa fermeture (cf _ac_key_cb d==202). La box ne doit
-    // jamais opérer sans identité — sinon rien n'est transmis à SafeSky.
-    if(!(g_ac_reg[0]&&g_ac_type[0]&&g_ac_hex[0])) mkAircraftOverlay();
+    // (2026-06) Identité aéronef saisie au PORTAIL WEB du boîtier (plus à l'écran) :
+    // le boîtier pousse reg/typ/hex en STATUS BLE → affichés live (accueil + Active
+    // Aircraft). Plus de saisie FORCÉE ici (l'overlay AIRCRAFT était le dernier reliquat
+    // de la page retirée). Si le boîtier n'a pas d'identité, l'accueil montre un hint
+    // non-bloquant « set via WiFi Setup » (p0UpdateAcId). Overlay legacy non déclenché.
     Serial.println("Ready");}
 
 // ── Loop ──────────────────────────────────────────────────────────────────────
@@ -6240,6 +6416,9 @@ void loop(){
             if(g_session.is_owner){Preferences p;p.begin("auth",false);p.putString("owner",s_session_pc);p.end();}
             if(!hadName)showWelcome(g_session.name, s_instr_name[0]?s_instr_name:nullptr);
             g_dataUpdated=true;}}
+#ifdef HAS_IMU
+    imuTick();   // mouchard G/assiette : échantillonne ~50 Hz, peak-hold, auto-zéro au sol
+#endif
     static uint32_t drLast=0;
     if(now-drLast>=200){drLast=now;
         alertEngineTick();                       // moteur anticollision : toutes pages (force le radar même hors radar)
