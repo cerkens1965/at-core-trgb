@@ -128,7 +128,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "63"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v63 : WS241 — AIP EU EMBARQUÉE dans la flash écran (aip_data.h, gated BOARD_WS241) chargée au boot (instant, persistant) → remplace le pull BLE (qui corrompait les données par lectures curseur désalignées : nfiles garbage, 0/401 CTR aléatoire). Les autres écrans gardent la SD. v62 : accueil hint conditionnel. v61 : pull BLE (déprécié WS241). */
+#define VIEW_VERSION  "64"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v64 : AIP_MAX_CTR 1024→2048 (toute l'EU = 1098 zones CTR / 13813 pts mesuré ; 1024 plafonnait). v63 : WS241 AIP EU embarquée flash écran (remplace le pull BLE corrompu). v62 : accueil hint conditionnel. */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -645,8 +645,8 @@ static bool     g_sd_ok = false;
 
 // ── AIP overlay data (PSRAM) ─────────────────────────────────────────────────
 struct AipCtrEntry { uint16_t pt_start,n_pts; uint8_t type_id; };
-#define AIP_MAX_CTR 1024
-#define AIP_MAX_PTS 24000
+#define AIP_MAX_CTR 2048   // toute l'EU = 1098 zones CTR (mesuré 2026-06-27) → 2048 = marge ; 1024 plafonnait
+#define AIP_MAX_PTS 24000  // toute l'EU = 13813 points → 24000 suffit (pas besoin de relever)
 #define AIP_MAX_AD  5500
 static AipCtrEntry g_aip_ctr[AIP_MAX_CTR];
 static int32_t*    g_aip_lat    = nullptr;   // ps_malloc, lat×1e6
