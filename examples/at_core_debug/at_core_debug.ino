@@ -128,7 +128,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "65"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
+#define VIEW_VERSION  "68"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v68 : SYSTEM = tuiles en grille 2 colonnes (même style que la grille SETTINGS, contour bleu), plus de barres pleine largeur ; SD card en libellé d'état. v67 : SYSTEM = un gros bouton plein large par page (le nom EST sur le bouton, plus de couple label+OPEN). v66 : MENU Settings — fusion CONFIG+DISPLAY en 1 section "CONFIG" scrollable (swipe down ; brightness/theme/scale/vfilt/altdiff/callsign), grille passe à 5 tuiles (6e libre dev futur), SYSTEM = boutons WIFI/FlightLogs/Updates/Diagnostic/Test. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -629,7 +629,9 @@ static lv_obj_t* s_menu      = nullptr;  // page d'accueil réglages (grille 6 g
 static lv_obj_t* s_sec[6]    = {};       // conteneurs sections (cachés sauf l'ouvert)
 static lv_obj_t* s_back_btn  = nullptr;  // cercle « retour » haut-droite (visible en section)
 static int8_t    s_cur_sec   = -1;       // -1 = menu affiché, sinon index section ouverte
-static const char* kSecName[6]={"CONFIG","DISPLAY","TRAFFIC","PILOT","SYSTEM","ABOUT"};
+// (2026-06-27) FUSION CONFIG+DISPLAY → 1 section "CONFIG" scrollable (swipe down) ;
+// libère la 6e tuile de la grille (réservée dev futur, laissée vide).
+static const char* kSecName[6]={"CONFIG","TRAFFIC","PILOT","SYSTEM","ABOUT",""};
 static lv_obj_t* s_set_acval = nullptr;  // bloc "Active Aircraft" REG/TYP/HEX (en-tête, menu seul)
 static lv_obj_t* s_set_aclbl = nullptr;  //   label "Active Aircraft" associé
 static void settingsShowMenu();          // (fwd) utilisé par switchPage pour reset à l'entrée
@@ -3667,6 +3669,27 @@ static lv_obj_t* mkBigBtnRow(lv_obj_t*p,const char*k,int y,const char*v,const ch
     return vl;
 }
 
+// Tuile de navigation = MÊME STYLE que la grille SETTINGS (mkMenuBtn) : contour bleu, rempli
+// au press, nom centré. Posée en grille 2 colonnes dans la page SYSTEM (pas de barres pleine
+// largeur). Géométrie board-aware identique à mkMenuBtn.
+static void mkNavTile(lv_obj_t*p,const char*name,int x,int y,lv_event_cb_t cb){
+    lv_obj_t*bt=lv_btn_create(p);
+#ifdef BOARD_T4S3
+    lv_obj_set_size(bt,252,80);const lv_font_t*MF=&lv_font_montserrat_24;
+#else
+    lv_obj_set_size(bt,180,64);const lv_font_t*MF=&lv_font_montserrat_18;
+#endif
+    lv_obj_set_pos(bt,x,y);
+    lv_obj_set_style_bg_color(bt,TBG(),0);lv_obj_set_style_bg_opa(bt,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(bt,C_BRAND,0);lv_obj_set_style_border_width(bt,2,0);
+    lv_obj_set_style_radius(bt,16,0);lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0);
+    lv_obj_set_style_bg_color(bt,C_BRAND,LV_STATE_PRESSED);
+    lv_obj_add_event_cb(bt,cb,LV_EVENT_CLICKED,NULL);
+    lv_obj_t*l=lv_label_create(bt);lv_label_set_text(l,name);
+    lv_obj_set_style_text_color(l,C_BRAND,0);
+    lv_obj_set_style_text_font(l,MF,0);lv_obj_center(l);
+}
+
 // ── Maintenance overlay (Modèle 1 : hotspot + transfert vol) ──────────────────
 static lv_obj_t* g_maint_scanlist;   // fwd : annulé ici aussi (enfant de l'overlay)
 static lv_obj_t* g_maint_upd=nullptr;   // annonce de MAJ firmware (au-dessus du bouton Update)
@@ -4981,9 +5004,11 @@ void buildSettingsPageT4(lv_obj_t*p){
     lv_obj_set_style_bg_opa(s_menu,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(s_menu,0,0);
     lv_obj_set_style_pad_all(s_menu,0,0);lv_obj_clear_flag(s_menu,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(s_menu,swipeCb,LV_EVENT_ALL,NULL);   // swipe horizontal (nav page) conservé
+    // 5 tuiles : CONFIG / TRAFFIC / PILOT (col 0) · SYSTEM / ABOUT (col 1) ; 6e cellule
+    // (col1,r0+2*dyr) laissée VIDE = slot réservé pour un futur réglage.
     {mkMenuBtn(s_menu,0,col0,r0);        mkMenuBtn(s_menu,3,col1,r0);
      mkMenuBtn(s_menu,1,col0,r0+dyr);    mkMenuBtn(s_menu,4,col1,r0+dyr);
-     mkMenuBtn(s_menu,2,col0,r0+2*dyr);  mkMenuBtn(s_menu,5,col1,r0+2*dyr);}
+     mkMenuBtn(s_menu,2,col0,r0+2*dyr);}
 
     // ── 6 conteneurs sections (cachés au départ) ────────────────────────────
     for(int i=0;i<6;i++){
@@ -4995,50 +5020,54 @@ void buildSettingsPageT4(lv_obj_t*p){
         lv_obj_add_flag(s_sec[i],LV_OBJ_FLAG_HIDDEN);
     }
 
-    // 0) CONFIG : Default radar scale · Vertical filter (→ VF SafeSky poussé ATC) · Alt difference · Callsign
+    // 0) CONFIG (fusion ex-CONFIG + ex-DISPLAY) — SCROLLABLE verticalement (swipe down) :
+    //    BRIGHTNESS (slider horizontal, en tête : ne gêne pas le scroll vertical) · THEME ·
+    //    Default radar scale · Vertical filter (→ VF SafeSky poussé ATC) · Alt difference · Callsign.
+    //    6 lignes > hauteur écran → on active le scroll vertical au lieu de tout tasser.
     {lv_obj_t*sp=s_sec[0]; const int Y0=8,DY=72;
-     snprintf(b,sizeof(b),"%d nm",g_cfg.scale_nm);
-     s_scale_v=mkPopRow(sp,"DEFAULT RADAR SCALE",Y0+0*DY,b,"DEFAULT RADAR SCALE",kScaleStr,7,_idxScale,_applyScale);
-     snprintf(b,sizeof(b),"%d ft",g_cfg.vfilt_ft);
-     s_vfilt_v=mkPopRow(sp,"VERTICAL FILTER",Y0+1*DY,b,"VERTICAL FILTER (ft)",kVfiltStr,4,_idxVfilt,_applyVfilt);
-     mkSegRow(sp,"ALT DIFFERENCE",Y0+2*DY,"OFF","ON",&g_cfg.show_vdiff,false);
-     mkSegRow(sp,"CALLSIGN",Y0+3*DY,"OFF","ON",&g_cfg.show_cs,false);}
-
-    // 1) DISPLAY : BRIGHTNESS slider · THEME segmented
-    {lv_obj_t*sp=s_sec[1]; const int Y0=8,DY=72;
      mkBigBrightRow(sp,"BRIGHTNESS",Y0+0*DY,g_cfg.brightness);
-     mkSegRow(sp,"THEME",Y0+1*DY,"LIGHT","DARK",&g_cfg.dark,false);}
+     mkSegRow(sp,"THEME",Y0+1*DY,"LIGHT","DARK",&g_cfg.dark,false);
+     snprintf(b,sizeof(b),"%d nm",g_cfg.scale_nm);
+     s_scale_v=mkPopRow(sp,"DEFAULT RADAR SCALE",Y0+2*DY,b,"DEFAULT RADAR SCALE",kScaleStr,7,_idxScale,_applyScale);
+     snprintf(b,sizeof(b),"%d ft",g_cfg.vfilt_ft);
+     s_vfilt_v=mkPopRow(sp,"VERTICAL FILTER",Y0+3*DY,b,"VERTICAL FILTER (ft)",kVfiltStr,4,_idxVfilt,_applyVfilt);
+     mkSegRow(sp,"ALT DIFFERENCE",Y0+4*DY,"OFF","ON",&g_cfg.show_vdiff,false);
+     mkSegRow(sp,"CALLSIGN",Y0+5*DY,"OFF","ON",&g_cfg.show_cs,false);
+     // Scroll vertical : le contenu (6 lignes ≈ 420 px) dépasse le conteneur → swipe down.
+     // Slider brightness horizontal en tête → drag horizontal = brightness, drag vertical = scroll
+     // (orthogonaux, pas de conflit). Le swipe HORIZONTAL de nav page reste géré par swipeCb (bubble).
+     lv_obj_add_flag(sp,LV_OBJ_FLAG_SCROLLABLE);
+     lv_obj_set_scroll_dir(sp,LV_DIR_VER);
+     lv_obj_set_scrollbar_mode(sp,LV_SCROLLBAR_MODE_AUTO);}
 
-    // 2) TRAFFIC : GROUNDED · ICONS · AIP · HELIPORT · ALERT MODE (override circuit)
-    {lv_obj_t*sp=s_sec[2]; const int Y0=8,DY=66;
+    // 1) TRAFFIC : GROUNDED · ICONS · AIP · HELIPORT · ALERT MODE (override circuit)
+    {lv_obj_t*sp=s_sec[1]; const int Y0=8,DY=66;
      mkSegRow (sp,"GROUNDED",Y0+0*DY,"OFF","ON",&g_cfg.show_grnd,false);
      mkSegRowN(sp,"ICONS",Y0+1*DY,kIconSzNames,3,&g_cfg.icon_sz,1);
      mkSegRow (sp,"AIP",Y0+2*DY,"OFF","ON",&g_cfg.aip_en,false);
      mkSegRow (sp,"HELIPORT",Y0+3*DY,"OFF","ON",&g_cfg.ad_heli,false);
      mkSegRowN(sp,"ALERT MODE",Y0+4*DY,kCircNames,3,&g_cfg.circuit_ovr,0);}  // AUTO / CIRCUIT forcé / ROUTE forcé
 
-    // 3) PILOT : réservé (réactivé plus tard). L'identité aéronef se configure désormais
+    // 2) PILOT : réservé (réactivé plus tard). L'identité aéronef se configure désormais
     //    via le portail web (champ "Active Aircraft" affiché à droite du menu) → page AIRCRAFT retirée.
-    {lv_obj_t*sp=s_sec[3];
+    {lv_obj_t*sp=s_sec[2];
      mkLblP(sp,"PILOT",TFG(),&lv_font_montserrat_24,40,8);
      mkLblP(sp,"Coming soon",lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,8+44);}
 
-    // 4) SYSTEM : WIFI SETUP · MAINTENANCE · TEST · SD CARD
-    //    (WIFI SETUP = portail boîtier pour config identité + WiFi club ; remplace l'ancien
-    //     toggle WIFI AP écran, qui repassera dans DIAGNOSTIC. MAINTENANCE garde UPDATES/diag
-    //     en attendant leur migration en pages dédiées.)
-    {lv_obj_t*sp=s_sec[4]; const int Y0=6,DY=60;
-     mkBigBtnRow(sp,"WIFI SETUP",Y0+0*DY,"","OPEN",_open_wifisetup_cb);
-     mkBigBtnRow(sp,"FlightLogs",Y0+1*DY,"","OPEN",_open_vols_cb);          // liste + Send last/all + Delete sent
-     mkBigBtnRow(sp,"UPDATES",Y0+2*DY,"","OPEN",_open_updates_cb);         // versions ATC/ATV + MAJ contextuelle
-     mkBigBtnRow(sp,"DIAGNOSTIC",Y0+3*DY,"","OPEN",_open_diag_cb);         // WiFi club/SD + Test WiFi/Reboot/AP écran (ex-Maintenance)
-     mkBigBtnRow(sp,"TEST",Y0+4*DY,"","OPEN",_open_test_cb);   // QA : simuler cycle vol (Phase A)
-     char sd[14]; if(g_sd_ok)snprintf(sd,sizeof(sd),"%u GB",g_sd_gb);else strlcpy(sd,"NO CARD",sizeof(sd));
-     mkLblP(sp,"SD CARD",lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,Y0+5*DY+6);
-     s_sd_v=mkLblP(sp,sd,g_sd_ok?C_GREEN:lv_color_hex(0x4b5563),&lv_font_montserrat_20,360,Y0+5*DY+6);}
+    // 3) SYSTEM : tuiles en grille 2 colonnes (même style que la grille SETTINGS), une par page.
+    //    Géométrie col0/col1/r0/dyr réutilisée de la grille → tuiles alignées à l'identique.
+    //    5 tuiles ; la 6e cellule (col1, 3e rangée) porte l'état SD CARD (libellé, pas un bouton).
+    {lv_obj_t*sp=s_sec[3];
+     mkNavTile(sp,"WIFI",      col0,r0,        _open_wifisetup_cb);   // portail : identité + WiFi club
+     mkNavTile(sp,"FlightLogs",col1,r0,        _open_vols_cb);         // liste + Send/Delete
+     mkNavTile(sp,"Updates",   col0,r0+dyr,    _open_updates_cb);     // versions ATC/ATV + MAJ
+     mkNavTile(sp,"Diagnostic",col1,r0+dyr,    _open_diag_cb);        // WiFi/SD + Test/Reboot
+     mkNavTile(sp,"Test",      col0,r0+2*dyr,  _open_test_cb);        // QA : simuler cycle vol
+     char sd[16]; if(g_sd_ok)snprintf(sd,sizeof(sd),"SD %u GB",g_sd_gb);else strlcpy(sd,"NO SD CARD",sizeof(sd));
+     s_sd_v=mkLblP(sp,sd,g_sd_ok?C_GREEN:lv_color_hex(0x4b5563),&lv_font_montserrat_20,col1+10,r0+2*dyr+26);}
 
-    // 5) ABOUT : versions & batteries (lecture seule, live BLE)
-    {lv_obj_t*sp=s_sec[5]; const lv_color_t kcol=lv_color_hex(0x4b5563); const int X2=320,DYr=40;
+    // 4) ABOUT : versions & batteries (lecture seule, live BLE)
+    {lv_obj_t*sp=s_sec[4]; const lv_color_t kcol=lv_color_hex(0x4b5563); const int X2=320,DYr=40;
      mkLblP(sp,"AT-VIEW",kcol,&lv_font_montserrat_20,40,8+0*DYr);
      mkLblP(sp,VIEW_VSTR,verColor(VIEW_VSTR),&lv_font_montserrat_20,X2,8+0*DYr);   // "1.2.38-dev" coloré par canal
      mkLblP(sp,"AT-CORE",kcol,&lv_font_montserrat_20,40,8+1*DYr);
