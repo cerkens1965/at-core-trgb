@@ -28,11 +28,12 @@
 #define WS241_LCD_D2    13
 #define WS241_LCD_D3    14
 #define WS241_LCD_RST   21
-#define WS241_NATIVE_W 450   // dalle native portrait
+#define WS241_NATIVE_W 480   // dalle native portrait (largeur) — 480 (et non 450 du T4) : la 2.41
+                             // est plus haute en paysage → bande noire en bas si trop petit (2026-06-30)
 #define WS241_NATIVE_H 600
-#define WS241_ROT       3    // 3 = paysage 90° CCW → 600×450 à l'endroit (validé HW 2026-06-26)
+#define WS241_ROT       3    // 3 = paysage 90° CCW → 600×480 à l'endroit
 #define WS241_LCD_W    600   // logique paysage (post-rotation) = ce que voit l'UI T4
-#define WS241_LCD_H    450
+#define WS241_LCD_H    480   // = NATIVE_W ; l'UI fait 480 de haut → remplit pile la dalle
 #define WS241_MADCTL  0x00
 
 #define WS241_I2C_SDA  47
