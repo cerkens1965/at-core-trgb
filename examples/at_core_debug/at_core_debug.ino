@@ -17,6 +17,8 @@
 #ifdef BOARD_T4S3            // ── Port test LilyGo T4-S3 AMOLED 2.41" (600×450 rect) ──
 #ifdef PANEL_WS241
 #include "ws241_shim.h"      // Arduino_GFX RM690B0 + SensorLib FT6336 + beginLvglHelper maison
+#include <driver/i2s_std.h>  // DAC I2S PCM5102A (audio) — include EN TÊTE (un #include en plein
+                             // milieu du .ino casse le générateur de prototypes Arduino → T4 KO)
 #define SD_MMC SD            // SD en SPI (fs::FS partagé) — best-effort sur la 2.41
 #else
 #include <LilyGo_AMOLED.h>   // lib LilyGo-AMOLED-Series : RM690B0 QSPI + touch CST226SE
@@ -128,7 +130,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "68"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v68 : SYSTEM = tuiles en grille 2 colonnes (même style que la grille SETTINGS, contour bleu), plus de barres pleine largeur ; SD card en libellé d'état. v67 : SYSTEM = un gros bouton plein large par page (le nom EST sur le bouton, plus de couple label+OPEN). v66 : MENU Settings — fusion CONFIG+DISPLAY en 1 section "CONFIG" scrollable (swipe down ; brightness/theme/scale/vfilt/altdiff/callsign), grille passe à 5 tuiles (6e libre dev futur), SYSTEM = boutons WIFI/FlightLogs/Updates/Diagnostic/Test. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
+#define VIEW_VERSION  "73"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v73 : WS-241 marges de respiration — RAD_R 208→198 (~20 px de blanc haut/bas, cardinaux N/S ne touchent plus) + bouton zoom "−" réancré SCR_H (ne flotte plus). v72 : WS-241 layout 600×480 — radar recentré (RAD_CY 240/RAD_R 208), pages+overlays+AIP+gear+accueil réancrés via SCR_W/SCR_H board-aware (T4 reste 450). v71 : FIX bande noire bas WS-241 — dalle 2.41 = 600×480 (pas 450), WS241_NATIVE_W/LCD_H 450→480 + UI_OY 0 → canvas 480 remplit pile la hauteur. v70 : ENCODEUR ROTATIF + poussoir (EC11) WS-241 — tourner=zoom radar (page suiv/préc ailleurs), clic=page suivante, appui long=action sheet Start/Stop. A=GPIO38/B=39/SW=40, décodeur quadrature sur ISR. Gated BOARD_WS241, no-op ailleurs. v69 : AUDIO I2S (DAC PCM5102A) TEST sur WS-241 — bip de validation au boot + bouton TEST (BCK=5/LCK=6/DIN=7, SCK→GND ; API i2s_std core 3.x). Gated BOARD_WS241, no-op ailleurs. v68 : SYSTEM = tuiles en grille 2 colonnes (même style que la grille SETTINGS, contour bleu), plus de barres pleine largeur ; SD card en libellé d'état. v67 : SYSTEM = un gros bouton plein large par page (le nom EST sur le bouton, plus de couple label+OPEN). v66 : MENU Settings — fusion CONFIG+DISPLAY en 1 section "CONFIG" scrollable (swipe down ; brightness/theme/scale/vfilt/altdiff/callsign), grille passe à 5 tuiles (6e libre dev futur), SYSTEM = boutons WIFI/FlightLogs/Updates/Diagnostic/Test. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -149,11 +151,11 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 WS241_Panel panel;           // shim Arduino_GFX/SensorLib RM690B0 paysage (ws241_shim.h)
 static inline void panelBright(uint8_t v){ panel.setBrightness(v>=16?255:v*17); }
 #define lv_font_montserrat_10 lv_font_montserrat_12
-// Paysage 600×450 ; canvas UI 480×480 centré. La dalle RM690B0 de la 2.41 affiche
-// le contenu ~3 px plus haut que le T4 (N collait en haut) → on descend le canvas de
-// 3 px (UI_OY -15 → -12) pour rééquilibrer marge haut/bas. (Validé HW 2026-06-26.)
+// Paysage 600×480 (dalle 2.41 = 480 de haut, pas 450) ; canvas UI 480×480 → remplit pile
+// la hauteur. UI_OX=60 centre horizontalement (480 dans 600) ; UI_OY=0 (plus de rognage ni
+// de bande noire en bas — corrigé 2026-06-30 après constat bande pleine largeur).
 #define UI_OX  60
-#define UI_OY  (-12)
+#define UI_OY  (0)
 #else
 LilyGo_Class amoled;
 #define panel amoled         // les call-sites panel.* (begin via setup dédié) pointent sur l'AMOLED
@@ -396,8 +398,13 @@ static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE
 // (juin 2026) Radar CENTRÉ sur l'écran (« mettre le radar bien au milieu »).
 // CX=300 = centre du 600×450 → cluster bas + pill cap recentrés (RB_DX/HDG_DX=0).
 #define RAD_CX 300          // centre radar écran (= centre du 600 px)
+#ifdef PANEL_WS241
+#define RAD_CY 240          // WS-241 = dalle 600×480 → centre vertical 240 (profite des 30 px supp)
+#define RAD_R  198          // marge de respiration ~20 px haut/bas (cardinaux N/S : 240±(198+12)=±210 → bord à 30, label ~20 → ~20 px de blanc)
+#else
 #define RAD_CY 225
-#define RAD_R  193          // (juin 2026) réduit pour que S/N (cardinaux extérieurs) tiennent dans 450 px
+#define RAD_R  193          // T4-S3 450 px : (juin 2026) réduit pour que S/N (cardinaux extérieurs) tiennent
+#endif
 #define RLC_X  10           // x colonne annotations gauche (pastilles GPS/LTE + mode SafeSky)
 #define RB_DX  0            // cluster scale/GS centré sous le radar (radar au milieu)
 #define RB_DY  0
@@ -456,6 +463,20 @@ static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE
 #else
  #define RAD_OVERSCAN 1.0f
  #define AIP_CULL     1.5f
+#endif
+// Dimensions écran/page board-aware (pour passer le radar/overlays/positions de 450→480 sur
+// la Waveshare 2.41 sans toucher au T4-S3 qui reste 600×450). T-RGB/WS216 = 480×480.
+#ifdef BOARD_T4S3
+ #ifdef PANEL_WS241
+  #define SCR_W 600
+  #define SCR_H 480
+ #else
+  #define SCR_W 600
+  #define SCR_H 450
+ #endif
+#else
+ #define SCR_W 480
+ #define SCR_H 480
 #endif
 static lv_obj_t *r_radar_hdg, *r_radar_scale_lbl, *r_radar_gs;
 static lv_obj_t *r_radar_ver=nullptr;   // version firmware + date (bas de la page radar)
@@ -635,6 +656,19 @@ static const char* kSecName[6]={"CONFIG","TRAFFIC","PILOT","SYSTEM","ABOUT",""};
 static lv_obj_t* s_set_acval = nullptr;  // bloc "Active Aircraft" REG/TYP/HEX (en-tête, menu seul)
 static lv_obj_t* s_set_aclbl = nullptr;  //   label "Active Aircraft" associé
 static void settingsShowMenu();          // (fwd) utilisé par switchPage pour reset à l'entrée
+// (2026-06-30) Forward-decls EXPLICITES : après l'ajout du module audio/encodeur, le générateur
+// de prototypes Arduino ne couvre plus ces fonctions sur le build T4-S3 (divergence du
+// preprocessing selon la carte) → "was not declared". Decls manuelles = robuste (cf
+// "auto-prototype fragility" dans CLAUDE.md). PilotEntry/lv_color_t sont déjà définis plus haut.
+static int        _parsePilotJSON(const char* json);
+void              hideUploadOverlay();
+PilotEntry*       pilotFind(const char* code);
+void              sendVfilt(int ft);
+void              unitSaveHotspot(const char* ssid, const char* pass);
+void              unitSaveMac(const char* mac);
+static lv_color_t verColor(const char* s);
+void              wifiStart();
+void              wifiStop();
 // Largeur de la zone Settings (coords écran) — pilote la géométrie board-aware des helpers.
 #ifdef BOARD_T4S3
   #define SETW 600   // T4-S3 : rectangle plein écran 600 px
@@ -667,6 +701,120 @@ static volatile bool g_aip_pull_req = false;   // (A1) armé à la connexion si 
 #define AIP_EMBEDDED 1
 #include "aip_data.h"
 #endif
+
+// ── Audio I2S — DAC externe PCM5102A (jack 3.5mm → casque / audio panel) ─────
+// Itération 1 (TEST sur WS-241) : valider DAC + câblage + broches via un bip.
+// La cadence/hauteur pilotée par le moteur d'alerte (level/dist) viendra après.
+// ⚠️ CÂBLAGE (header WS-241, broches réellement sorties) : VIN→3V3 · GND→GND ·
+//    BCK→GPIO5 · LCK→GPIO6 · DIN→GPIO7 · SCK→GND (CRITIQUE, sinon silence).
+// Core 3.x (pioarduino/IDF5) → nouvelle API i2s_std (include remonté en tête, cf zone includes).
+#if defined(BOARD_WS241)
+#define AUD_BCK   5
+#define AUD_WS    6
+#define AUD_DOUT  7
+#define AUD_SR    16000
+static i2s_chan_handle_t g_aud_tx = nullptr;
+static bool g_aud_ok = false;
+static void audioInit(){
+    i2s_chan_config_t cc = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
+    if(i2s_new_channel(&cc,&g_aud_tx,NULL)!=ESP_OK) return;
+    // Struct remplie champ par champ : les macros I2S_STD_*_DEFAULT_CONFIG ont un ordre de
+    // designated-initializers que le C++ refuse (erreur ext_clk_freq_hz). memset puis champs requis.
+    i2s_std_config_t sc; memset(&sc,0,sizeof(sc));
+    sc.clk_cfg.sample_rate_hz = AUD_SR;
+    sc.clk_cfg.clk_src        = I2S_CLK_SRC_DEFAULT;
+    sc.clk_cfg.mclk_multiple  = I2S_MCLK_MULTIPLE_256;
+    sc.slot_cfg.data_bit_width = I2S_DATA_BIT_WIDTH_16BIT;
+    sc.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO;
+    sc.slot_cfg.slot_mode      = I2S_SLOT_MODE_STEREO;
+    sc.slot_cfg.slot_mask      = I2S_STD_SLOT_BOTH;
+    sc.slot_cfg.ws_width       = 16;
+    sc.slot_cfg.ws_pol         = false;
+    sc.slot_cfg.bit_shift      = true;          // format Philips/I2S (MSB décalé 1 BCLK)
+    sc.gpio_cfg.mclk = I2S_GPIO_UNUSED;
+    sc.gpio_cfg.bclk = (gpio_num_t)AUD_BCK;
+    sc.gpio_cfg.ws   = (gpio_num_t)AUD_WS;
+    sc.gpio_cfg.dout = (gpio_num_t)AUD_DOUT;
+    sc.gpio_cfg.din  = I2S_GPIO_UNUSED;
+    if(i2s_channel_init_std_mode(g_aud_tx,&sc)!=ESP_OK){ g_aud_tx=nullptr; return; }
+    i2s_channel_enable(g_aud_tx);
+    g_aud_ok=true;
+    Serial.println("[AUD] I2S PCM5102A pret (BCK5/WS6/DIN7, SCK->GND)");
+}
+// Bip BLOQUANT (ponctuel seulement : boot / bouton test). Sinus 16-bit stéréo.
+static void audioBeep(int freq,int ms,int volPct){
+    if(!g_aud_ok) return;
+    const int N=256; static int16_t buf[N*2];
+    float amp=32767.0f*(volPct/100.0f), ph=0.0f, dp=2.0f*3.14159265f*freq/AUD_SR;
+    long total=(long)AUD_SR*ms/1000, done=0; size_t wr;
+    while(done<total){
+        int n=(total-done<N)?(int)(total-done):N;
+        for(int i=0;i<n;i++){ int16_t s=(int16_t)(amp*sinf(ph)); ph+=dp; if(ph>6.2831853f)ph-=6.2831853f; buf[2*i]=s; buf[2*i+1]=s; }
+        i2s_channel_write(g_aud_tx,buf,n*2*sizeof(int16_t),&wr,100/portTICK_PERIOD_MS);
+        done+=n;
+    }
+}
+static void audioTestChime(){ audioBeep(880,120,60); audioBeep(1175,120,60); audioBeep(1568,200,60); }  // 3 bips ascendants = câblage OK
+#else
+static inline void audioInit(){}
+static inline void audioTestChime(){}
+#endif
+
+// ── Encodeur rotatif + poussoir (EC11) — nav pages + zoom EN VOL (WS-241) ────
+// Bien plus sûr que le tactile en vol. Tourner = ZOOM (radar) / page suiv-préc (ailleurs) ;
+// clic court = page suivante ; appui long = action sheet Start/Stop (radar).
+// CÂBLAGE : A→GPIO38 · commun→GND · B→GPIO39 · poussoir→GPIO40 + GND. Pull-ups internes.
+#if defined(BOARD_WS241)
+void cfgSave(); void updSetPage(); static void radarActShow();   // fwd (définis plus bas)
+#define ENC_A   38
+#define ENC_B   39
+#define ENC_SW  40
+#define ENC_LONG_MS 600
+// Décodeur quadrature plein-pas (Ben Buxton) : 1 évènement par cran, anti-rebond inhérent.
+static const uint8_t ENC_TBL[7][4]={
+    {0x0,0x2,0x4,0x0},{0x3,0x0,0x1,0x10},{0x3,0x2,0x0,0x0},{0x3,0x2,0x1,0x0},
+    {0x6,0x0,0x4,0x0},{0x6,0x5,0x0,0x20},{0x6,0x5,0x4,0x0},
+};
+static volatile uint8_t g_enc_st=0;
+static volatile int     g_enc_delta=0;
+static portMUX_TYPE     g_enc_mux=portMUX_INITIALIZER_UNLOCKED;
+static void IRAM_ATTR encISR(){
+    uint8_t ab=(digitalRead(ENC_A)<<1)|digitalRead(ENC_B);
+    g_enc_st=ENC_TBL[g_enc_st&0x0f][ab];
+    uint8_t d=g_enc_st&0x30;
+    if(d==0x10)g_enc_delta++; else if(d==0x20)g_enc_delta--;
+}
+static void radarZoom(int dir){   // +1 = zoom in (range--), -1 = zoom out (range++)
+    int si=0;for(int i=0;i<7;i++)if(kScaleOpts[i]==g_cfg.scale_nm)si=i;
+    if(dir>0)si=(si>0)?si-1:0; else si=(si<6)?si+1:6;
+    g_cfg.scale_nm=kScaleOpts[si]; cfgSave(); updSetPage();
+}
+static void encStep(int dir){
+    if(g_page==1) radarZoom(dir);                                  // radar → zoom
+    else { g_navPage=(dir>0)?(uint8_t)((g_page+1)%NUM_PAGES)
+                            :(uint8_t)((g_page+NUM_PAGES-1)%NUM_PAGES);
+           g_navPending=true; }                                    // sinon → page suiv/préc
+}
+static void encoderInit(){
+    pinMode(ENC_A,INPUT_PULLUP); pinMode(ENC_B,INPUT_PULLUP); pinMode(ENC_SW,INPUT_PULLUP);
+    attachInterrupt(ENC_A,encISR,CHANGE); attachInterrupt(ENC_B,encISR,CHANGE);
+    Serial.println("[ENC] rotary A38/B39/SW40 pret");
+}
+static void encoderPoll(){        // appelé depuis loop() (contexte LVGL, jamais d'UI en ISR)
+    int d; portENTER_CRITICAL(&g_enc_mux); d=g_enc_delta; g_enc_delta=0; portEXIT_CRITICAL(&g_enc_mux);
+    while(d>0){ encStep(+1); d--; }
+    while(d<0){ encStep(-1); d++; }
+    static bool down=false,longFired=false; static uint32_t t0=0;
+    bool pressed=(digitalRead(ENC_SW)==LOW); uint32_t now=millis();
+    if(pressed && !down){ down=true; longFired=false; t0=now; }
+    else if(pressed && down && !longFired && now-t0>=ENC_LONG_MS){ longFired=true; if(g_page==1) radarActShow(); }
+    else if(!pressed && down){ down=false; if(!longFired && now-t0>=30){ g_navPage=(uint8_t)((g_page+1)%NUM_PAGES); g_navPending=true; } }
+}
+#else
+static inline void encoderInit(){}
+static inline void encoderPoll(){}
+#endif
+
 static lv_obj_t*   r_aip_layer  = nullptr;
 static lv_obj_t*   s_aip_v      = nullptr;
 static lv_obj_t*   s_heli_v     = nullptr;
@@ -1448,7 +1596,8 @@ void buildStatusPage(){
     // bloc versions du bas (batterie/ATV/ATC) ré-espacé pour ne PAS se chevaucher ni
     // coller au bord bas (overlay à UI_OY=-15 → y écran = y local - 15). T-RGB inchangé.
 #ifdef BOARD_T4S3
-    const int vwZoom=400, vwY=44, atZoom=480, atY=82, acidY=176, batY=394, verY=422, atcY=422;
+    const int vwZoom=400, vwY=44, atZoom=480, atY=82, acidY=176,
+              batY=394+(SCR_H-450), verY=422+(SCR_H-450), atcY=422+(SCR_H-450);  // cluster bas calé au bas réel (480 WS-241)
     const lv_font_t *FID=&lv_font_montserrat_24, *FVER=&lv_font_montserrat_16;   // (juin 2026) identité PLUS GRANDE
     const int chkY0=226, chkDY=33;                                               // (juin 2026) plus d'air sous l'identité + 5 checks (SafeSky)
 #else
@@ -2939,7 +3088,7 @@ void buildRadarPage(){
 #ifdef BOARD_T4S3
     // Page radar PLEIN ÉCRAN : coords radar = coords écran, et la page masquée
     // invalide tout l'écran (pas de résidus dans les bandes lors des swipes)
-    lv_obj_set_size(p,600,450);lv_obj_set_pos(p,0,0);
+    lv_obj_set_size(p,SCR_W,SCR_H);lv_obj_set_pos(p,0,0);   // SCR_H = 480 sur WS-241, 450 sur T4
 #endif
     // (juin 2026) Radar NON scrollable : le trafic/AIP en OVERSCAN déborde des bords →
     // si la page est scrollable, un drag horizontal SCROLLE au lieu de déclencher le
@@ -3207,7 +3356,7 @@ void buildRadarPage(){
     // (pousser + = se rapprocher) et "-" sur le zoom OUT. Settings SCALE inchangé.
 #ifdef BOARD_T4S3
     mkZoomBtn("+", 24,             0);   // haut-droit, décalé 24px du bord (45°)
-    mkZoomBtn("-", 450-ZOOM_SZ-24, 1);   // bas-droit, décalé 24px du bord (45°)
+    mkZoomBtn("-", SCR_H-ZOOM_SZ-24, 1);   // bas-droit, 24px du bord bas (SCR_H board-aware)
 #else
     mkZoomBtn("-",-55,1);
     mkZoomBtn("+", 55,0);
@@ -3216,7 +3365,7 @@ void buildRadarPage(){
     // AIP overlay — transparent layer between grid and traffic icons
     r_aip_layer=lv_obj_create(p);
 #ifdef BOARD_T4S3
-    lv_obj_set_size(r_aip_layer,600,450);lv_obj_set_pos(r_aip_layer,0,0);   // page plein écran
+    lv_obj_set_size(r_aip_layer,SCR_W,SCR_H);lv_obj_set_pos(r_aip_layer,0,0);   // page plein écran (SCR_H=480 WS-241)
 #else
     lv_obj_set_size(r_aip_layer,480,480);lv_obj_set_pos(r_aip_layer,0,0);
 #endif
@@ -3331,7 +3480,7 @@ void buildRadarPage(){
     // (au-dessus du trafic/AIP) et SANS EVENT_BUBBLE → tap 100 % fiable même si le swipe
     // résiste. Coin bas-gauche. C'est la nav de secours demandée.
     {lv_obj_t* gear=lv_btn_create(p);
-     lv_obj_set_size(gear,64,64);lv_obj_set_pos(gear,12,450-64-12);
+     lv_obj_set_size(gear,64,64);lv_obj_set_pos(gear,12,SCR_H-64-12);
      lv_obj_set_style_radius(gear,LV_RADIUS_CIRCLE,0);
      lv_obj_set_style_bg_color(gear,C_BRAND,0);lv_obj_set_style_bg_opa(gear,LV_OPA_COVER,0);
      lv_obj_set_style_border_width(gear,0,0);lv_obj_set_style_shadow_opa(gear,LV_OPA_TRANSP,0);
@@ -3344,7 +3493,7 @@ void buildRadarPage(){
     // Toggle rapide MODE ALERTE (au-dessus de l'engrenage) : tap = cycle AUTO→CIRC→RTE.
     // Couleur = état effectif (refresh dans updateRadarDR). Usage opérationnel (bascule en vol).
     {lv_obj_t* cc=lv_btn_create(p);
-     lv_obj_set_size(cc,64,36);lv_obj_set_pos(cc,12,450-64-12-44);
+     lv_obj_set_size(cc,64,36);lv_obj_set_pos(cc,12,SCR_H-64-12-44);
      lv_obj_set_style_radius(cc,8,0);
      lv_obj_set_style_bg_color(cc,lv_color_hex(0x1f2937),0);lv_obj_set_style_bg_opa(cc,LV_OPA_COVER,0);
      lv_obj_set_style_border_width(cc,0,0);lv_obj_set_style_shadow_opa(cc,LV_OPA_TRANSP,0);
@@ -4776,6 +4925,7 @@ static void mkTestOverlay(){
 }
 static void _open_test_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    audioTestChime();                 // bip de validation audio (no-op hors WS-241)
     if(!g_test_ov)mkTestOverlay();}
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -4940,7 +5090,7 @@ void buildSettingsPageT4(lv_obj_t*p){
     // les contrôles tiennent dans le cercle). Le RETOUR = cercle bleu ; sur rond il est placé
     // plus bas/centré (les coins du cercle sont clippés).
 #ifdef BOARD_T4S3
-    const int hLogoX=40,hLogoY=26, hTitX=112,hTitY=38, ulineY=70, SCRH=450, CY=94;
+    const int hLogoX=40,hLogoY=26, hTitX=112,hTitY=38, ulineY=70, SCRH=SCR_H, CY=94;
     const int col0=44,col1=304,r0=29,dyr=109;
 #else
     const int hLogoX=30,hLogoY=10, hTitX=100,hTitY=14, ulineY=42, SCRH=480, CY=86;
@@ -5095,7 +5245,7 @@ void buildSettingsPage(){
     lv_obj_set_style_bg_opa(p,LV_OPA_COVER,0);
     // Settings UNIFIÉ (grille → sections → popups), board-aware via SETW : T4 ET T-RGB y passent.
 #ifdef BOARD_T4S3
-    lv_obj_set_size(p,600,450);lv_obj_set_pos(p,0,0);
+    lv_obj_set_size(p,SCR_W,SCR_H);lv_obj_set_pos(p,0,0);
 #else
     lv_obj_set_size(p,480,480);lv_obj_set_pos(p,0,0);
 #endif
@@ -5629,7 +5779,7 @@ static void radarActShow(){
     if(g_radar_act_ov) return;
     // Backdrop plein écran semi-opaque : tap HORS panneau = fermer.
     g_radar_act_ov=lv_obj_create(lv_layer_top());
-    lv_obj_set_size(g_radar_act_ov,600,450);lv_obj_center(g_radar_act_ov);
+    lv_obj_set_size(g_radar_act_ov,SCR_W,SCR_H);lv_obj_center(g_radar_act_ov);
     lv_obj_set_style_bg_color(g_radar_act_ov,lv_color_hex(0x000000),0);
     lv_obj_set_style_bg_opa(g_radar_act_ov,LV_OPA_50,0);
     lv_obj_set_style_border_width(g_radar_act_ov,0,0);lv_obj_set_style_radius(g_radar_act_ov,0,0);
@@ -6536,11 +6686,14 @@ void setup(){
     // Aircraft). Plus de saisie FORCÉE ici (l'overlay AIRCRAFT était le dernier reliquat
     // de la page retirée). Si le boîtier n'a pas d'identité, l'accueil montre un hint
     // non-bloquant « set via WiFi Setup » (p0UpdateAcId). Overlay legacy non déclenché.
+    audioInit(); audioTestChime();   // WS-241 : init DAC I2S + carillon de validation câblage (no-op ailleurs)
+    encoderInit();                   // WS-241 : encodeur rotatif nav/zoom (no-op ailleurs)
     Serial.println("Ready");}
 
 // ── Loop ──────────────────────────────────────────────────────────────────────
 void loop(){
     uint32_t now=millis();
+    encoderPoll();   // WS-241 : encodeur rotatif (zoom/pages) — no-op ailleurs
     if(g_doReconnect){g_doReconnect=false;startScan();}
     if(g_doConnect&&!g_connected){g_doConnect=false;
         if(connectBLE())Serial.println("[BLE] OK");
