@@ -130,7 +130,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "73"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v73 : WS-241 marges de respiration — RAD_R 208→198 (~20 px de blanc haut/bas, cardinaux N/S ne touchent plus) + bouton zoom "−" réancré SCR_H (ne flotte plus). v72 : WS-241 layout 600×480 — radar recentré (RAD_CY 240/RAD_R 208), pages+overlays+AIP+gear+accueil réancrés via SCR_W/SCR_H board-aware (T4 reste 450). v71 : FIX bande noire bas WS-241 — dalle 2.41 = 600×480 (pas 450), WS241_NATIVE_W/LCD_H 450→480 + UI_OY 0 → canvas 480 remplit pile la hauteur. v70 : ENCODEUR ROTATIF + poussoir (EC11) WS-241 — tourner=zoom radar (page suiv/préc ailleurs), clic=page suivante, appui long=action sheet Start/Stop. A=GPIO38/B=39/SW=40, décodeur quadrature sur ISR. Gated BOARD_WS241, no-op ailleurs. v69 : AUDIO I2S (DAC PCM5102A) TEST sur WS-241 — bip de validation au boot + bouton TEST (BCK=5/LCK=6/DIN=7, SCK→GND ; API i2s_std core 3.x). Gated BOARD_WS241, no-op ailleurs. v68 : SYSTEM = tuiles en grille 2 colonnes (même style que la grille SETTINGS, contour bleu), plus de barres pleine largeur ; SD card en libellé d'état. v67 : SYSTEM = un gros bouton plein large par page (le nom EST sur le bouton, plus de couple label+OPEN). v66 : MENU Settings — fusion CONFIG+DISPLAY en 1 section "CONFIG" scrollable (swipe down ; brightness/theme/scale/vfilt/altdiff/callsign), grille passe à 5 tuiles (6e libre dev futur), SYSTEM = boutons WIFI/FlightLogs/Updates/Diagnostic/Test. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
+#define VIEW_VERSION  "75"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v75 : WS-241 fine-tuning radar (deltas WS241-only, T4 inchangé) — cluster SafeSky/LTE/GNSS descendu (R_TOP_EXTRA), engrenage+chip remontés (R_GEAR_UP), boutons +/- rapprochés du centre (R_ZOOM_IN). v74 : WS-241 accueil — cluster versions descendu de +15 (au lieu de +30) → ~27 px de marge sous l'ATC (ne colle plus en bas). v73 : WS-241 marges de respiration — RAD_R 208→198 (~20 px de blanc haut/bas, cardinaux N/S ne touchent plus) + bouton zoom "−" réancré SCR_H (ne flotte plus). v72 : WS-241 layout 600×480 — radar recentré (RAD_CY 240/RAD_R 208), pages+overlays+AIP+gear+accueil réancrés via SCR_W/SCR_H board-aware (T4 reste 450). v71 : FIX bande noire bas WS-241 — dalle 2.41 = 600×480 (pas 450), WS241_NATIVE_W/LCD_H 450→480 + UI_OY 0 → canvas 480 remplit pile la hauteur. v70 : ENCODEUR ROTATIF + poussoir (EC11) WS-241 — tourner=zoom radar (page suiv/préc ailleurs), clic=page suivante, appui long=action sheet Start/Stop. A=GPIO38/B=39/SW=40, décodeur quadrature sur ISR. Gated BOARD_WS241, no-op ailleurs. v69 : AUDIO I2S (DAC PCM5102A) TEST sur WS-241 — bip de validation au boot + bouton TEST (BCK=5/LCK=6/DIN=7, SCK→GND ; API i2s_std core 3.x). Gated BOARD_WS241, no-op ailleurs. v68 : SYSTEM = tuiles en grille 2 colonnes (même style que la grille SETTINGS, contour bleu), plus de barres pleine largeur ; SD card en libellé d'état. v67 : SYSTEM = un gros bouton plein large par page (le nom EST sur le bouton, plus de couple label+OPEN). v66 : MENU Settings — fusion CONFIG+DISPLAY en 1 section "CONFIG" scrollable (swipe down ; brightness/theme/scale/vfilt/altdiff/callsign), grille passe à 5 tuiles (6e libre dev futur), SYSTEM = boutons WIFI/FlightLogs/Updates/Diagnostic/Test. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -477,6 +477,16 @@ static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE
 #else
  #define SCR_W 480
  #define SCR_H 480
+#endif
+// Deltas d'ajustement radar WS-241 UNIQUEMENT (T4-S3 = 0 → inchangé). Fine-tuning hauteur 480.
+#ifdef PANEL_WS241
+ #define R_TOP_EXTRA 12   // descend le cluster SafeSky/statut/LTE/GNSS (icône SafeSky était trop haute)
+ #define R_GEAR_UP   24   // remonte l'engrenage Settings + chip (étaient trop bas)
+ #define R_ZOOM_IN   18   // rapproche les boutons +/- du centre (+ trop haut, − trop bas)
+#else
+ #define R_TOP_EXTRA 0
+ #define R_GEAR_UP   0
+ #define R_ZOOM_IN   0
 #endif
 static lv_obj_t *r_radar_hdg, *r_radar_scale_lbl, *r_radar_gs;
 static lv_obj_t *r_radar_ver=nullptr;   // version firmware + date (bas de la page radar)
@@ -1596,8 +1606,15 @@ void buildStatusPage(){
     // bloc versions du bas (batterie/ATV/ATC) ré-espacé pour ne PAS se chevaucher ni
     // coller au bord bas (overlay à UI_OY=-15 → y écran = y local - 15). T-RGB inchangé.
 #ifdef BOARD_T4S3
+    // WS-241 (dalle 600×480, UI_OY=0) : on descend le cluster bas de +15 (pas +30) pour garder
+    // ~27 px de marge sous l'ATC, comme le T4-S3 (qui a son UI_OY=-15). +30 collait (~12 px).
+#ifdef PANEL_WS241
+    const int VBOT=15;
+#else
+    const int VBOT=0;
+#endif
     const int vwZoom=400, vwY=44, atZoom=480, atY=82, acidY=176,
-              batY=394+(SCR_H-450), verY=422+(SCR_H-450), atcY=422+(SCR_H-450);  // cluster bas calé au bas réel (480 WS-241)
+              batY=394+VBOT, verY=422+VBOT, atcY=422+VBOT;
     const lv_font_t *FID=&lv_font_montserrat_24, *FVER=&lv_font_montserrat_16;   // (juin 2026) identité PLUS GRANDE
     const int chkY0=226, chkDY=33;                                               // (juin 2026) plus d'air sous l'identité + 5 checks (SafeSky)
 #else
@@ -3226,24 +3243,24 @@ void buildRadarPage(){
     if(r_hdr_sky){
         lv_obj_t* sp=PILL_OF(r_hdr_sky);
         lv_obj_clear_flag(sp,LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_size(sp,52,52);lv_obj_set_pos(sp,RLC_X,8);   // 24×24 ×2 = 48 → pastille 52
+        lv_obj_set_size(sp,52,52);lv_obj_set_pos(sp,RLC_X,8+R_TOP_EXTRA);   // 24×24 ×2 = 48 → pastille 52
         lv_img_set_zoom(r_hdr_sky,512);                          // 256 = 1× → 512 = 2×
         lv_obj_center(r_hdr_sky);
     }
     // Statut de vol, à DROITE de l'icône SafeSky (défaut GND)
-    lv_obj_set_pos(r_ss_gnd, RLC_X + 52 + 14, 24);
+    lv_obj_set_pos(r_ss_gnd, RLC_X + 52 + 14, 24+R_TOP_EXTRA);
     lv_obj_set_style_text_font(r_ss_gnd, &lv_font_montserrat_22, 0);
     lv_label_set_text(r_ss_gnd, "GND");
     lv_obj_clear_flag(r_ss_gnd, LV_OBJ_FLAG_HIDDEN);
     // LTE & GPS(GNSS) : CENTRÉS sous l'icône SafeSky (centre x≈36), agrandis manuellement
     // (pas de transform_zoom : il les faisait disparaître). Pastille PILL_W=64 → x=4 = centre 36.
-    if(r_hdr_lte){ lv_obj_set_pos(PILL_OF(r_hdr_lte), RLC_X-6, 70);
+    if(r_hdr_lte){ lv_obj_set_pos(PILL_OF(r_hdr_lte), RLC_X-6, 70+R_TOP_EXTRA);
         // barres plus grandes
         static const int8_t bh2[4]={9,14,19,25}; const int bw=5, sp=7, gx=(PILL_W-(4*bw+3*(sp-bw)))/2;
         for(int i=0;i<4;i++) if(r_hdr_lte_b[i]){
             lv_obj_set_size(r_hdr_lte_b[i],bw,bh2[i]);
             lv_obj_set_pos(r_hdr_lte_b[i],gx+i*sp,(PILL_H-2)-bh2[i]); } }
-    if(r_hdr_gps){ lv_obj_set_pos(PILL_OF(r_hdr_gps), RLC_X-6, 120);   // gap SafeSky→LTE = LTE→GPS = 10
+    if(r_hdr_gps){ lv_obj_set_pos(PILL_OF(r_hdr_gps), RLC_X-6, 120+R_TOP_EXTRA);   // gap SafeSky→LTE = LTE→GPS = 10
         lv_obj_set_style_text_font(r_hdr_gps,&lv_font_montserrat_28,0); }   // symbole GPS plus grand
     #undef PILL_OF
 #endif
@@ -3355,8 +3372,8 @@ void buildRadarPage(){
     // id 0 = nm-- (zoom IN), id 1 = nm++ (zoom OUT). On mappe "+" sur le zoom IN
     // (pousser + = se rapprocher) et "-" sur le zoom OUT. Settings SCALE inchangé.
 #ifdef BOARD_T4S3
-    mkZoomBtn("+", 24,             0);   // haut-droit, décalé 24px du bord (45°)
-    mkZoomBtn("-", SCR_H-ZOOM_SZ-24, 1);   // bas-droit, 24px du bord bas (SCR_H board-aware)
+    mkZoomBtn("+", 24+R_ZOOM_IN,             0);   // haut-droit (descendu de R_ZOOM_IN sur WS-241)
+    mkZoomBtn("-", SCR_H-ZOOM_SZ-24-R_ZOOM_IN, 1);   // bas-droit (remonté de R_ZOOM_IN sur WS-241)
 #else
     mkZoomBtn("-",-55,1);
     mkZoomBtn("+", 55,0);
@@ -3480,7 +3497,7 @@ void buildRadarPage(){
     // (au-dessus du trafic/AIP) et SANS EVENT_BUBBLE → tap 100 % fiable même si le swipe
     // résiste. Coin bas-gauche. C'est la nav de secours demandée.
     {lv_obj_t* gear=lv_btn_create(p);
-     lv_obj_set_size(gear,64,64);lv_obj_set_pos(gear,12,SCR_H-64-12);
+     lv_obj_set_size(gear,64,64);lv_obj_set_pos(gear,12,SCR_H-64-12-R_GEAR_UP);
      lv_obj_set_style_radius(gear,LV_RADIUS_CIRCLE,0);
      lv_obj_set_style_bg_color(gear,C_BRAND,0);lv_obj_set_style_bg_opa(gear,LV_OPA_COVER,0);
      lv_obj_set_style_border_width(gear,0,0);lv_obj_set_style_shadow_opa(gear,LV_OPA_TRANSP,0);
@@ -3493,7 +3510,7 @@ void buildRadarPage(){
     // Toggle rapide MODE ALERTE (au-dessus de l'engrenage) : tap = cycle AUTO→CIRC→RTE.
     // Couleur = état effectif (refresh dans updateRadarDR). Usage opérationnel (bascule en vol).
     {lv_obj_t* cc=lv_btn_create(p);
-     lv_obj_set_size(cc,64,36);lv_obj_set_pos(cc,12,SCR_H-64-12-44);
+     lv_obj_set_size(cc,64,36);lv_obj_set_pos(cc,12,SCR_H-64-12-44-R_GEAR_UP);
      lv_obj_set_style_radius(cc,8,0);
      lv_obj_set_style_bg_color(cc,lv_color_hex(0x1f2937),0);lv_obj_set_style_bg_opa(cc,LV_OPA_COVER,0);
      lv_obj_set_style_border_width(cc,0,0);lv_obj_set_style_shadow_opa(cc,LV_OPA_TRANSP,0);
