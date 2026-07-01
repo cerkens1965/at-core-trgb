@@ -130,7 +130,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "75"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v75 : WS-241 fine-tuning radar (deltas WS241-only, T4 inchangé) — cluster SafeSky/LTE/GNSS descendu (R_TOP_EXTRA), engrenage+chip remontés (R_GEAR_UP), boutons +/- rapprochés du centre (R_ZOOM_IN). v74 : WS-241 accueil — cluster versions descendu de +15 (au lieu de +30) → ~27 px de marge sous l'ATC (ne colle plus en bas). v73 : WS-241 marges de respiration — RAD_R 208→198 (~20 px de blanc haut/bas, cardinaux N/S ne touchent plus) + bouton zoom "−" réancré SCR_H (ne flotte plus). v72 : WS-241 layout 600×480 — radar recentré (RAD_CY 240/RAD_R 208), pages+overlays+AIP+gear+accueil réancrés via SCR_W/SCR_H board-aware (T4 reste 450). v71 : FIX bande noire bas WS-241 — dalle 2.41 = 600×480 (pas 450), WS241_NATIVE_W/LCD_H 450→480 + UI_OY 0 → canvas 480 remplit pile la hauteur. v70 : ENCODEUR ROTATIF + poussoir (EC11) WS-241 — tourner=zoom radar (page suiv/préc ailleurs), clic=page suivante, appui long=action sheet Start/Stop. A=GPIO38/B=39/SW=40, décodeur quadrature sur ISR. Gated BOARD_WS241, no-op ailleurs. v69 : AUDIO I2S (DAC PCM5102A) TEST sur WS-241 — bip de validation au boot + bouton TEST (BCK=5/LCK=6/DIN=7, SCK→GND ; API i2s_std core 3.x). Gated BOARD_WS241, no-op ailleurs. v68 : SYSTEM = tuiles en grille 2 colonnes (même style que la grille SETTINGS, contour bleu), plus de barres pleine largeur ; SD card en libellé d'état. v67 : SYSTEM = un gros bouton plein large par page (le nom EST sur le bouton, plus de couple label+OPEN). v66 : MENU Settings — fusion CONFIG+DISPLAY en 1 section "CONFIG" scrollable (swipe down ; brightness/theme/scale/vfilt/altdiff/callsign), grille passe à 5 tuiles (6e libre dev futur), SYSTEM = boutons WIFI/FlightLogs/Updates/Diagnostic/Test. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
+#define VIEW_VERSION  "78"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v78 : WS-216 glyphes zoom poussés DANS L'ANGLE (décalage vers le coin bas-ext, zone tactile inchangée). v77 : WS-216 zoom = 2 GRANDES zones tactiles de coin (bas-gauche −, bas-droite +), juste le glyphe barres (style T4) centré, EVENT_BUBBLE (swipe préservé) → taps fiables au 1/4 inférieur hors radar. v76 : WS-216 (carré) — boutons zoom +/- dans les coins bas (+ bas-droite, − bas-gauche), agrandis 34→56 px + cible tactile élargie (taps fiables) ; radar RAD_R 175→192 (le carré n'a pas de verre qui clippe). WS-216 only, T-RGB rond inchangé. v75 : WS-241 fine-tuning radar (deltas WS241-only, T4 inchangé) — cluster SafeSky/LTE/GNSS descendu (R_TOP_EXTRA), engrenage+chip remontés (R_GEAR_UP), boutons +/- rapprochés du centre (R_ZOOM_IN). v74 : WS-241 accueil — cluster versions descendu de +15 (au lieu de +30) → ~27 px de marge sous l'ATC (ne colle plus en bas). v73 : WS-241 marges de respiration — RAD_R 208→198 (~20 px de blanc haut/bas, cardinaux N/S ne touchent plus) + bouton zoom "−" réancré SCR_H (ne flotte plus). v72 : WS-241 layout 600×480 — radar recentré (RAD_CY 240/RAD_R 208), pages+overlays+AIP+gear+accueil réancrés via SCR_W/SCR_H board-aware (T4 reste 450). v71 : FIX bande noire bas WS-241 — dalle 2.41 = 600×480 (pas 450), WS241_NATIVE_W/LCD_H 450→480 + UI_OY 0 → canvas 480 remplit pile la hauteur. v70 : ENCODEUR ROTATIF + poussoir (EC11) WS-241 — tourner=zoom radar (page suiv/préc ailleurs), clic=page suivante, appui long=action sheet Start/Stop. A=GPIO38/B=39/SW=40, décodeur quadrature sur ISR. Gated BOARD_WS241, no-op ailleurs. v69 : AUDIO I2S (DAC PCM5102A) TEST sur WS-241 — bip de validation au boot + bouton TEST (BCK=5/LCK=6/DIN=7, SCK→GND ; API i2s_std core 3.x). Gated BOARD_WS241, no-op ailleurs. v68 : SYSTEM = tuiles en grille 2 colonnes (même style que la grille SETTINGS, contour bleu), plus de barres pleine largeur ; SD card en libellé d'état. v67 : SYSTEM = un gros bouton plein large par page (le nom EST sur le bouton, plus de couple label+OPEN). v66 : MENU Settings — fusion CONFIG+DISPLAY en 1 section "CONFIG" scrollable (swipe down ; brightness/theme/scale/vfilt/altdiff/callsign), grille passe à 5 tuiles (6e libre dev futur), SYSTEM = boutons WIFI/FlightLogs/Updates/Diagnostic/Test. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -445,6 +445,12 @@ static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE
 #define CHIP_H 48
 #define CHIP_FONT lv_font_montserrat_16
 #define RAD_FONT lv_font_montserrat_14
+#endif
+// WS-216 = carré 480×480 (PAS de verre qui clippe les coins, contrairement au T-RGB rond) :
+// radar légèrement agrandi. Le zoom passe par de GRANDES zones tactiles de coin (cf buildRadarPage).
+#if defined(BOARD_WS216)
+ #undef  RAD_R
+ #define RAD_R    192
 #endif
 // (juin 2026) Décalage radial des cardinaux N/E/S/W vs l'anneau : T4-S3 = À
 // L'EXTÉRIEUR (+), T-RGB = à l'intérieur (−24, layout rond d'origine inchangé).
@@ -3340,6 +3346,7 @@ void buildRadarPage(){
         // (juin 2026) plus de zone tactile étendue : elle capturait les swipes près du bord droit
 #else
         lv_obj_align(b,LV_ALIGN_BOTTOM_MID,RB_DX+dx,-28+RB_DY);
+        lv_obj_set_ext_click_area(b,14);       // T-RGB rond : cible élargie
 #endif
         lv_obj_set_style_radius(b,LV_RADIUS_CIRCLE,0);
 #ifdef BOARD_T4S3
@@ -3374,6 +3381,30 @@ void buildRadarPage(){
 #ifdef BOARD_T4S3
     mkZoomBtn("+", 24+R_ZOOM_IN,             0);   // haut-droit (descendu de R_ZOOM_IN sur WS-241)
     mkZoomBtn("-", SCR_H-ZOOM_SZ-24-R_ZOOM_IN, 1);   // bas-droit (remonté de R_ZOOM_IN sur WS-241)
+#elif defined(BOARD_WS216)
+    // Carré 480 : le zoom = 2 GRANDES zones tactiles invisibles dans les coins bas (hors radar
+    // rond), avec JUSTE le glyphe +/- (barres, style T4) centré dedans. + = bas-DROITE (id 0,
+    // zoom in), − = bas-GAUCHE (id 1, zoom out). EVENT_BUBBLE → le swipe de nav passe toujours.
+    {auto mkZoomZone=[&](const char* sym,bool right,intptr_t id){
+        lv_obj_t* z=lv_obj_create(p);
+        lv_obj_set_size(z,200,180);
+        lv_obj_align(z, right?LV_ALIGN_BOTTOM_RIGHT:LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        lv_obj_set_style_bg_opa(z,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(z,0,0);
+        lv_obj_set_style_shadow_opa(z,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(z,0,0);
+        lv_obj_clear_flag(z,LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_add_flag(z,LV_OBJ_FLAG_EVENT_BUBBLE);           // laisse passer le swipe de nav
+        lv_obj_add_event_cb(z,cbSetBtn,LV_EVENT_CLICKED,(void*)id);
+        const int BAR=54,TH=10;                                // glyphe = barres, POUSSÉ dans l'angle
+        const int GOX=(right?50:-50), GOY=48;                  // décalage vers le coin bas-ext (2 barres concentriques → + propre)
+        auto bar=[&](int w,int h){ lv_obj_t*r=lv_obj_create(z);lv_obj_set_size(r,w,h);lv_obj_align(r,LV_ALIGN_CENTER,GOX,GOY);
+            lv_obj_set_style_bg_color(r,TFG(),0);lv_obj_set_style_bg_opa(r,LV_OPA_COVER,0);
+            lv_obj_set_style_border_width(r,0,0);lv_obj_set_style_radius(r,2,0);lv_obj_set_style_pad_all(r,0,0);
+            lv_obj_clear_flag(r,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_flag(r,LV_OBJ_FLAG_EVENT_BUBBLE); };
+        bar(BAR,TH); if(sym[0]=='+') bar(TH,BAR);              // − = 1 barre, + = croix
+     };
+     mkZoomZone("-",false,1);   // bas-GAUCHE
+     mkZoomZone("+",true, 0);}  // bas-DROITE
 #else
     mkZoomBtn("-",-55,1);
     mkZoomBtn("+", 55,0);
