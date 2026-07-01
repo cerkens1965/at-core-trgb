@@ -130,7 +130,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "78"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v78 : WS-216 glyphes zoom poussés DANS L'ANGLE (décalage vers le coin bas-ext, zone tactile inchangée). v77 : WS-216 zoom = 2 GRANDES zones tactiles de coin (bas-gauche −, bas-droite +), juste le glyphe barres (style T4) centré, EVENT_BUBBLE (swipe préservé) → taps fiables au 1/4 inférieur hors radar. v76 : WS-216 (carré) — boutons zoom +/- dans les coins bas (+ bas-droite, − bas-gauche), agrandis 34→56 px + cible tactile élargie (taps fiables) ; radar RAD_R 175→192 (le carré n'a pas de verre qui clippe). WS-216 only, T-RGB rond inchangé. v75 : WS-241 fine-tuning radar (deltas WS241-only, T4 inchangé) — cluster SafeSky/LTE/GNSS descendu (R_TOP_EXTRA), engrenage+chip remontés (R_GEAR_UP), boutons +/- rapprochés du centre (R_ZOOM_IN). v74 : WS-241 accueil — cluster versions descendu de +15 (au lieu de +30) → ~27 px de marge sous l'ATC (ne colle plus en bas). v73 : WS-241 marges de respiration — RAD_R 208→198 (~20 px de blanc haut/bas, cardinaux N/S ne touchent plus) + bouton zoom "−" réancré SCR_H (ne flotte plus). v72 : WS-241 layout 600×480 — radar recentré (RAD_CY 240/RAD_R 208), pages+overlays+AIP+gear+accueil réancrés via SCR_W/SCR_H board-aware (T4 reste 450). v71 : FIX bande noire bas WS-241 — dalle 2.41 = 600×480 (pas 450), WS241_NATIVE_W/LCD_H 450→480 + UI_OY 0 → canvas 480 remplit pile la hauteur. v70 : ENCODEUR ROTATIF + poussoir (EC11) WS-241 — tourner=zoom radar (page suiv/préc ailleurs), clic=page suivante, appui long=action sheet Start/Stop. A=GPIO38/B=39/SW=40, décodeur quadrature sur ISR. Gated BOARD_WS241, no-op ailleurs. v69 : AUDIO I2S (DAC PCM5102A) TEST sur WS-241 — bip de validation au boot + bouton TEST (BCK=5/LCK=6/DIN=7, SCK→GND ; API i2s_std core 3.x). Gated BOARD_WS241, no-op ailleurs. v68 : SYSTEM = tuiles en grille 2 colonnes (même style que la grille SETTINGS, contour bleu), plus de barres pleine largeur ; SD card en libellé d'état. v67 : SYSTEM = un gros bouton plein large par page (le nom EST sur le bouton, plus de couple label+OPEN). v66 : MENU Settings — fusion CONFIG+DISPLAY en 1 section "CONFIG" scrollable (swipe down ; brightness/theme/scale/vfilt/altdiff/callsign), grille passe à 5 tuiles (6e libre dev futur), SYSTEM = boutons WIFI/FlightLogs/Updates/Diagnostic/Test. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
+#define VIEW_VERSION  "83"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v83 : WS-216 capsule cap descendue (TOP_MID +28→+58) → sous le N (cardinal extérieur), plus d'interférence. v82 : WS-216 cardinaux N/E/S/W plus gros (montserrat_24) + À L'EXTÉRIEUR de l'anneau (RAD_CARD_OFF +12) ; échelle remontée (−52) pour loger le S dessous. v81 : cardinaux N/E/S/W initialisés à leur vraie position (north-up) au lieu d'empilés en haut → visibles même sans STATUS BLE (avant : « disparus » quand le boîtier n'est pas connecté). v80 : WS-216 label échelle radar agrandi (montserrat_14 gris → 28 TFG). v79 : GS retirée du radar sur TOUTES les cartes (r_radar_gs=nullptr partout ; T4-S3 l'était déjà). v78 : WS-216 glyphes zoom poussés DANS L'ANGLE (décalage vers le coin bas-ext, zone tactile inchangée). v77 : WS-216 zoom = 2 GRANDES zones tactiles de coin (bas-gauche −, bas-droite +), juste le glyphe barres (style T4) centré, EVENT_BUBBLE (swipe préservé) → taps fiables au 1/4 inférieur hors radar. v76 : WS-216 (carré) — boutons zoom +/- dans les coins bas (+ bas-droite, − bas-gauche), agrandis 34→56 px + cible tactile élargie (taps fiables) ; radar RAD_R 175→192 (le carré n'a pas de verre qui clippe). WS-216 only, T-RGB rond inchangé. v75 : WS-241 fine-tuning radar (deltas WS241-only, T4 inchangé) — cluster SafeSky/LTE/GNSS descendu (R_TOP_EXTRA), engrenage+chip remontés (R_GEAR_UP), boutons +/- rapprochés du centre (R_ZOOM_IN). v74 : WS-241 accueil — cluster versions descendu de +15 (au lieu de +30) → ~27 px de marge sous l'ATC (ne colle plus en bas). v73 : WS-241 marges de respiration — RAD_R 208→198 (~20 px de blanc haut/bas, cardinaux N/S ne touchent plus) + bouton zoom "−" réancré SCR_H (ne flotte plus). v72 : WS-241 layout 600×480 — radar recentré (RAD_CY 240/RAD_R 208), pages+overlays+AIP+gear+accueil réancrés via SCR_W/SCR_H board-aware (T4 reste 450). v71 : FIX bande noire bas WS-241 — dalle 2.41 = 600×480 (pas 450), WS241_NATIVE_W/LCD_H 450→480 + UI_OY 0 → canvas 480 remplit pile la hauteur. v70 : ENCODEUR ROTATIF + poussoir (EC11) WS-241 — tourner=zoom radar (page suiv/préc ailleurs), clic=page suivante, appui long=action sheet Start/Stop. A=GPIO38/B=39/SW=40, décodeur quadrature sur ISR. Gated BOARD_WS241, no-op ailleurs. v69 : AUDIO I2S (DAC PCM5102A) TEST sur WS-241 — bip de validation au boot + bouton TEST (BCK=5/LCK=6/DIN=7, SCK→GND ; API i2s_std core 3.x). Gated BOARD_WS241, no-op ailleurs. v68 : SYSTEM = tuiles en grille 2 colonnes (même style que la grille SETTINGS, contour bleu), plus de barres pleine largeur ; SD card en libellé d'état. v67 : SYSTEM = un gros bouton plein large par page (le nom EST sur le bouton, plus de couple label+OPEN). v66 : MENU Settings — fusion CONFIG+DISPLAY en 1 section "CONFIG" scrollable (swipe down ; brightness/theme/scale/vfilt/altdiff/callsign), grille passe à 5 tuiles (6e libre dev futur), SYSTEM = boutons WIFI/FlightLogs/Updates/Diagnostic/Test. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -456,8 +456,10 @@ static lv_obj_t *r_p0_atc=nullptr;      // ligne "ATC vN  date" (version AT-CORE
 // L'EXTÉRIEUR (+), T-RGB = à l'intérieur (−24, layout rond d'origine inchangé).
 #ifdef BOARD_T4S3
  #define RAD_CARD_OFF  12
+#elif defined(BOARD_WS216)
+ #define RAD_CARD_OFF  12     // carré : cardinaux À L'EXTÉRIEUR de l'anneau (demande 2026-07-01)
 #else
- #define RAD_CARD_OFF  (-24)
+ #define RAD_CARD_OFF  (-24)  // T-RGB rond : à l'intérieur (layout d'origine inchangé)
 #endif
 // Débord hors mire (2026-06-05, demande vol test) : sur le T4 rectangulaire,
 // trafic + AIP se dessinent jusqu'aux BORDS de l'écran (coins ≈ 2× RAD_R du
@@ -3125,6 +3127,8 @@ void buildRadarPage(){
     lv_obj_t*hb=lv_obj_create(p);lv_obj_set_size(hb,HDG_W,HDG_H);
 #ifdef BOARD_T4S3
     lv_obj_align(hb,LV_ALIGN_TOP_MID,HDG_DX,46);
+#elif defined(BOARD_WS216)
+    lv_obj_align(hb,LV_ALIGN_TOP_MID,HDG_DX,58);   // sous le N (cardinal extérieur), dans le haut de l'anneau
 #else
     lv_obj_align(hb,LV_ALIGN_TOP_MID,HDG_DX,28);
 #endif
@@ -3136,15 +3140,9 @@ void buildRadarPage(){
     lv_obj_set_style_text_color(r_radar_hdg,TFG(),0);
     lv_obj_set_style_text_font(r_radar_hdg,&HDG_FONT,0);lv_obj_center(r_radar_hdg);
 
-    // GS — (juin 2026) RETIRÉE du radar sur T4-S3 (« GS pas nécessaire »). updateAllPages garde `if(r_radar_gs)`.
-#ifdef BOARD_T4S3
+    // GS — RETIRÉE du radar sur TOUTES les cartes (« GS pas nécessaire », 2026-07-01 ; T4-S3 l'était
+    // déjà). r_radar_gs=nullptr → updateAllPages garde `if(r_radar_gs)` (no-op), plus de label GS.
     r_radar_gs=nullptr;
-#else
-    r_radar_gs=lv_label_create(p);lv_label_set_text(r_radar_gs,"GS ---");
-    lv_obj_set_style_text_color(r_radar_gs,TFG(),0);
-    lv_obj_set_style_text_font(r_radar_gs,&RAD_FONT,0);
-    lv_obj_align(r_radar_gs,LV_ALIGN_BOTTOM_MID,RB_DX,-33+RB_DY);   // remonté pour loger la ligne version
-#endif
 
     // Version firmware AT-CORE + date de build — bas de page.
     // (juin 2026) RETIRÉE du radar sur T4-S3 (« pas de n° de version sur cette page »).
@@ -3313,15 +3311,23 @@ void buildRadarPage(){
 
     // Cardinal labels N/E/S/W — position radiale via RAD_CARD_OFF (T4 = à l'extérieur de l'anneau)
     const char*cnames[]={"N","E","S","W"};
+    const int  cbear0[]={0,90,180,270};
     for(int ci=0;ci<4;ci++){
         r_card[ci]=lv_label_create(p);
         lv_label_set_text(r_card[ci],cnames[ci]);
+#if defined(BOARD_WS216)
+        lv_obj_set_style_text_font(r_card[ci],&lv_font_montserrat_24,0);   // cardinaux plus gros (carré)
+#else
         lv_obj_set_style_text_font(r_card[ci],&RAD_FONT,0);
+#endif
         lv_obj_set_style_text_color(r_card[ci],TFG(),0);
         // (juin 2026) largeur fixe + texte centré → W (large) ne paraît plus décalé
         lv_obj_set_width(r_card[ci],24);
         lv_obj_set_style_text_align(r_card[ci],LV_TEXT_ALIGN_CENTER,0);
-        lv_obj_set_pos(r_card[ci],RAD_CX-12,RAD_CY-(RAD_R+RAD_CARD_OFF)-10);}
+        // (2026-07-01) position INITIALE correcte N/E/S/W (north-up) au lieu des 4 empilées en
+        // haut → cardinaux visibles même SANS STATUS BLE (avant : « disparus » hors connexion).
+        float ra=(float)cbear0[ci]*(float)M_PI/180.0f; int ri=RAD_R+RAD_CARD_OFF;
+        lv_obj_set_pos(r_card[ci],(int)(RAD_CX+sinf(ra)*(float)ri)-12,(int)(RAD_CY-cosf(ra)*(float)ri)-10);}
 
     // Scale label — entre le S de la rose et la GS (ordre : S → 4nm → GS XXkt).
     // (juin 2026) T4-S3 : police PLUS GRANDE + couleur premier-plan (« affichage plus
@@ -3329,6 +3335,8 @@ void buildRadarPage(){
     char scl[12];snprintf(scl,12,"%dnm",g_cfg.scale_nm);
 #ifdef BOARD_T4S3
     r_radar_scale_lbl=mkLbl(p,scl,TFG(),&lv_font_montserrat_32,LV_ALIGN_BOTTOM_MID,RB_DX,-36+RB_DY);   // (juin 2026) descendu
+#elif defined(BOARD_WS216)
+    r_radar_scale_lbl=mkLbl(p,scl,TFG(),&lv_font_montserrat_28,LV_ALIGN_BOTTOM_MID,RB_DX,-52+RB_DY);   // (2026-07-01) échelle plus grande + lisible (carré) ; remontée pour loger le S (cardinal extérieur) dessous
 #else
     r_radar_scale_lbl=mkLbl(p,scl,TGREY(),&RAD_FONT,LV_ALIGN_BOTTOM_MID,RB_DX,-53+RB_DY);
 #endif
