@@ -132,7 +132,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "87"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v87 : OTA écran PAR CARTE — ATV_OTA_TAG distingue enfin ws241/ws216/t4s3/trgb (avant : WS241→t4s3 et WS216→trgb à cause du #define BOARD_T4S3 de WS241 → OTA du mauvais binaire = risque brick). Test WS241/WS216 AVANT T4S3. Chaque carte lit firmware/atv/<tag>/ = SON binaire. ⚠️ Migration : les écrans en v68 (ancienne logique) doivent passer v87 par USB avant de pouvoir OTA proprement (WS-216/WS-241 surtout). v86 : UX upload WROVER — quand le boîtier envoie STATUS rbt=1 (il va tuer le BLE + rebooter pour finir l'upload cloud), l'écran garde un overlay "SAVING FLIGHT — Box rebooting, reconnecting..." pendant une fenêtre de grâce ~40 s AU LIEU de passer toutes les icônes en rouge (déconnexion prise pour une panne). Effacé au retour d'un status normal. Parse le champ STATUS rbt + g_rbt_ms. v85 : durcissement init audio WS-241 (PAS un fix — l'audio reste muet). L'init I2S échoue car gdma (CONFIG_GDMA_ISR_IRAM_SAFE=1) exige un user-context en RAM interne, or le driver I2S alloue le handle du canal en MALLOC_CAP_DEFAULT → PSRAM sur ce build. NON corrigeable au niveau sketch : les flags GDMA/I2S_ISR_IRAM_SAFE sont dans les libs précompilées pioarduino. La tentative heap_caps_malloc_extmem_enable() n'agit QUE sur les allocs malloc()/heap_caps_malloc_default, PAS sur le heap_caps_malloc(DEFAULT) direct du driver → sans effet (gardée, inoffensive). Reste utile : i2s_del_channel sur échec (pas de fuite de handle) + log d'erreur propre au lieu d'un plantage silencieux. VRAI fix à faire quand le DAC sera câblé : driver i2s legacy (driver/i2s.h) ou framework recompilé avec CONFIG_I2S_ISR_IRAM_SAFE=y. v84 : AIP EMBARQUÉE flash sur TOUS les écrans (avant : WS-241 seul, les autres lisaient la SD → pas d'AIP sans carte) → AIP visible sur tous les radars. v83 : WS-216 capsule cap descendue (TOP_MID +28→+58) → sous le N (cardinal extérieur), plus d'interférence. v82 : WS-216 cardinaux N/E/S/W plus gros (montserrat_24) + À L'EXTÉRIEUR de l'anneau (RAD_CARD_OFF +12) ; échelle remontée (−52) pour loger le S dessous. v81 : cardinaux N/E/S/W initialisés à leur vraie position (north-up) au lieu d'empilés en haut → visibles même sans STATUS BLE (avant : « disparus » quand le boîtier n'est pas connecté). v80 : WS-216 label échelle radar agrandi (montserrat_14 gris → 28 TFG). v79 : GS retirée du radar sur TOUTES les cartes (r_radar_gs=nullptr partout ; T4-S3 l'était déjà). v78 : WS-216 glyphes zoom poussés DANS L'ANGLE (décalage vers le coin bas-ext, zone tactile inchangée). v77 : WS-216 zoom = 2 GRANDES zones tactiles de coin (bas-gauche −, bas-droite +), juste le glyphe barres (style T4) centré, EVENT_BUBBLE (swipe préservé) → taps fiables au 1/4 inférieur hors radar. v76 : WS-216 (carré) — boutons zoom +/- dans les coins bas (+ bas-droite, − bas-gauche), agrandis 34→56 px + cible tactile élargie (taps fiables) ; radar RAD_R 175→192 (le carré n'a pas de verre qui clippe). WS-216 only, T-RGB rond inchangé. v75 : WS-241 fine-tuning radar (deltas WS241-only, T4 inchangé) — cluster SafeSky/LTE/GNSS descendu (R_TOP_EXTRA), engrenage+chip remontés (R_GEAR_UP), boutons +/- rapprochés du centre (R_ZOOM_IN). v74 : WS-241 accueil — cluster versions descendu de +15 (au lieu de +30) → ~27 px de marge sous l'ATC (ne colle plus en bas). v73 : WS-241 marges de respiration — RAD_R 208→198 (~20 px de blanc haut/bas, cardinaux N/S ne touchent plus) + bouton zoom "−" réancré SCR_H (ne flotte plus). v72 : WS-241 layout 600×480 — radar recentré (RAD_CY 240/RAD_R 208), pages+overlays+AIP+gear+accueil réancrés via SCR_W/SCR_H board-aware (T4 reste 450). v71 : FIX bande noire bas WS-241 — dalle 2.41 = 600×480 (pas 450), WS241_NATIVE_W/LCD_H 450→480 + UI_OY 0 → canvas 480 remplit pile la hauteur. v70 : ENCODEUR ROTATIF + poussoir (EC11) WS-241 — tourner=zoom radar (page suiv/préc ailleurs), clic=page suivante, appui long=action sheet Start/Stop. A=GPIO38/B=39/SW=40, décodeur quadrature sur ISR. Gated BOARD_WS241, no-op ailleurs. v69 : AUDIO I2S (DAC PCM5102A) TEST sur WS-241 — bip de validation au boot + bouton TEST (BCK=5/LCK=6/DIN=7, SCK→GND ; API i2s_std core 3.x). Gated BOARD_WS241, no-op ailleurs. v68 : SYSTEM = tuiles en grille 2 colonnes (même style que la grille SETTINGS, contour bleu), plus de barres pleine largeur ; SD card en libellé d'état. v67 : SYSTEM = un gros bouton plein large par page (le nom EST sur le bouton, plus de couple label+OPEN). v66 : MENU Settings — fusion CONFIG+DISPLAY en 1 section "CONFIG" scrollable (swipe down ; brightness/theme/scale/vfilt/altdiff/callsign), grille passe à 5 tuiles (6e libre dev futur), SYSTEM = boutons WIFI/FlightLogs/Updates/Diagnostic/Test. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
+#define VIEW_VERSION  "92"   /* BUILD monotone — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v92 : FIX ÉCRAN NOIR (rétroéclairage 0) — la nav encodeur permettait de descendre BRIGHTNESS jusqu'à 0 → panelBright(0) → AMOLED éteint, valeur sauvée NVS → écran noir persistant même après reflash (CPU vivant, IMU OK). Plancher brightness à 1 PARTOUT (edit encodeur, sliders touch mkBigBrightRow/mkSetSliderRow, cbBrightSlider) + AUTO-RÉCUP au boot (bright_lv==0 en NVS → remis à 16). Rallume les écrans éteints dès le reflash. v91 : FIX focus invisible en sous-section — le contour/titre de focus n'existait que sur le cercle retour ; encFocusOutline appliqué à CHAQUE ligne (erReg) + TITRE recoloré (gris/BLEU focus/VERT édition) = sélection lisible ; reset couleurs à l'entrée de section. v90 : NAV ENCODEUR Settings PHASE 2 REVUE (WS-241) — modèle à 2 niveaux DANS une section. Registre EncRow (1 ligne/réglage, rempli par erReg dans les mk*), pas les sous-cellules. TOURNER = passe d'un TITRE à l'autre (contour BLEU). CLIC : sur toggle 2 états = bascule direct ; sur réglage multi-valeurs (radar scale/vertical filter/icons/alert mode/brightness) = ENTRE EN ÉDITION (contour VERT, tourner change la valeur EN DIRECT), re-clic VALIDE et remonte au titre ; sur tuile SYSTEM = ouvre la sous-page ; sur cercle « retour » (dernière ligne) = revient à la grille. APPUI LONG (n'importe où sur Settings) = SORT vers le radar. Le focus suit le scroll (CONFIG 6 lignes). v89 : (remplacé) nav sous-items générique. v88 : NAV ENCODEUR grille Settings (WS-241, phase 1) — sur la page Settings, TOURNER = déplace le focus entre les 5 tuiles (surlignage bordure+fond, groupe LVGL g_encGroup, ordre visuel grille) au lieu de changer de page (fini le retour radar accidentel) ; CLIC = ouvre la section focus ; en section, CLIC = retour à la grille. Radar inchangé (tourner=zoom, appui long=Start/Stop). Phase 2 à venir : focus des sous-items dans chaque section. v87 : OTA écran PAR CARTE — ATV_OTA_TAG distingue enfin ws241/ws216/t4s3/trgb (avant : WS241→t4s3 et WS216→trgb à cause du #define BOARD_T4S3 de WS241 → OTA du mauvais binaire = risque brick). Test WS241/WS216 AVANT T4S3. Chaque carte lit firmware/atv/<tag>/ = SON binaire. ⚠️ Migration : les écrans en v68 (ancienne logique) doivent passer v87 par USB avant de pouvoir OTA proprement (WS-216/WS-241 surtout). v86 : UX upload WROVER — quand le boîtier envoie STATUS rbt=1 (il va tuer le BLE + rebooter pour finir l'upload cloud), l'écran garde un overlay "SAVING FLIGHT — Box rebooting, reconnecting..." pendant une fenêtre de grâce ~40 s AU LIEU de passer toutes les icônes en rouge (déconnexion prise pour une panne). Effacé au retour d'un status normal. Parse le champ STATUS rbt + g_rbt_ms. v85 : durcissement init audio WS-241 (PAS un fix — l'audio reste muet). L'init I2S échoue car gdma (CONFIG_GDMA_ISR_IRAM_SAFE=1) exige un user-context en RAM interne, or le driver I2S alloue le handle du canal en MALLOC_CAP_DEFAULT → PSRAM sur ce build. NON corrigeable au niveau sketch : les flags GDMA/I2S_ISR_IRAM_SAFE sont dans les libs précompilées pioarduino. La tentative heap_caps_malloc_extmem_enable() n'agit QUE sur les allocs malloc()/heap_caps_malloc_default, PAS sur le heap_caps_malloc(DEFAULT) direct du driver → sans effet (gardée, inoffensive). Reste utile : i2s_del_channel sur échec (pas de fuite de handle) + log d'erreur propre au lieu d'un plantage silencieux. VRAI fix à faire quand le DAC sera câblé : driver i2s legacy (driver/i2s.h) ou framework recompilé avec CONFIG_I2S_ISR_IRAM_SAFE=y. v84 : AIP EMBARQUÉE flash sur TOUS les écrans (avant : WS-241 seul, les autres lisaient la SD → pas d'AIP sans carte) → AIP visible sur tous les radars. v83 : WS-216 capsule cap descendue (TOP_MID +28→+58) → sous le N (cardinal extérieur), plus d'interférence. v82 : WS-216 cardinaux N/E/S/W plus gros (montserrat_24) + À L'EXTÉRIEUR de l'anneau (RAD_CARD_OFF +12) ; échelle remontée (−52) pour loger le S dessous. v81 : cardinaux N/E/S/W initialisés à leur vraie position (north-up) au lieu d'empilés en haut → visibles même sans STATUS BLE (avant : « disparus » quand le boîtier n'est pas connecté). v80 : WS-216 label échelle radar agrandi (montserrat_14 gris → 28 TFG). v79 : GS retirée du radar sur TOUTES les cartes (r_radar_gs=nullptr partout ; T4-S3 l'était déjà). v78 : WS-216 glyphes zoom poussés DANS L'ANGLE (décalage vers le coin bas-ext, zone tactile inchangée). v77 : WS-216 zoom = 2 GRANDES zones tactiles de coin (bas-gauche −, bas-droite +), juste le glyphe barres (style T4) centré, EVENT_BUBBLE (swipe préservé) → taps fiables au 1/4 inférieur hors radar. v76 : WS-216 (carré) — boutons zoom +/- dans les coins bas (+ bas-droite, − bas-gauche), agrandis 34→56 px + cible tactile élargie (taps fiables) ; radar RAD_R 175→192 (le carré n'a pas de verre qui clippe). WS-216 only, T-RGB rond inchangé. v75 : WS-241 fine-tuning radar (deltas WS241-only, T4 inchangé) — cluster SafeSky/LTE/GNSS descendu (R_TOP_EXTRA), engrenage+chip remontés (R_GEAR_UP), boutons +/- rapprochés du centre (R_ZOOM_IN). v74 : WS-241 accueil — cluster versions descendu de +15 (au lieu de +30) → ~27 px de marge sous l'ATC (ne colle plus en bas). v73 : WS-241 marges de respiration — RAD_R 208→198 (~20 px de blanc haut/bas, cardinaux N/S ne touchent plus) + bouton zoom "−" réancré SCR_H (ne flotte plus). v72 : WS-241 layout 600×480 — radar recentré (RAD_CY 240/RAD_R 208), pages+overlays+AIP+gear+accueil réancrés via SCR_W/SCR_H board-aware (T4 reste 450). v71 : FIX bande noire bas WS-241 — dalle 2.41 = 600×480 (pas 450), WS241_NATIVE_W/LCD_H 450→480 + UI_OY 0 → canvas 480 remplit pile la hauteur. v70 : ENCODEUR ROTATIF + poussoir (EC11) WS-241 — tourner=zoom radar (page suiv/préc ailleurs), clic=page suivante, appui long=action sheet Start/Stop. A=GPIO38/B=39/SW=40, décodeur quadrature sur ISR. Gated BOARD_WS241, no-op ailleurs. v69 : AUDIO I2S (DAC PCM5102A) TEST sur WS-241 — bip de validation au boot + bouton TEST (BCK=5/LCK=6/DIN=7, SCK→GND ; API i2s_std core 3.x). Gated BOARD_WS241, no-op ailleurs. v68 : SYSTEM = tuiles en grille 2 colonnes (même style que la grille SETTINGS, contour bleu), plus de barres pleine largeur ; SD card en libellé d'état. v67 : SYSTEM = un gros bouton plein large par page (le nom EST sur le bouton, plus de couple label+OPEN). v66 : MENU Settings — fusion CONFIG+DISPLAY en 1 section "CONFIG" scrollable (swipe down ; brightness/theme/scale/vfilt/altdiff/callsign), grille passe à 5 tuiles (6e libre dev futur), SYSTEM = boutons WIFI/FlightLogs/Updates/Diagnostic/Test. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -671,6 +671,7 @@ static lv_obj_t* s_menu      = nullptr;  // page d'accueil réglages (grille 6 g
 static lv_obj_t* s_sec[6]    = {};       // conteneurs sections (cachés sauf l'ouvert)
 static lv_obj_t* s_back_btn  = nullptr;  // cercle « retour » haut-droite (visible en section)
 static int8_t    s_cur_sec   = -1;       // -1 = menu affiché, sinon index section ouverte
+static lv_obj_t* g_menuBtns[6] = {};     // (v88) tuiles de la grille (par index section) → nav encodeur WS-241
 // (2026-06-27) FUSION CONFIG+DISPLAY → 1 section "CONFIG" scrollable (swipe down) ;
 // libère la 6e tuile de la grille (réservée dev futur, laissée vide).
 static const char* kSecName[6]={"CONFIG","TRAFFIC","PILOT","SYSTEM","ABOUT",""};
@@ -818,6 +819,41 @@ static const uint8_t ENC_TBL[7][4]={
 static volatile uint8_t g_enc_st=0;
 static volatile int     g_enc_delta=0;
 static portMUX_TYPE     g_enc_mux=portMUX_INITIALIZER_UNLOCKED;
+lv_group_t* g_encGroup=nullptr;   // (v88) groupe LVGL de la GRILLE Settings (focus tuile via molette)
+
+// ── (v90) Nav encodeur DANS une section Settings : 1 focus par LIGNE + édition de valeur ──
+// Modèle : TOURNER = passe d'un titre à l'autre. CLIC sur une ligne à valeurs multiples
+// (radar scale / vertical filter / icons / alert mode / brightness) = ENTRE EN ÉDITION
+// (tourner change la valeur en direct, re-clic valide et remonte au titre). CLIC sur un
+// toggle 2 états = bascule direct. CLIC sur une tuile SYSTEM = ouvre la sous-page. CLIC sur
+// « retour » = revient à la grille. APPUI LONG (géré dans encoderPoll) = SORT vers le radar.
+enum { ER_SEG, ER_SEGN, ER_POP, ER_BRIGHT, ER_TILE };
+struct EncRow { lv_obj_t* sect; lv_obj_t* focus; lv_obj_t* title; uint8_t type; int16_t ref; };
+static EncRow g_er[48]; static int g_er_n=0;        // registre global (rempli au build des sections)
+static int8_t g_erAct[16]; static int g_erAct_n=0;  // lignes de la section courante (g_er idx ; -1 = retour)
+static int    g_erCur=0;                            // ligne focus (index dans g_erAct)
+static bool   g_erEdit=false;                       // true = on édite la valeur de la ligne focus
+// Contour de focus : BLEU = navigation (FOCUSED), VERT épais = édition (EDITED). Marche sur
+// n'importe quel type d'objet (bouton/slider/track segmented/tuile).
+static void encFocusOutline(lv_obj_t* o){
+    if(!o) return;
+    lv_obj_set_style_outline_width(o,4,LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_color(o,C_BRAND,LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_opa(o,LV_OPA_COVER,LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_pad(o,3,LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(o,5,LV_STATE_EDITED);
+    lv_obj_set_style_outline_color(o,C_GREEN,LV_STATE_EDITED);
+    lv_obj_set_style_outline_opa(o,LV_OPA_COVER,LV_STATE_EDITED);
+    lv_obj_set_style_outline_pad(o,3,LV_STATE_EDITED);
+}
+static void erReg(lv_obj_t* sect,lv_obj_t* focus,lv_obj_t* title,uint8_t type,int ref){   // appelé par les mk* (BOARD_WS241)
+    if(g_er_n>=48||!focus) return;
+    g_er[g_er_n].sect=sect; g_er[g_er_n].focus=focus; g_er[g_er_n].title=title; g_er[g_er_n].type=type; g_er[g_er_n].ref=(int16_t)ref; g_er_n++;
+    encFocusOutline(focus);   // (v91) FIX : le contour de focus doit exister sur CHAQUE ligne (sinon focus invisible)
+}
+static void erStep(int dir);      // fwd (définis après g_pop / cbBrightSlider, avant settingsOpenSection)
+static void erClick();
+static void erBuildActive(lv_obj_t* sect);
 static void IRAM_ATTR encISR(){
     uint8_t ab=(digitalRead(ENC_A)<<1)|digitalRead(ENC_B);
     g_enc_st=ENC_TBL[g_enc_st&0x0f][ab];
@@ -830,10 +866,18 @@ static void radarZoom(int dir){   // +1 = zoom in (range--), -1 = zoom out (rang
     g_cfg.scale_nm=kScaleOpts[si]; cfgSave(); updSetPage();
 }
 static void encStep(int dir){
-    if(g_page==1) radarZoom(dir);                                  // radar → zoom
-    else { g_navPage=(dir>0)?(uint8_t)((g_page+1)%NUM_PAGES)
-                            :(uint8_t)((g_page+NUM_PAGES-1)%NUM_PAGES);
-           g_navPending=true; }                                    // sinon → page suiv/préc
+    if(g_page==1){ radarZoom(dir); return; }                       // radar → zoom
+    if(g_page==2){                                                 // (v88/v90) SETTINGS : tourner = focus
+        if(s_cur_sec>=0){ erStep(dir); }                          // DANS une section : titre ↔ titre (ou valeur si édition)
+        else if(g_encGroup){                                      // grille : tuile ↔ tuile
+            if(dir>0) lv_group_focus_next(g_encGroup);
+            else      lv_group_focus_prev(g_encGroup);
+        }
+        return;                                                   // jamais de changement de page à la molette
+    }
+    g_navPage=(dir>0)?(uint8_t)((g_page+1)%NUM_PAGES)              // accueil (page 0) → page suiv/préc
+                     :(uint8_t)((g_page+NUM_PAGES-1)%NUM_PAGES);
+    g_navPending=true;
 }
 static void encoderInit(){
     pinMode(ENC_A,INPUT_PULLUP); pinMode(ENC_B,INPUT_PULLUP); pinMode(ENC_SW,INPUT_PULLUP);
@@ -847,8 +891,18 @@ static void encoderPoll(){        // appelé depuis loop() (contexte LVGL, jamai
     static bool down=false,longFired=false; static uint32_t t0=0;
     bool pressed=(digitalRead(ENC_SW)==LOW); uint32_t now=millis();
     if(pressed && !down){ down=true; longFired=false; t0=now; }
-    else if(pressed && down && !longFired && now-t0>=ENC_LONG_MS){ longFired=true; if(g_page==1) radarActShow(); }
-    else if(!pressed && down){ down=false; if(!longFired && now-t0>=30){ g_navPage=(uint8_t)((g_page+1)%NUM_PAGES); g_navPending=true; } }
+    else if(pressed && down && !longFired && now-t0>=ENC_LONG_MS){ longFired=true;   // (v90) APPUI LONG = SORTIE
+        if(g_page==1) radarActShow();                             // radar → action sheet Start/Stop
+        else if(g_page==2){ g_navPage=1; g_navPending=true; }     // Settings (grille/section/édition) → SORT vers le radar
+    }
+    else if(!pressed && down){ down=false; if(!longFired && now-t0>=30){   // (v90) CLIC COURT = valider / activer
+        if(g_page==2){
+            if(s_cur_sec>=0) erClick();                           // section : entre/valide édition · toggle · tuile · retour
+            else if(g_encGroup){ lv_obj_t*f=lv_group_get_focused(g_encGroup);  // grille : ouvre la section focus
+                                 if(f) lv_event_send(f,LV_EVENT_CLICKED,NULL); }
+        }
+        else { g_navPage=(uint8_t)((g_page+1)%NUM_PAGES); g_navPending=true; }  // radar/accueil → page suivante
+    } }
 }
 #else
 static inline void encoderInit(){}
@@ -1309,7 +1363,7 @@ void cfgLoad(){
     g_prefs.begin("atview",true);
     g_cfg.scale_nm  =g_prefs.getUChar("scale",4);
     // brightness = niveau hardware 0-16 (clé bright_lv, défaut 16=max)
-    {uint8_t bl=g_prefs.getUChar("bright_lv",16); if(bl>16)bl=16; g_cfg.brightness=bl;}
+    {uint8_t bl=g_prefs.getUChar("bright_lv",16); if(bl==0||bl>16)bl=16; g_cfg.brightness=bl;}  // (v92) 0 en NVS = noir accidentel → plein (auto-récup écran éteint)
     g_cfg.trf_src   =0;   // SOURCE retiré de l'UI : trafic toujours SafeSky (SSKY)
     g_cfg.dist_nm   =g_prefs.getBool("dist_nm",true);
     g_cfg.alt_ft    =g_prefs.getBool("alt_ft",true);
@@ -3721,7 +3775,7 @@ static void cbBrightSlider(lv_event_t*e){
     if(code==LV_EVENT_RELEASED||code==LV_EVENT_PRESS_LOST){g_bright_drag=false;cfgSave();return;}
     if(code!=LV_EVENT_VALUE_CHANGED)return;
     lv_obj_t*sl=lv_event_get_target(e);
-    int v=lv_slider_get_value(sl); if(v<0)v=0; if(v>16)v=16;
+    int v=lv_slider_get_value(sl); if(v<1)v=1; if(v>16)v=16;   // (v92) plancher 1 : jamais de rétroéclairage nul
     g_cfg.brightness=(uint8_t)v;
     panelBright(g_cfg.brightness);
     if(s_bright_v){char b[8];snprintf(b,8,"%d/16",v);lv_label_set_text(s_bright_v,b);}
@@ -3735,7 +3789,7 @@ static lv_obj_t* mkSetSliderRow(lv_obj_t*p,const char*k,int y,uint8_t val){
     lv_obj_t*sl=lv_slider_create(p);
     lv_obj_set_size(sl,135,10);
     lv_obj_set_pos(sl,225,y+5);
-    lv_slider_set_range(sl,0,16);
+    lv_slider_set_range(sl,1,16);   // (v92) plancher 1 : jamais de noir total
     lv_slider_set_value(sl,val,LV_ANIM_OFF);
     lv_obj_set_style_bg_color(sl,lv_color_hex(0xe5e7eb),LV_PART_MAIN);
     lv_obj_set_style_bg_opa(sl,LV_OPA_COVER,LV_PART_MAIN);
@@ -3791,7 +3845,7 @@ static void cbSeg(lv_event_t*e){
 static void mkSegRow(lv_obj_t*p,const char*k,int y,const char*a,const char*b,
                      bool*val,bool aIsTrue){
     if(g_seg_n>=8)return;
-    mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
+    lv_obj_t*_tl=mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
     const int TW=224,TH=52,TX=SETW-40-TW,HW=(TW-6)/2;   // track à droite (board-aware SETW), 3px pad bords
     lv_obj_t*tr=lv_obj_create(p);
     lv_obj_set_size(tr,TW,TH);lv_obj_set_pos(tr,TX,y);
@@ -3815,6 +3869,9 @@ static void mkSegRow(lv_obj_t*p,const char*k,int y,const char*a,const char*b,
     g_seg[idx].segA=sa;g_seg[idx].segB=sb;g_seg[idx].lblA=la;g_seg[idx].lblB=lb;
     g_seg[idx].val=val;g_seg[idx].aIsTrue=aIsTrue;
     g_seg_n++; segApplyStyle(g_seg[idx]);
+#if defined(BOARD_WS241)
+    erReg(p,tr,_tl,ER_SEG,idx);   // nav encodeur : 1 ligne, focus sur le track, titre recoloré
+#endif
 }
 
 // Gros stepper : label + [−] valeur [+] (réutilise cbSetBtn ids). Renvoie le label valeur.
@@ -3841,16 +3898,19 @@ static lv_obj_t* mkBigStepRow(lv_obj_t*p,const char*k,int y,const char*v,int idn
 
 // Slider brightness épais (gros knob) — réservé T4-S3.
 static void mkBigBrightRow(lv_obj_t*p,const char*k,int y,uint8_t val){
-    mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
+    lv_obj_t*_tl=mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
     lv_obj_t*sl=lv_slider_create(p);
     lv_obj_set_size(sl,224,14);lv_obj_set_pos(sl,SETW-264,y+19);   // bande board-aware (alignée seg/stepper)
-    lv_slider_set_range(sl,0,16);lv_slider_set_value(sl,val,LV_ANIM_OFF);
+    lv_slider_set_range(sl,1,16);lv_slider_set_value(sl,val,LV_ANIM_OFF);   // (v92) plancher 1 : jamais de noir total
     lv_obj_set_style_bg_color(sl,lv_color_hex(0xe5e7eb),LV_PART_MAIN);
     lv_obj_set_style_bg_opa(sl,LV_OPA_COVER,LV_PART_MAIN);lv_obj_set_style_radius(sl,7,LV_PART_MAIN);
     lv_obj_set_style_bg_color(sl,C_BRAND,LV_PART_INDICATOR);lv_obj_set_style_bg_opa(sl,LV_OPA_COVER,LV_PART_INDICATOR);
     lv_obj_set_style_bg_color(sl,C_BRAND,LV_PART_KNOB);
     lv_obj_set_style_pad_all(sl,16,LV_PART_KNOB);     // knob ≈ 46 px → cible doigt
     lv_obj_add_event_cb(sl,cbBrightSlider,LV_EVENT_ALL,NULL);
+#if defined(BOARD_WS241)
+    erReg(p,sl,_tl,ER_BRIGHT,-1);   // nav encodeur : édition = tourne le slider, titre recoloré
+#endif
 }
 
 // ── Segmented MULTI-options (SOURCE 4, ICONS SIZE 3) ─────────────────────────
@@ -3880,7 +3940,7 @@ static void cbSegN(lv_event_t*e){
 // Ligne label + segmented N options (cellules égales dans la bande 336..560).
 static void mkSegRowN(lv_obj_t*p,const char*k,int y,const char*const*opts,int n,uint8_t*val,uint8_t kind){
     if(g_segn_n>=2||n>4)return;
-    mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
+    lv_obj_t*_tl=mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
     const int TW=224,TH=52,TX=SETW-40-TW,pad=3,cw=(TW-2*pad)/n;
     lv_obj_t*tr=lv_obj_create(p);
     lv_obj_set_size(tr,TW,TH);lv_obj_set_pos(tr,TX,y);
@@ -3900,6 +3960,9 @@ static void mkSegRowN(lv_obj_t*p,const char*k,int y,const char*const*opts,int n,
     }
     g_segn[idx].n=(uint8_t)n; g_segn[idx].val=val; g_segn[idx].kind=kind;
     g_segn_n++; segNApply(g_segn[idx]);
+#if defined(BOARD_WS241)
+    erReg(p,tr,_tl,ER_SEGN,idx);   // nav encodeur : 1 ligne, focus sur le track, titre recoloré
+#endif
 }
 
 // Ligne label + (valeur optionnelle) + gros bouton d'action (AIRCRAFT / MAINTENANCE).
@@ -3937,6 +4000,11 @@ static void mkNavTile(lv_obj_t*p,const char*name,int x,int y,lv_event_cb_t cb){
     lv_obj_t*l=lv_label_create(bt);lv_label_set_text(l,name);
     lv_obj_set_style_text_color(l,C_BRAND,0);
     lv_obj_set_style_text_font(l,MF,0);lv_obj_center(l);
+#if defined(BOARD_WS241)
+    lv_obj_set_style_bg_color(bt,C_BRAND,LV_STATE_FOCUSED);   // tuile focus : léger remplissage bleu
+    lv_obj_set_style_bg_opa(bt,60,LV_STATE_FOCUSED);
+    erReg(p,bt,nullptr,ER_TILE,-1);   // nav encodeur : clic = ouvre la sous-page (pas de titre séparé)
+#endif
 }
 
 // ── Maintenance overlay (Modèle 1 : hotspot + transfert vol) ──────────────────
@@ -5113,7 +5181,7 @@ static void _pop_open_cb(lv_event_t*e){
 }
 static lv_obj_t* mkPopRow(lv_obj_t*p,const char*k,int y,const char*curval,
                           const char* title,const char* const* opts,int n,int(*idx)(),void(*apply)(int)){
-    mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
+    lv_obj_t*_tl=mkLblP(p,k,lv_color_hex(0x4b5563),&lv_font_montserrat_20,40,y+15);
     if(g_pop_n>=6) return nullptr;
     int pi=g_pop_n;
     g_pop[pi].title=title; g_pop[pi].opts=opts; g_pop[pi].n=n; g_pop[pi].idx=idx; g_pop[pi].apply=apply;
@@ -5126,6 +5194,9 @@ static lv_obj_t* mkPopRow(lv_obj_t*p,const char*k,int y,const char*curval,
     lv_obj_set_style_text_color(vl,lv_color_hex(0x0f172a),0);
     lv_obj_set_style_text_font(vl,&lv_font_montserrat_20,0);lv_obj_center(vl);
     g_pop_n++;
+#if defined(BOARD_WS241)
+    erReg(p,bt,_tl,ER_POP,pi);   // nav encodeur : édition = cycle les options en place, titre recoloré
+#endif
     return vl;
 }
 
@@ -5142,7 +5213,85 @@ static void settingsShowMenu(){
                      lv_label_set_text(s_set_acval,ac); lv_obj_clear_flag(s_set_acval,LV_OBJ_FLAG_HIDDEN); }
     if(s_set_title) lv_label_set_text(s_set_title,"SETTINGS");
     if(s_set_uline&&s_set_title){ lv_obj_update_layout(s_set_title); lv_obj_set_width(s_set_uline,lv_obj_get_width(s_set_title)); }
+#if defined(BOARD_WS241)
+    // (v88) Nav encodeur : (re)construit le groupe des 5 tuiles dans l'ordre visuel de la grille
+    // (haut→bas, gauche→droite) + focus la 1re (CONFIG). Tourner = focus suiv/préc, clic = ouvrir.
+    extern lv_group_t* g_encGroup;
+    if(!g_encGroup) g_encGroup=lv_group_create();
+    lv_group_remove_all_objs(g_encGroup);
+    static const int gord[5]={0,3,1,4,2};
+    for(int k=0;k<5;k++) if(g_menuBtns[gord[k]]) lv_group_add_obj(g_encGroup,g_menuBtns[gord[k]]);
+    if(g_menuBtns[gord[0]]) lv_group_focus_obj(g_menuBtns[gord[0]]);
+    g_erAct_n=0; g_erCur=0; g_erEdit=false;   // (v90) plus de section active
+#endif
 }
+
+#if defined(BOARD_WS241)
+// ── (v90) Nav encodeur DANS une section : focus par ligne + édition de valeur ──
+static void erSetState(int ai,bool focused,bool editing){   // ai = index dans g_erAct
+    if(ai<0||ai>=g_erAct_n) return;
+    int idx=g_erAct[ai];
+    lv_obj_t* o   = (idx<0)? s_back_btn : g_er[idx].focus;
+    lv_obj_t* ttl = (idx<0)? nullptr   : g_er[idx].title;
+    if(o){
+        lv_obj_clear_state(o,LV_STATE_FOCUSED|LV_STATE_EDITED);
+        if(editing)      lv_obj_add_state(o,LV_STATE_EDITED);
+        else if(focused) lv_obj_add_state(o,LV_STATE_FOCUSED);
+        lv_obj_scroll_to_view(o,LV_ANIM_ON);   // suit le focus si la section scrolle (CONFIG = 6 lignes)
+    }
+    // (v91) Le TITRE change de couleur : gris = inactif · BLEU = focus · VERT = édition (bien plus lisible)
+    if(ttl) lv_obj_set_style_text_color(ttl, editing? C_GREEN : (focused? C_BRAND : lv_color_hex(0x4b5563)), 0);
+}
+static void erBuildActive(lv_obj_t* sect){
+    g_erAct_n=0; g_erCur=0; g_erEdit=false;
+    for(int i=0;i<g_er_n && g_erAct_n<15;i++) if(g_er[i].sect==sect) g_erAct[g_erAct_n++]=(int8_t)i;
+    if(s_back_btn){ encFocusOutline(s_back_btn); if(g_erAct_n<16) g_erAct[g_erAct_n++]=-1; }   // « retour » en dernier
+    for(int a=0;a<g_erAct_n;a++) erSetState(a,false,false);   // (v91) remet tout au neutre (évite les titres restés bleus)
+    if(g_erAct_n>0) erSetState(0,true,false);                 // puis focus la 1re ligne
+}
+static void erEditApply(int dir){   // applique un pas d'édition sur la ligne focus
+    if(g_erCur<0||g_erCur>=g_erAct_n) return;
+    int ai=g_erAct[g_erCur]; if(ai<0) return;
+    EncRow& r=g_er[ai];
+    if(r.type==ER_SEG){                                    // 2 états : basculer
+        SegCtl& s=g_seg[r.ref];
+        lv_event_send((*s.val==s.aIsTrue)? s.segB : s.segA, LV_EVENT_CLICKED, NULL);
+    }else if(r.type==ER_SEGN){
+        SegN& s=g_segn[r.ref];
+        int k=(int)*s.val+(dir>0?1:-1); if(k<0)k=0; if(k>=s.n)k=s.n-1;
+        if(k!=(int)*s.val) lv_event_send(s.cell[k],LV_EVENT_CLICKED,NULL);
+    }else if(r.type==ER_POP){
+        PopSpec& s=g_pop[r.ref];
+        int k=s.idx()+(dir>0?1:-1); if(k<0)k=0; if(k>=s.n)k=s.n-1;
+        s.apply(k);
+    }else if(r.type==ER_BRIGHT){
+        int v=(int)g_cfg.brightness+(dir>0?1:-1); if(v<1)v=1; if(v>16)v=16;   // (v92) plancher 1 : jamais de noir total
+        g_cfg.brightness=(uint8_t)v; panelBright(g_cfg.brightness);
+        if(r.focus) lv_slider_set_value(r.focus,v,LV_ANIM_OFF);
+        if(s_bright_v){char b[8];snprintf(b,8,"%d/16",v);lv_label_set_text(s_bright_v,b);}
+    }
+}
+static void erStep(int dir){        // tourner dans une section
+    if(g_erAct_n<=0) return;
+    if(g_erEdit){ erEditApply(dir); return; }             // en édition : change la valeur
+    erSetState(g_erCur,false,false);                      // quitte le focus courant
+    g_erCur+=(dir>0?1:-1);
+    if(g_erCur<0) g_erCur=g_erAct_n-1;
+    if(g_erCur>=g_erAct_n) g_erCur=0;
+    erSetState(g_erCur,true,false);                       // focus le nouveau
+}
+static void erClick(){
+    if(g_erAct_n<=0){ settingsShowMenu(); return; }
+    int ai=g_erAct[g_erCur];
+    if(ai<0){ settingsShowMenu(); return; }               // « retour » → grille
+    if(g_erEdit){ g_erEdit=false; erSetState(g_erCur,true,false); return; }  // valide → remonte au titre
+    EncRow& r=g_er[ai];
+    if(r.type==ER_SEG){ erEditApply(+1); }                // toggle 2 états : bascule direct
+    else if(r.type==ER_TILE){ lv_event_send(r.focus,LV_EVENT_CLICKED,NULL); }   // ouvre la sous-page
+    else { g_erEdit=true; erSetState(g_erCur,false,true); }  // segn/pop/bright : entre en édition
+}
+#endif
+
 static void settingsOpenSection(int i){
     if(i<0||i>=6||!s_sec[i])return;
     s_cur_sec=(int8_t)i;
@@ -5154,6 +5303,9 @@ static void settingsOpenSection(int i){
     if(s_set_acval) lv_obj_add_flag(s_set_acval,LV_OBJ_FLAG_HIDDEN);
     if(s_set_title) lv_label_set_text(s_set_title,kSecName[i]);        // titre épuré (le retour est le cercle à droite)
     if(s_set_uline&&s_set_title){ lv_obj_update_layout(s_set_title); lv_obj_set_width(s_set_uline,lv_obj_get_width(s_set_title)); }
+#if defined(BOARD_WS241)
+    erBuildActive(s_sec[i]);   // (v90) construit la liste des lignes (titres) de la section + focus la 1re
+#endif
 }
 static void _menu_btn_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) settingsOpenSection((int)(intptr_t)lv_event_get_user_data(e)); }
 static void _sec_back_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) settingsShowMenu(); }
@@ -5171,7 +5323,13 @@ static void mkMenuBtn(lv_obj_t*parent,int i,int x,int y){
     lv_obj_set_style_border_color(bt,C_BRAND,0);lv_obj_set_style_border_width(bt,2,0);
     lv_obj_set_style_radius(bt,16,0);lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0);
     lv_obj_set_style_bg_color(bt,C_BRAND,LV_STATE_PRESSED);
+    // (v88) surlignage quand la tuile est FOCUS (nav encodeur WS-241) : bordure épaisse + fond léger
+    lv_obj_set_style_border_width(bt,4,LV_STATE_FOCUSED);
+    lv_obj_set_style_border_color(bt,C_BRAND,LV_STATE_FOCUSED);
+    lv_obj_set_style_bg_color(bt,C_BRAND,LV_STATE_FOCUSED);
+    lv_obj_set_style_bg_opa(bt,60,LV_STATE_FOCUSED);
     lv_obj_add_event_cb(bt,_menu_btn_cb,LV_EVENT_CLICKED,(void*)(intptr_t)i);
+    if(i>=0&&i<6) g_menuBtns[i]=bt;   // (v88) réf pour la nav encodeur
     lv_obj_t*l=lv_label_create(bt);lv_label_set_text(l,kSecName[i]);
     lv_obj_set_style_text_color(l,C_BRAND,0);
     lv_obj_set_style_text_font(l,MF,0);lv_obj_center(l);
@@ -5190,6 +5348,9 @@ static void bubbleAll(lv_obj_t* o){
 void buildSettingsPageT4(lv_obj_t*p){
     char b[20];
     g_seg_n=0; g_segn_n=0; g_pop_n=0; s_cur_sec=-1;
+#if defined(BOARD_WS241)
+    g_er_n=0; g_erAct_n=0; g_erCur=0; g_erEdit=false;   // (v90) reset registre nav encodeur (rebuild safe)
+#endif
     s_scale_v=nullptr;s_vfilt_v=nullptr;s_dist_v=nullptr;s_alt_v=nullptr;s_spd_v=nullptr;
     s_bright_v=nullptr;s_src_v=nullptr;s_theme_v=nullptr;s_grnd_v=nullptr;s_icon_sz_v=nullptr;
     s_ac_v=nullptr;s_wifi_v=nullptr;s_sd_v=nullptr;s_set_aclbl=nullptr;s_set_acval=nullptr;
