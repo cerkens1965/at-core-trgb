@@ -1,0 +1,21 @@
+Init SH8601 v2.0.1 extraite du dump WS241_REV2.0_factory_v2.0.1_6MB.bin (2026-07-06)
+(app @0x10000, tableau lcd_init_cmds trouvé @file 0x0328b0 seg0/rodata).
+Format {cmd, {data}, delay_ms} :
+  0xFE {0x20}          page CMD2 vendeur   ] IDENTIQUE
+  0x26 {0x0A}          vendeur             ]  à la
+  0x24 {0x80}          vendeur             ]  v1.0.0
+  0xFE {0x00}          retour page user    ]
+  0x3A {0x55}          pixel format RGB565
+  0xC2 {0x00}  +10ms
+  0x35 {}              TE on (data_bytes=0)
+  0x51 {0x00}  +10ms   brightness 0
+  0x11         +80ms   SLPOUT
+  0x2A {0x00,0x10,0x00,0xD1}   CASET  <-- DIFFERE de v1.0.0 (qui = 00 10 01 D1 = 16..465)
+  0x2B {0x00,0x00,0x00,0x57}   PASET  <-- DIFFERE de v1.0.0 (qui = 00 00 02 57 = 0..599)
+  0x29         +10ms   DISPON
+  0x36 {0x30}          MADCTL paysage (MV+MX)
+  0x51 {0xFF}          brightness MAX
+NB: CASET/PASET init sont peut-être des valeurs par defaut ecrasees par flush per-draw dans la
+demo ESP-IDF ; a re-verifier (lecture pointeur possiblement decalee d'1 octet). Vendeur = SUR.
+CONCLUSION : le fix v2.0.1 = init SH8601 complet + BONNE GEOMETRIE (pas juste l'amorcage vendeur,
+qui est deja identique v1.0.0). Chemin PANEL_WS241_SH8601 (Arduino_SH8601 + geometrie) a finaliser.
