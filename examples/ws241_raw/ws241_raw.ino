@@ -89,7 +89,7 @@ void setup() {
         .flags = { .use_qspi_interface = 1 },
     };
     esp_lcd_panel_dev_config_t panel_config = {
-        .reset_gpio_num = -1,   // reset fait via TCA9554 (Rev2.0), pas GPIO21
+        .reset_gpio_num = PIN_RST,   // UNIVERSEL : GPIO21 (reset v1.0.0) + TCA9554 pulse (reset v2.0.1)
         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
         .bits_per_pixel = 16,
         .vendor_config = &vendor_config,

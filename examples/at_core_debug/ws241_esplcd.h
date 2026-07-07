@@ -111,9 +111,10 @@ public:
     }
     bool begin() {
         Wire.begin(WS241_I2C_SDA, WS241_I2C_SCL);
-        // ── Rev2.0 : le reset de la dalle AMOLED passe par le TCA9554 (@0x20), PAS la GPIO21 ──
-        // Au POR l'expandeur est en entrée → LCD maintenu en reset → écran NOIR. On le met en
-        // sortie et on pulse le reset. (Découvert 2026-07-07 par scan I2C : 0x20 TCA9554 présent.)
+        // ── Reset dalle AMOLED : dépend de la révision → on fait les DEUX (universel) ──
+        // v1.0.0 (Rev1) : reset via GPIO21 (fait par esp_lcd, reset_gpio_num plus bas).
+        // v2.0.1 (Rev2.0) : reset via l'I/O expander TCA9554 @0x20 (bus 47/48) ci-dessous — au POR
+        // l'expandeur est en entrée → LCD bloqué en reset → NOIR sans ça. (Scan I2C 2026-07-07.)
         tcaReset();
         spi_bus_config_t buscfg = SH8601_PANEL_BUS_QSPI_CONFIG(
             WS241_LCD_SCK, WS241_LCD_D0, WS241_LCD_D1, WS241_LCD_D2, WS241_LCD_D3,
@@ -131,7 +132,7 @@ public:
             .flags = { .use_qspi_interface = 1 },
         };
         esp_lcd_panel_dev_config_t panel_config = {
-            .reset_gpio_num = -1,   // reset fait via TCA9554 (Rev2.0), pas GPIO21
+            .reset_gpio_num = WS241_LCD_RST,   // UNIVERSEL : GPIO21 (reset dalle v1.0.0) + tcaReset() TCA9554 (reset dalle v2.0.1)
             .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
             .bits_per_pixel = 16,
             .vendor_config = &vendor_config,
