@@ -24,8 +24,8 @@
 
 #define WS241_LCD_HOST   SPI2_HOST
 #define WS241_LCD_W      600
-#define WS241_LCD_H      480   // dalle Rev2.0 = 600×480 (PAS 450 ; = SCR_H UI + chemin RM690B0 Rev1)
-#define WS241_LCD_YGAP   0     // offset 0 (comme le chemin RM690B0 col_offset=0) — la démo 450 mettait +16
+#define WS241_LCD_H      450   // dalle 2.41 = 600×450 (spec Waveshare ; natif SH8601 450×600 portrait)
+#define WS241_LCD_YGAP   0     // offset 0 — le "trop bas" venait du +16 de la démo, pas de la hauteur
 
 // Init SH8601 v2.0.1 — COPIE EXACTE de lcd_init_cmds[] de la démo (AMOLED_Rotate=Rotate_90).
 static const sh8601_lcd_init_cmd_t ws241_lcd_init_cmds[] = {
