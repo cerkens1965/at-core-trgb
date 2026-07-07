@@ -28,19 +28,15 @@
 #define WS241_LCD_D2    13
 #define WS241_LCD_D3    14
 #define WS241_LCD_RST   21
-#ifdef PANEL_WS241_SH8601
-#define WS241_NATIVE_W 600   // SH8601 : rotation HARDWARE (MADCTL 0x30) → adressage paysage DIRECT 600×450
-#define WS241_NATIVE_H 450
-#define WS241_ROT      0     // pas de rotation software (la dalle tourne elle-même via MADCTL 0x30)
-#define WS241_LCD_H    450
-#else
-#define WS241_NATIVE_W 480   // RM690B0 (ancien) : 480 (450 → bande noire en bas, cf 2026-06-30)
+#if !defined(PANEL_WS241_SH8601_ESPLCD)
+// Géométrie RM690B0 480×600 rot3 (chemin Arduino_GFX).
+#define WS241_NATIVE_W 480
 #define WS241_NATIVE_H 600
 #define WS241_ROT      3     // paysage 90° CCW software
+#define WS241_LCD_W    600
 #define WS241_LCD_H    480
-#endif
-#define WS241_LCD_W    600   // logique paysage = ce que voit l'UI T4
 #define WS241_MADCTL  0x00
+#endif
 
 #define WS241_I2C_SDA  47
 #define WS241_I2C_SCL  48
@@ -48,37 +44,32 @@
 #define WS241_TP_INT   -1
 #define WS241_TP_ADDR 0x38   // FT6336
 
-// ── Objets bas-niveau ───────────────────────────────────────────────────────────
+#if defined(PANEL_WS241_SH8601_ESPLCD)
+#include "ws241_esplcd.h"   // chemin esp_lcd SH8601 (remplace tout le bloc Arduino_GFX ci-dessous)
+#else
+// ── Objets bas-niveau (Arduino_GFX RM690B0) ─────────────────────────────────────
 static Arduino_DataBus *ws_bus = new Arduino_ESP32QSPI(
     WS241_LCD_CS, WS241_LCD_SCK, WS241_LCD_D0, WS241_LCD_D1, WS241_LCD_D2, WS241_LCD_D3);
-// (bus, rst, rotation, w_natif, h_natif, offsets…) → width()/height() = dims post-rotation.
-// ⚠️ Waveshare a changé le contrôleur AMOLED sur le stock récent (RM690B0 → SH8601, constaté
-// 2026-07 : dalles neuves noires avec le driver RM690B0, la démo d'usine loggue "sh8601").
-// Le flag PANEL_WS241_SH8601 sélectionne le SH8601 (même constructeur, même bus QSPI, mêmes pins).
-#ifdef PANEL_WS241_SH8601
-// rotation 0 + row_offset1=16 → _yStart=16 → PASET démarre à +16 (= offset Y paysage de la démo
-// Waveshare : draw_bitmap(x, y+16)). MADCTL 0x30 (dans begin) fait la rotation HW.
-static Arduino_SH8601 *ws_gfx = new Arduino_SH8601(
-    ws_bus, WS241_LCD_RST, WS241_ROT, WS241_NATIVE_W, WS241_NATIVE_H, 0, 16, 0, 0);
-#else
+// ⚠️ Stock WS-241 récent = dalles SH8601 (pas RM690B0). Le RENDU du driver RM690B0 fonctionne dessus
+// (mêmes commandes DCS standard + même bus QSPI), à condition d'envoyer l'AMORÇAGE VENDEUR SH8601 dans
+// begin() (page CMD2). D'où : driver RM690B0 pour le rendu + init SH8601 dans begin().
 static Arduino_RM690B0 *ws_gfx = new Arduino_RM690B0(
     ws_bus, WS241_LCD_RST, WS241_ROT, WS241_NATIVE_W, WS241_NATIVE_H, 0, 0, 0, 0);
-#endif
 static TouchDrvFT6X36 ws_touch;
 
 class WS241_Panel {
 public:
     bool begin() {
         Wire.begin(WS241_I2C_SDA, WS241_I2C_SCL);
-        if (!ws_gfx->begin()) return false;   // init graphique (RM690B0 par défaut, comportement v90 validé)
-        // (2026-07-06) L'amorçage vendeur SH8601 (0xFE/0x26/0x24) a été testé ici (v93) : INUTILE pour
-        // les dalles v1.0.0 (marchent sans) et INEFFICACE pour v2.0.1 (valeurs différentes, non
-        // disponibles) → retiré pour ne pas risquer les vraies dalles RM690B0. Cf mémoire
-        // ws241_sh8601_port_reference. Rev2.0 v2.0.1 = bloqué tant qu'on n'a pas l'init v2.0.1.
-#ifdef PANEL_WS241_SH8601
-        // Init SH8601 v2.0.1 EXTRAITE du dump usine (ws241_sh8601_reference/WS241_v2.0.1_init_extracted.txt),
-        // ordre EXACT, envoyée APRÈS begin() (écrase l'init générique Arduino_GFX). CLÉ vs essai précédent :
-        // on ENVOIE bien le MADCTL 0x30 (rotation HARDWARE de la dalle) — l'omettre = noir.
+        if (!ws_gfx->begin()) return false;   // init graphique RM690B0 (rendu + géométrie 480×600 rot3)
+#ifndef WS241_NO_PRIME
+        // (2026-07-07) AMORÇAGE SH8601 avec l'ORDRE DE L'USINE : le vendeur (page CMD2) doit être posé
+        // AVANT SLPOUT/DISPON (v93 le posait APRÈS → ne prenait pas → noir à froid). On repart d'un
+        // SWRESET (efface l'init RM690B0), puis vendeur → pixfmt → SLPOUT → DISPON → MADCTL. On garde la
+        // GÉOMÉTRIE RM690B0 (480×600 rot3) : MADCTL remis à 0xA0 (= MV|MY|RGB, rotation 3 RM690B0) pour
+        // que le rendu 480×600 (CASET/PASET per-draw du driver) colle. Pas de MADCTL 0x30 (celui de la
+        // démo esp_lcd, incompatible avec la géométrie RM690B0).
+        ws_bus->beginWrite(); ws_bus->writeCommand(0x01); ws_bus->endWrite(); delay(200);  // SWRESET
         ws_bus->beginWrite();
         ws_bus->writeC8D8(0xFE, 0x20);      // page CMD2 vendeur
         ws_bus->writeC8D8(0x26, 0x0A);
@@ -87,14 +78,10 @@ public:
         ws_bus->writeC8D8(0x3A, 0x55);      // pixel format RGB565
         ws_bus->writeC8D8(0xC2, 0x00);
         ws_bus->endWrite(); delay(10);
+        ws_bus->beginWrite(); ws_bus->writeCommand(0x11); ws_bus->endWrite(); delay(120);  // SLPOUT
+        ws_bus->beginWrite(); ws_bus->writeCommand(0x29); ws_bus->endWrite(); delay(10);   // DISPON
         ws_bus->beginWrite();
-        ws_bus->writeCommand(0x35);         // TE on (data_bytes=0 dans l'init v2.0.1)
-        ws_bus->writeC8D8(0x51, 0x00);      // brightness 0 (remontée ensuite)
-        ws_bus->endWrite(); delay(10);
-        ws_bus->beginWrite(); ws_bus->writeCommand(0x11); ws_bus->endWrite(); delay(80);  // SLPOUT
-        ws_bus->beginWrite(); ws_bus->writeCommand(0x29); ws_bus->endWrite(); delay(10);  // DISPON
-        ws_bus->beginWrite();
-        ws_bus->writeC8D8(0x36, 0x30);      // MADCTL paysage HARDWARE (MV+MX) — LA clé manquante
+        ws_bus->writeC8D8(0x36, 0xA0);      // MADCTL = RM690B0 rotation 3 (MV|MY|RGB) → colle au rendu 480×600
         ws_bus->writeC8D8(0x51, 0xFF);      // brightness max
         ws_bus->endWrite();
 #endif
@@ -170,3 +157,4 @@ static inline void beginLvglHelper(WS241_Panel &p, bool debug = false) {
     ws_indev_drv.read_cb = ws_touch_read;
     lv_indev_drv_register(&ws_indev_drv);
 }
+#endif // PANEL_WS241_SH8601_ESPLCD (chemin Arduino_GFX vs esp_lcd)
