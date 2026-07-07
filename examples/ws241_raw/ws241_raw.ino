@@ -97,6 +97,16 @@ void setup() {
     Serial.printf("[RAW] new_panel=0x%x\n", esp_lcd_new_panel_sh8601(io, &panel_config, &panel));
     Serial.printf("[RAW] reset=0x%x\n", esp_lcd_panel_reset(panel));
     Serial.printf("[RAW] init=0x%x\n", esp_lcd_panel_init(panel));
+    // ── DÉTECTION CONTRÔLEUR : lire les registres ID via QSPI (0xDA=ID1 → 0x86 = SH8601) ──
+    { uint8_t id[4] = {0,0,0,0};
+      esp_err_t r04 = esp_lcd_panel_io_rx_param(io, 0x04, id, 3);
+      Serial.printf("[RAW] RDDID(0x04)=0x%x -> %02X %02X %02X\n", r04, id[0], id[1], id[2]);
+      uint8_t da=0,db=0,dc=0;
+      esp_lcd_panel_io_rx_param(io, 0xDA, &da, 1);
+      esp_lcd_panel_io_rx_param(io, 0xDB, &db, 1);
+      esp_lcd_panel_io_rx_param(io, 0xDC, &dc, 1);
+      Serial.printf("[RAW] ID1(0xDA)=0x%02X ID2(0xDB)=0x%02X ID3(0xDC)=0x%02X  => %s\n",
+                    da, db, dc, (da==0x86) ? "SH8601" : "RM690B0/autre"); }
     Serial.printf("[RAW] disp_on=0x%x\n", esp_lcd_panel_disp_on_off(panel, true));
     // mirror comme la démo (ROT_NONE) — swap_xy est un no-op sur ce driver
     esp_lcd_panel_mirror(panel, true, false);
