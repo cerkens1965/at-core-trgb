@@ -42,6 +42,7 @@
 #include <ArduinoJson.h>
 #include <Preferences.h>
 #include <math.h>
+#include "alert_core.h"   // moteur d'alerte trafic PARTAGÉ (firmware ↔ simulateur altsim/) — source de vérité
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Update.h>   // OTA firmware AT-VIEW (WP7) — réception .bin via l'AP du WebServer
@@ -5739,77 +5740,42 @@ struct ThreatInfo { uint8_t level; int clock; int dist_m; int dalt_ft; int closi
 static ThreatInfo g_threat = {};
 static uint8_t    g_trf_threat[MAX_TRF] = {};   // niveau par cible (couleur icône radar), index aligné g_traffic.t
 static bool       g_circuit_mode = false;
-// ── Modèle d'alerte trafic UNIVERSEL (2026-07-08) — plus de « mode circuit » ──
-// Convergence (CPA) + bulle-œuf décalée VERS L'AVANT dont la taille varie avec
-// notre vitesse sol. Aucune alerte au SOL (gate flt_st).
-#define ALERT_FWD_SEC   30.0f    // lobe avant de la bulle-œuf = vitesse_sol × 30 s
-#define ALERT_FWD_MIN   400.0f   // clamp bas (m)
-#define ALERT_FWD_MAX   2000.0f  // clamp haut (m)
-#define ALERT_AFT_MIN   150.0f   // lobe arrière mini (m)
-#define ALERT_FLOOR_M   150.0f   // plancher co-altitude (m) → ROUGE quoi qu'il arrive
-
+// ── Moteur d'alerte trafic — DÉLÈGUE à alert_core.h (source de vérité PARTAGÉE
+// firmware ↔ simulateur altsim/). Modèle universel bulle-œuf + convergence, gate
+// sol (flt_st==0). Ici on ne fait QUE mapper g_status/g_traffic → AC_* puis recopier
+// le résultat dans g_threat / g_trf_threat. Toute la LOGIQUE est dans acEvalThreats()
+// → ce que le simu montre = ce que le firmware calcule (zéro divergence).
+// AC_NONE/ORANGE/RED (0/1/2) == THREAT_NONE/ORANGE/RED.
 void alertEngineTick(){
     g_threat = {};
     for(int i=0;i<MAX_TRF;i++) g_trf_threat[i]=THREAT_NONE;
-    if(!g_status.valid || !g_status.gps_fix) return;
 
-    // Mode GND : AUCUNE alerte au sol. Gate autoritaire = phase de vol boîtier
-    // (flt_st : 0=sol · 1=en vol · 2=arrêt imminent). Parking/roulage lent = 0.
-    if(g_status.flt_st == 0) return;
+    AC_Own o;
+    o.spd_kmh = (float)g_status.spd;   // g_status.spd = km/h
+    o.hdg_deg = (float)g_status.hdg;
+    o.flt_st  = g_status.flt_st;
+    o.gps_fix = g_status.gps_fix;
+    o.valid   = g_status.valid;
 
-    const float NM=1852.0f;
-    const float vOrg=500.0f, vRed=400.0f;            // gate vertical (ft)
-    const float tOrg=45.0f,  tRed=25.0f;             // tCPA (s) orange / rouge
-    const float dOrg=1.0f*NM, dRed=0.5f*NM;          // dCPA distance de passage (m)
-
-    // Bulle-œuf décalée VERS L'AVANT : lobe avant = distance parcourue en
-    // ALERT_FWD_SEC s (bornée), arrière = 20 % (min 150 m) → un suiveur derrière
-    // tombe dans le petit lobe et ne déclenche pas.
-    float ogs=g_status.spd/3.6f;                     // own m/s
-    float rFwd=ogs*ALERT_FWD_SEC; if(rFwd<ALERT_FWD_MIN)rFwd=ALERT_FWD_MIN; if(rFwd>ALERT_FWD_MAX)rFwd=ALERT_FWD_MAX;
-    float rAft=rFwd*0.20f; if(rAft<ALERT_AFT_MIN)rAft=ALERT_AFT_MIN;
-
-    float ot=g_status.hdg*(float)M_PI/180.0f;
-    float ovx=ogs*sinf(ot), ovy=ogs*cosf(ot);
-
-    for(int i=0;i<g_traffic.count && i<MAX_TRF;i++){
+    AC_Intruder tr[MAX_TRF]; int n=0;
+    for(int i=0;i<g_traffic.count && i<MAX_TRF;i++,n++){
         TrafficEntry&e=g_traffic.t[i];
-        if(!e.visible) continue;
-        float dalt=fabsf((float)e.alt_m*100.0f);                // |Δalt| ft (alt_m = centaines de ft)
-        float br=e.bear_deg*(float)M_PI/180.0f;
-        float Rx=e.dist_m*sinf(br), Ry=e.dist_m*cosf(br);       // position relative (m, est/nord)
-        float tt=e.hdg_deg*(float)M_PI/180.0f, tgs=e.spd_kt*0.514444f;
-        float vrx=tgs*sinf(tt)-ovx, vry=tgs*cosf(tt)-ovy;       // vitesse relative
-        float vr2=vrx*vrx+vry*vry;
-        float tcpa=(vr2>0.05f)?-(Rx*vrx+Ry*vry)/vr2:-1.0f;      // <=0 → s'éloigne/parallèle
-        float dcpa=e.dist_m;
-        if(tcpa>0){ float cx=Rx+vrx*tcpa, cy=Ry+vry*tcpa; dcpa=sqrtf(cx*cx+cy*cy); }
-        int closing=(int)(sqrtf(vr2)/0.514444f);                // kt
+        tr[n].visible       = e.visible;
+        tr[n].alt_rel_100ft = (float)e.alt_m;   // alt_m = centaines de ft (relatif)
+        tr[n].bear_deg      = (float)e.bear_deg;
+        tr[n].dist_m        = (float)e.dist_m;
+        tr[n].hdg_deg       = (float)e.hdg_deg;
+        tr[n].spd_kt        = (float)e.spd_kt;
+    }
 
-        bool converging=(tcpa>0);                                    // on se rapproche
-        // Rayon de la bulle-œuf à ce relèvement (grand devant, petit derrière).
-        float rel=e.bear_deg-g_status.hdg;
-        float ceg=cosf(rel*(float)M_PI/180.0f);
-        float rEgg=rAft+(rFwd-rAft)*(1.0f+ceg)*0.5f;
+    uint8_t per[MAX_TRF]; AC_Out out;
+    acEvalThreats(o, tr, n, acDefaultParams(), per, out);
 
-        uint8_t lvl=THREAT_NONE;
-        // CONVERGENCE (CPA temps + distance de passage) — le cœur du modèle.
-        if(dalt<=vOrg && converging && tcpa<=tOrg && dcpa<=dOrg) lvl=THREAT_ORANGE;
-        if(dalt<=vRed && converging && tcpa<=tRed && dcpa<=dRed) lvl=THREAT_RED;
-        // BULLE-ŒUF : dans l'œuf ET on converge → au moins ORANGE
-        // (règle le faux-positif « suiveur » : sans convergence → rien).
-        if(dalt<=vOrg && converging && (float)e.dist_m<=rEgg && lvl<THREAT_ORANGE) lvl=THREAT_ORANGE;
-        // PLANCHER : trop près + co-altitude → ROUGE (garde-fou « pile dessus »).
-        if(dalt<=vRed && (float)e.dist_m<=ALERT_FLOOR_M) lvl=THREAT_RED;
-
-        g_trf_threat[i]=lvl;
-        if(lvl>g_threat.level){
-            int clk=((e.bear_deg-g_status.hdg)%360+360)%360;
-            int hr=((clk+15)/30)%12; if(hr==0)hr=12;            // position horaire relative au nez
-            g_threat.level=lvl; g_threat.clock=hr; g_threat.dist_m=e.dist_m;
-            g_threat.dalt_ft=e.alt_m*100; g_threat.closing_kt=closing;
-            g_threat.valid=true; strlcpy(g_threat.cs,e.cs,9);
-        }
+    for(int i=0;i<n;i++) g_trf_threat[i]=per[i];
+    if(out.valid){
+        g_threat.level=out.level; g_threat.clock=out.clock; g_threat.dist_m=out.dist_m;
+        g_threat.dalt_ft=out.dalt_ft; g_threat.closing_kt=out.closing_kt; g_threat.valid=true;
+        if(out.idx>=0 && out.idx<n) strlcpy(g_threat.cs, g_traffic.t[out.idx].cs, 9);
     }
 }
 

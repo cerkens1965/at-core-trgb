@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AeroTrace — Simulateur d'alertes trafic</title>
+<style>
+  :root{ --bg:#0e1116; --panel:#161b22; --line:#2a3340; --fg:#e6edf3; --muted:#8b98a5;
+         --green:#3fb950; --amber:#e3b341; --red:#f85149; --brand:#2f81f7; }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+  header{padding:8px 14px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  header h1{font-size:15px;margin:0;font-weight:600}
+  header .sub{color:var(--muted);font-size:12px}
+  .wrap{display:flex;gap:14px;padding:14px;flex-wrap:wrap;align-items:flex-start}
+  .col{display:flex;flex-direction:column;gap:6px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px}
+  .card h2{font-size:12px;margin:0 0 6px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+  canvas{display:block;background:#000;border-radius:8px}
+  #live{background:#0a0e13}
+  .controls{display:flex;flex-direction:column;gap:10px;min-width:280px;max-width:340px}
+  .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  select,button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;cursor:pointer}
+  button.primary{background:var(--brand);border-color:var(--brand)}
+  button:active{transform:translateY(1px)}
+  label.sl{display:flex;flex-direction:column;gap:2px;font-size:12px;color:var(--muted)}
+  label.sl b{color:var(--fg);font-weight:600}
+  input[type=range]{width:100%}
+  input[type=file]{font-size:12px;color:var(--muted);max-width:100%}
+  .pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700}
+  .tag{color:var(--muted);font-size:11px}
+  table{border-collapse:collapse;width:100%;font-size:11px}
+  td,th{border-bottom:1px solid var(--line);padding:3px 5px;text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  .toggle{display:flex;align-items:center;gap:6px;font-size:12px}
+  .kbd{font:11px ui-monospace,Menlo,monospace;background:#21262d;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+</style>
+</head>
+<body>
+<header>
+  <h1>AeroTrace — Simulateur d'alertes trafic</h1>
+  <span class="sub">moteur = miroir JS de <span class="kbd">alert_core.h</span> · bulle-œuf + convergence</span>
+  <span class="sub" id="clock" style="margin-left:auto"></span>
+</header>
+
+<div class="wrap">
+  <!-- Vue "live traffic" (dessus, absolu) -->
+  <div class="col card">
+    <h2>Live traffic (vue du dessus)</h2>
+    <canvas id="live" width="440" height="440"></canvas>
+    <div class="tag" id="liveScale"></div>
+  </div>
+
+  <!-- Écran avion 600x450 -->
+  <div class="col card">
+    <h2>Écran avion (600 × 450)</h2>
+    <canvas id="screen" width="600" height="450"></canvas>
+    <div class="tag">Radar own-centré, track-up · overlay alerte = flash 1,5× en ROUGE</div>
+  </div>
+
+  <!-- Contrôles -->
+  <div class="col card controls">
+    <h2>Scénario</h2>
+    <select id="scenario"></select>
+    <div class="row">
+      <button id="play" class="primary">▶ Play</button>
+      <button id="reset">⟲ Reset</button>
+      <span class="tag" id="tlabel">t = 0.0 s</span>
+    </div>
+    <input type="range" id="scrub" min="0" max="100" value="0" step="0.1">
+    <div class="row">
+      <label class="sl" style="flex:1"><span>Vitesse ×<b id="spdv">1</b></span>
+        <input type="range" id="speed" min="0.25" max="8" step="0.25" value="1"></label>
+      <label class="sl" style="flex:1"><span>Portée radar <b id="rngv">8</b> nm</span>
+        <input type="range" id="range" min="2" max="16" step="1" value="8"></label>
+    </div>
+    <div class="row">
+      <span class="toggle"><input type="checkbox" id="audio"> 🔊 Son</span>
+      <span class="toggle"><input type="checkbox" id="egg" checked> 🥚 Bulle</span>
+      <span class="toggle"><input type="checkbox" id="vec" checked> ➜ Vecteurs</span>
+    </div>
+
+    <h2 style="margin-top:6px">Alerte courante</h2>
+    <div id="alertBox" class="row"><span class="pill" style="background:#30363d">AUCUNE</span></div>
+
+    <h2 style="margin-top:6px">Trafic</h2>
+    <table id="trf"><thead><tr><th>cs</th><th>dist</th><th>Δalt</th><th>clos</th><th>tCPA</th><th>lvl</th></tr></thead><tbody></tbody></table>
+
+    <h2 style="margin-top:6px">Seuils (live)</h2>
+    <label class="sl"><span>Lobe avant = vitesse × <b id="fs">30</b> s</span><input type="range" id="pfwd" min="10" max="60" step="1" value="30"></label>
+    <label class="sl"><span>Plancher <b id="fl">150</b> m</span><input type="range" id="pfloor" min="50" max="500" step="10" value="150"></label>
+    <label class="sl"><span>Vertical ROUGE <b id="vr">400</b> ft</span><input type="range" id="pvred" min="200" max="1000" step="50" value="400"></label>
+    <label class="sl"><span>tCPA ROUGE <b id="tr">25</b> s</span><input type="range" id="ptred" min="10" max="60" step="5" value="25"></label>
+    <label class="sl"><span>dCPA ROUGE <b id="dr">0.5</b> nm</span><input type="range" id="pdred" min="0.1" max="2" step="0.1" value="0.5"></label>
+    <div class="row"><button id="resetP">Seuils par défaut</button></div>
+
+    <h2 style="margin-top:6px">Charger 2 CSV réels</h2>
+    <div class="row"><span class="tag" style="width:52px">own</span><input type="file" id="csvOwn" accept=".csv"></div>
+    <div class="row"><span class="tag" style="width:52px">intrus</span><input type="file" id="csvInt" accept=".csv"></div>
+    <div class="tag" id="csvInfo">Format ATCORE_*.csv (UTC Time, Lat, Lon, AltGPS, GndSpd, TRK).</div>
+  </div>
+</div>
+
+<script src="alert_core.js"></script>
+<script>
+/* Moteur d'alerte : AC / NM / acDefaultParams / acEvalThreats sont fournis par
+   alert_core.js (miroir JS de alert_core.h, verrouillé par altsim/conformance/).
+   → ce que le simu affiche = ce que le firmware calcule. */
+
+/* ============================================================================
+   SCÉNARIOS — chaque aéronef a une fonction pos(t) (forme fermée → scrub exact).
+   Repère local plan : x=est (m), y=nord (m), alt en ft, hdg deg, spd kt.
+   ============================================================================ */
+function lin(cs,x0,y0,alt,hdg,spd,vfpm){ // droite + taux vertical optionnel (ft/min)
+  vfpm=vfpm||0;
+  return {cs, pos:(t)=>{const ms=spd*0.514444, r=hdg*Math.PI/180;
+    return {x:x0+ms*Math.sin(r)*t, y:y0+ms*Math.cos(r)*t, alt:alt+vfpm/60*t, hdg, spd};}};
+}
+const SCEN = {
+  headon:   {name:"Face-à-face (co-alt) — doit ROUGE", dur:80,
+    own:lin("OWN",0,-6000,2000,0,100), intr:[lin("FJABC",0,6000,2000,180,100)]},
+  cross:    {name:"Croisement 90° — doit alerter", dur:80,
+    own:lin("OWN",0,-5000,2000,0,100), intr:[lin("FJXCR",-6500,300,2000,90,110)]},
+  overtake: {name:"Rattrapage par l'arrière", dur:90,
+    own:lin("OWN",0,0,2000,0,90), intr:[lin("FJOVK",0,-2800,2000,0,135)]},
+  follower: {name:"Avion qui SUIT (co-vitesse) — doit RESTER vert", dur:90,
+    own:lin("OWN",0,0,2000,0,100), intr:[lin("FJSUI",0,-1200,2000,0,100)]},
+  stacked:  {name:"Face-à-face étagé +1500 ft — PAS d'alerte", dur:80,
+    own:lin("OWN",0,-6000,2000,0,100), intr:[lin("FJHI",0,6000,3500,180,100)]},
+  climbing: {name:"Convergent en montée (traverse le niveau)", dur:90,
+    own:lin("OWN",0,-6000,3000,0,100), intr:[lin("FJCLB",0,6000,1200,180,100,1600)]},
+  multi:    {name:"Multi-trafic (mélange)", dur:100,
+    own:lin("OWN",0,-4000,2500,0,105),
+    intr:[lin("FJHON",0,7000,2500,180,100), lin("FJCRS",-7000,1500,2600,90,120),
+          lin("FJFOL",0,-1300,2500,0,105), lin("FJHI",3000,3000,4200,225,130)]},
+};
+let csvOwnData=null, csvIntData=null;   // {samples:[{t,x,y,alt,hdg,spd}], dur}
+
+/* ---- état de simulation ---- */
+let scenKey="headon", playing=false, simT=0, lastRAF=0, speed=1, rangeNm=8;
+let params=acDefaultParams();
+let audioOn=false, showEgg=true, showVec=true;
+
+function curScenario(){
+  if(scenKey==="csv" && csvOwnData){
+    return {name:"2 CSV croisés", dur:Math.min(csvOwnData.dur, csvIntData?csvIntData.dur:csvOwnData.dur),
+      ownFn:(t)=>sampleCsv(csvOwnData,t), intrFns: csvIntData?[(t)=>sampleCsv(csvIntData,t)]:[], intrCs:["INTRUS"]};
+  }
+  const s=SCEN[scenKey];
+  return {name:s.name, dur:s.dur, ownFn:s.own.pos, intrFns:s.intr.map(a=>a.pos), intrCs:s.intr.map(a=>a.cs)};
+}
+
+/* état des aéronefs à l'instant t → own + liste intrus (absolu) */
+function stateAt(t){
+  const S=curScenario();
+  const own=S.ownFn(t);
+  const intr=S.intrFns.map((fn,i)=>({cs:S.intrCs[i], ...fn(t)}));
+  return {own, intr, dur:S.dur, name:S.name};
+}
+
+/* dérive les entrées MOTEUR (relatives à own) + garde l'absolu pour la vue live */
+function buildEngineInput(st){
+  const D=Math.PI/180;
+  const own={ spd_kmh: st.own.spd*1.852, hdg_deg: st.own.hdg, flt_st:1, gps_fix:true, valid:true };
+  const t=st.intr.map(a=>{
+    const dx=a.x-st.own.x, dy=a.y-st.own.y;
+    const dist=Math.hypot(dx,dy);
+    let bear=Math.atan2(dx,dy)/D; if(bear<0)bear+=360;   // 0=nord, atan2(est,nord)
+    return {cs:a.cs, visible:true, alt_rel_100ft:(a.alt-st.own.alt)/100,
+            bear_deg:bear, dist_m:dist, hdg_deg:a.hdg, spd_kt:a.spd, _abs:a};
+  });
+  return {own,t};
+}
+
+/* ============================================================================
+   RENDU
+   ============================================================================ */
+const COL={0:"#3fb950",1:"#e3b341",2:"#f85149"};
+const liveC=document.getElementById('live'), lx=liveC.getContext('2d');
+const scrC=document.getElementById('screen'), sx=scrC.getContext('2d');
+
+function drawLive(st, eng, per){
+  const W=liveC.width,H=liveC.height; lx.clearRect(0,0,W,H);
+  // échelle : englobe tout
+  let maxr=1500; const all=[st.own,...st.intr];
+  all.forEach(a=>{maxr=Math.max(maxr,Math.hypot(a.x-st.own.x,a.y-st.own.y)*1.15);});
+  const sc=(Math.min(W,H)/2-24)/maxr; const cx=W/2, cy=H/2;
+  const X=(a)=>cx+(a.x-st.own.x)*sc, Y=(a)=>cy-(a.y-st.own.y)*sc;
+  // grille
+  lx.strokeStyle="#1b2530"; lx.lineWidth=1;
+  for(let g=1;g<=4;g++){lx.beginPath();lx.arc(cx,cy,(Math.min(W,H)/2-24)*g/4,0,7);lx.stroke();}
+  // intrus
+  eng.t.forEach((e,i)=>{ const a=e._abs; drawPlane(lx,X(a),Y(a),a.hdg,COL[per[i]],9);
+    lx.fillStyle="#c9d4df";lx.font="10px sans-serif";lx.fillText(a.cs,X(a)+8,Y(a)-6);
+    if(showVec) drawVec(lx,X(a),Y(a),a.hdg,a.spd,sc); });
+  // own
+  drawPlane(lx,X(st.own),Y(st.own),st.own.hdg,"#7ee0ff",11,true);
+  if(showVec) drawVec(lx,X(st.own),Y(st.own),st.own.hdg,st.own.spd,sc);
+  document.getElementById('liveScale').textContent="rayon ≈ "+(maxr/NM).toFixed(1)+" nm · own bleu clair, cap ↑ réel";
+}
+
+function drawPlane(c,x,y,hdg,col,r,own){
+  c.save();c.translate(x,y);c.rotate(hdg*Math.PI/180);
+  c.fillStyle=col;c.beginPath();c.moveTo(0,-r);c.lineTo(r*0.6,r*0.7);c.lineTo(0,r*0.35);c.lineTo(-r*0.6,r*0.7);c.closePath();c.fill();
+  if(own){c.strokeStyle="#fff";c.lineWidth=1;c.stroke();}
+  c.restore();
+}
+function drawVec(c,x,y,hdg,spd,sc){ const ms=spd*0.514444, len=ms*20*sc; // 20 s de projection
+  const r=hdg*Math.PI/180; c.strokeStyle="rgba(180,200,220,.35)";c.lineWidth=1;
+  c.beginPath();c.moveTo(x,y);c.lineTo(x+Math.sin(r)*len,y-Math.cos(r)*len);c.stroke(); }
+
+// Écran avion : radar own-centré, track-up (nez = haut)
+const RCX=300,RCY=225,RR=193;
+function drawScreen(st, eng, per, out){
+  sx.clearRect(0,0,600,450); sx.fillStyle="#000"; sx.fillRect(0,0,600,450);
+  // anneaux
+  sx.strokeStyle="#243040";sx.lineWidth=1;
+  sx.beginPath();sx.arc(RCX,RCY,RR,0,7);sx.stroke();
+  sx.beginPath();sx.arc(RCX,RCY,RR/2,0,7);sx.stroke();
+  sx.beginPath();sx.moveTo(RCX-RR,RCY);sx.lineTo(RCX+RR,RCY);sx.moveTo(RCX,RCY-RR);sx.lineTo(RCX,RCY+RR);sx.stroke();
+  const pxPerM = RR/(rangeNm*NM);
+  const oh=st.own.hdg*Math.PI/180;
+  // bulle-œuf (debug) — track-up, symétrique gauche/droite, grande devant
+  if(showEgg){
+    const ogs=st.own.spd*0.514444;
+    let rFwd=ogs*params.fwd_sec; rFwd=Math.max(params.fwd_min,Math.min(params.fwd_max,rFwd));
+    let rAft=Math.max(rFwd*0.2,params.aft_min);
+    sx.strokeStyle="rgba(47,129,247,.55)";sx.setLineDash([4,4]);sx.lineWidth=1.5;sx.beginPath();
+    for(let d=0;d<=360;d+=4){const th=d*Math.PI/180; // th=0 → devant (haut)
+      const ceg=Math.cos(th); const R=(rAft+(rFwd-rAft)*(1+ceg)*0.5)*pxPerM;
+      const px=RCX+Math.sin(th)*R, py=RCY-Math.cos(th)*R; d===0?sx.moveTo(px,py):sx.lineTo(px,py);}
+    sx.closePath();sx.stroke();sx.setLineDash([]);
+    // plancher
+    sx.strokeStyle="rgba(248,81,73,.4)";sx.beginPath();sx.arc(RCX,RCY,params.floor_m*pxPerM,0,7);sx.stroke();
+  }
+  // cardinaux (rotation track-up)
+  sx.fillStyle="#5b6773";sx.font="13px sans-serif";sx.textAlign="center";sx.textBaseline="middle";
+  [["N",0],["E",90],["S",180],["W",270]].forEach(([lab,a])=>{const th=(a-st.own.hdg)*Math.PI/180;
+    sx.fillText(lab,RCX+Math.sin(th)*(RR+12),RCY-Math.cos(th)*(RR+12));});
+  // trafic
+  eng.t.forEach((e,i)=>{ let rp=e.dist_m*pxPerM; if(rp>RR+40)return;
+    const rel=(e.bear_deg-st.own.hdg)*Math.PI/180;
+    const px=RCX+Math.sin(rel)*rp, py=RCY-Math.cos(rel)*rp;
+    drawPlane(sx,px,py,e.hdg_deg-st.own.hdg,COL[per[i]],11);
+    sx.fillStyle=COL[per[i]];sx.font="bold 11px sans-serif";sx.textAlign="left";sx.textBaseline="alphabetic";
+    sx.fillText(e.cs,px+9,py-4);
+    sx.fillStyle="#9aa7b3";sx.font="10px sans-serif";
+    const sign=e.alt_rel_100ft>=0?"+":""; sx.fillText(sign+Math.round(e.alt_rel_100ft)+"  "+Math.round(e.dist_m/NM*10)/10+"nm",px+9,py+8);
+  });
+  // own triangle vert (nez haut)
+  drawPlane(sx,RCX,RCY,0,"#3fb950",13,true);
+  // capsule cap
+  sx.fillStyle="#0d1117";sx.strokeStyle="#30363d";roundRect(sx,RCX-34,8,68,26,13);sx.fill();sx.stroke();
+  sx.fillStyle="#e6edf3";sx.font="bold 15px sans-serif";sx.textAlign="center";sx.textBaseline="middle";
+  sx.fillText(Math.round(st.own.hdg)+"°",RCX,22);
+  // échelle
+  sx.fillStyle="#5b6773";sx.font="12px sans-serif";sx.textAlign="left";sx.fillText(rangeNm+" nm",12,440);
+  // ── overlay alerte
+  drawAlertOverlay(out);
+}
+function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
+
+let flashPhase=0;
+function drawAlertOverlay(out){
+  if(out.level===AC.NONE) return;
+  const txt="TFC "+out.clock+"h  "+(out.dist_m/NM).toFixed(1)+"nm  "+(out.dalt_ft>=0?"+":"")+out.dalt_ft+"ft  clos "+out.closing_kt+"kt";
+  if(out.level===AC.RED){
+    const on=(Math.floor(performance.now()/220)%2)===0;   // ~2,3 Hz
+    const w=450,h=66,x=(600-w)/2,y=450-90;
+    sx.fillStyle=on?"#f85149":"#ffffff"; roundRect(sx,x,y,w,h,10); sx.fill();
+    sx.fillStyle=on?"#ffffff":"#f85149"; sx.font="bold 22px sans-serif";sx.textAlign="center";sx.textBaseline="middle";
+    sx.fillText(txt,300,y+h/2);
+  } else {
+    const w=300,h=44,x=(600-w)/2,y=450-72;
+    sx.fillStyle="#e3b341"; roundRect(sx,x,y,w,h,10); sx.fill();
+    sx.fillStyle="#111"; sx.font="bold 15px sans-serif";sx.textAlign="center";sx.textBaseline="middle";
+    sx.fillText(txt,300,y+h/2);
+  }
+}
+
+/* ============================================================================
+   AUDIO (Web Audio) — bip selon niveau. RED = triple rapide, ORANGE = simple lent.
+   ============================================================================ */
+let actx=null, lastBeep=0, lastLevel=0;
+function beep(freq,dur,vol){ if(!actx)return; const o=actx.createOscillator(),g=actx.createGain();
+  o.frequency.value=freq;o.type="square";g.gain.value=vol;o.connect(g);g.connect(actx.destination);
+  const t=actx.currentTime;o.start(t);g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);o.stop(t+dur);}
+function audioTick(level){
+  if(!audioOn||!actx){lastLevel=level;return;}
+  const now=performance.now();
+  if(level===AC.RED){ if(now-lastBeep>500){beep(1200,0.09,0.25);setTimeout(()=>beep(1200,0.09,0.25),120);setTimeout(()=>beep(1200,0.09,0.25),240);lastBeep=now;} }
+  else if(level===AC.ORANGE){ if(now-lastBeep>1600){beep(760,0.14,0.18);lastBeep=now;} }
+  lastLevel=level;
+}
+
+/* ============================================================================
+   BOUCLE + UI
+   ============================================================================ */
+function tick(now){
+  const dt=lastRAF?(now-lastRAF)/1000:0; lastRAF=now;
+  const S=curScenario();
+  if(playing){ simT+=dt*speed; if(simT>=S.dur){simT=S.dur;playing=false;document.getElementById('play').textContent="▶ Play";} }
+  const st=stateAt(simT);
+  const eng=buildEngineInput(st);
+  const {per,out}=acEvalThreats(eng.own, eng.t, params);
+  drawLive(st,eng,per);
+  drawScreen(st,eng,per,out);
+  audioTick(out.level);
+  updatePanels(st,eng,per,out);
+  requestAnimationFrame(tick);
+}
+function updatePanels(st,eng,per,out){
+  document.getElementById('tlabel').textContent="t = "+simT.toFixed(1)+" s / "+st.dur+" s";
+  document.getElementById('scrub').value=(simT/st.dur*100);
+  document.getElementById('clock').textContent=st.name;
+  const ab=document.getElementById('alertBox');
+  const names=["AUCUNE","CAUTION (orange)","URGENT (rouge)"];const cols=["#30363d","#e3b341","#f85149"];
+  ab.innerHTML='<span class="pill" style="background:'+cols[out.level]+';color:'+(out.level?"#111":"#8b98a5")+'">'+names[out.level]+(out.valid?(" · "+out.clock+"h "+ (out.dist_m/NM).toFixed(1)+"nm"):"")+'</span>';
+  const tb=document.querySelector('#trf tbody');tb.innerHTML="";
+  eng.t.forEach((e,i)=>{const tr=document.createElement('tr');
+    const tcpa=e._tcpa>0?e._tcpa.toFixed(0)+"s":"—";
+    tr.innerHTML="<td>"+e.cs+"</td><td>"+(e.dist_m/NM).toFixed(1)+"</td><td>"+(e.alt_rel_100ft>=0?"+":"")+Math.round(e.alt_rel_100ft*100)+"</td><td>"+
+      (e._tcpa>0?Math.round(Math.hypot(e.spd_kt*0.514,0)):"")+"</td><td>"+tcpa+"</td>"+
+      '<td><span class="pill" style="background:'+COL[per[i]]+';color:#111">'+["·","O","R"][per[i]]+'</span></td>';
+    tb.appendChild(tr);});
+}
+
+/* ---- CSV ---- */
+function parseCsv(text){
+  const lines=text.split(/\r?\n/).filter(l=>l.length);
+  // trouver la ligne d'entêtes courtes (contient "Latitude" ou "Lat")
+  let hi=lines.findIndex(l=>/Latitude/i.test(l)&&/Longitude/i.test(l));
+  if(hi<0)hi=1;
+  const cols=lines[hi].split(',').map(s=>s.trim());
+  const idx=(names)=>cols.findIndex(c=>names.some(n=>c.toLowerCase()===n));
+  const iLat=idx(["latitude","lat"]),iLon=idx(["longitude","lon"]),iAlt=idx(["altgps","gps altitude","alt"]),
+        iSpd=idx(["gndspd","ground speed","gs"]),iTrk=idx(["trk","gps track","track","hdg"]),iT=idx(["utc time","time"]);
+  const rows=[];
+  for(let k=hi+1;k<lines.length;k++){const c=lines[k].split(',');
+    const la=parseFloat(c[iLat]),lo=parseFloat(c[iLon]); if(!isFinite(la)||!isFinite(lo))continue;
+    rows.push({lat:la,lon:lo,alt:parseFloat(c[iAlt])||0,spd:parseFloat(c[iSpd])||0,trk:parseFloat(c[iTrk])||0,ts:c[iT]});}
+  if(rows.length<2)throw new Error("CSV: <2 points");
+  // origine = 1er point ; conversion équirectangulaire en m
+  const lat0=rows[0].lat*Math.PI/180, R=6371000;
+  const samples=rows.map((r,i)=>({t:i, x:(r.lon-rows[0].lon)*Math.PI/180*R*Math.cos(lat0),
+    y:(r.lat-rows[0].lat)*Math.PI/180*R, alt:r.alt, hdg:r.trk, spd:r.spd}));
+  // ATCORE ~4 Hz → dt réel inconnu ici : on cadence à 1 pt/s pour le rejeu (t=index)
+  return {samples, dur:samples.length-1, origin:{lat:rows[0].lat,lon:rows[0].lon}};
+}
+function sampleCsv(d,t){ const s=d.samples; const i=Math.min(s.length-1,Math.max(0,Math.floor(t)));
+  const a=s[i], b=s[Math.min(s.length-1,i+1)], f=t-i;
+  return {x:a.x+(b.x-a.x)*f, y:a.y+(b.y-a.y)*f, alt:a.alt+(b.alt-a.alt)*f, hdg:a.hdg, spd:a.spd}; }
+// Recale l'intrus dans le repère de l'own (via lat/lon d'origine)
+function realignInt(){ if(!csvOwnData||!csvIntData)return; const R=6371000, lat0=csvOwnData.origin.lat*Math.PI/180;
+  const dx=(csvIntData.origin.lon-csvOwnData.origin.lon)*Math.PI/180*R*Math.cos(lat0);
+  const dy=(csvIntData.origin.lat-csvOwnData.origin.lat)*Math.PI/180*R;
+  csvIntData.samples.forEach(s=>{s.x+=dx;s.y+=dy;}); csvIntData.origin=csvOwnData.origin; }
+
+/* ---- init UI ---- */
+const selScen=document.getElementById('scenario');
+Object.entries(SCEN).forEach(([k,s])=>{const o=document.createElement('option');o.value=k;o.textContent=s.name;selScen.appendChild(o);});
+{const o=document.createElement('option');o.value="csv";o.textContent="— 2 CSV réels croisés —";selScen.appendChild(o);}
+selScen.value="headon";
+selScen.onchange=()=>{scenKey=selScen.value;simT=0;playing=false;document.getElementById('play').textContent="▶ Play";};
+document.getElementById('play').onclick=(e)=>{ if(!actx&&window.AudioContext)actx=new AudioContext(); if(actx&&actx.state==="suspended")actx.resume();
+  playing=!playing;e.target.textContent=playing?"⏸ Pause":"▶ Play"; };
+document.getElementById('reset').onclick=()=>{simT=0;playing=false;document.getElementById('play').textContent="▶ Play";};
+document.getElementById('scrub').oninput=(e)=>{const S=curScenario();simT=e.target.value/100*S.dur;};
+document.getElementById('speed').oninput=(e)=>{speed=+e.target.value;document.getElementById('spdv').textContent=speed;};
+document.getElementById('range').oninput=(e)=>{rangeNm=+e.target.value;document.getElementById('rngv').textContent=rangeNm;};
+document.getElementById('audio').onchange=(e)=>{audioOn=e.target.checked; if(audioOn&&!actx&&window.AudioContext){actx=new AudioContext();}};
+document.getElementById('egg').onchange=(e)=>showEgg=e.target.checked;
+document.getElementById('vec').onchange=(e)=>showVec=e.target.checked;
+function bindP(id,key,lab,scale){const el=document.getElementById(id);el.oninput=()=>{params[key]=+el.value*(scale||1);
+  document.getElementById(lab).textContent=el.value;};}
+bindP('pfwd','fwd_sec','fs'); bindP('pfloor','floor_m','fl'); bindP('pvred','vRed','vr');
+bindP('ptred','tRed','tr'); document.getElementById('pdred').oninput=(e)=>{params.dRed=+e.target.value*NM;document.getElementById('dr').textContent=e.target.value;};
+document.getElementById('resetP').onclick=()=>{params=acDefaultParams();
+  pfwd.value=30;fs.textContent=30;pfloor.value=150;fl.textContent=150;pvred.value=400;vr.textContent=400;
+  ptred.value=25;tr.textContent=25;pdred.value=0.5;dr.textContent=0.5;};
+document.getElementById('csvOwn').onchange=(e)=>loadCsv(e.target.files[0],'own');
+document.getElementById('csvInt').onchange=(e)=>loadCsv(e.target.files[0],'int');
+function loadCsv(file,which){ if(!file)return; const rd=new FileReader();
+  rd.onload=()=>{try{const d=parseCsv(rd.result); if(which==='own')csvOwnData=d;else csvIntData=d; realignInt();
+    scenKey="csv";selScen.value="csv";simT=0;playing=false;
+    document.getElementById('csvInfo').textContent=(which==='own'?"OWN":"INTRUS")+" chargé : "+d.samples.length+" pts";
+  }catch(err){document.getElementById('csvInfo').textContent="Erreur CSV: "+err.message;}};
+  rd.readAsText(file); }
+
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
