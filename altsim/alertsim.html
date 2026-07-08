@@ -19,6 +19,8 @@
   canvas{display:block;background:#000;border-radius:8px;max-width:100%}
   #live{background:#0a1420}
   #profile{background:#0a1018}
+  /* écran affiché plus petit (rendu interne reste 600×450) → diagnostic visible sans scroll */
+  #screen{width:480px;height:360px}
   .controls{display:flex;flex-direction:column;gap:9px;min-width:280px;max-width:340px}
   .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   select,button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;cursor:pointer}
@@ -41,7 +43,7 @@
   .fieldset .lg{font-size:11px;color:var(--brand);font-weight:700;text-transform:uppercase;letter-spacing:.03em}
   /* panneau diagnostic */
   #diag{width:100%;font-size:12px}
-  #diag td,#diag th{padding:4px 8px}
+  #diag td,#diag th{padding:2px 8px}
   #diag .k{color:var(--muted);text-align:left}
   #diag .v{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
   #diag .big{font-size:15px}
