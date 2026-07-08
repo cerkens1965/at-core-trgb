@@ -345,6 +345,10 @@ function tick(now){ const dt=lastRAF?(now-lastRAF)/1000:0; lastRAF=now;
   requestAnimationFrame(tick);
 }
 function fmt(v,u,d){ return (v>=0?"":"")+ (d?v.toFixed(d):Math.round(v)) + (u||""); }
+// marge = seuil − valeur (>0 = condition SATISFAITE, côté déclenchement, vert ✓ ;
+// <0 = pas atteinte, |marge| = ce qu'il manque). Pour la bulle : rEgg − dist.
+function marg(v,u,d){ const met=v>0; const s=(v>=0?"+":"")+(d?v.toFixed(d):Math.round(v))+(u||"");
+  return '<span style="color:'+(met?"#3fb950":"#8b98a5")+'">'+s+(met?" ✓":"")+'</span>'; }
 function updatePanels(st,eng,per,out){
   document.getElementById('tlabel').textContent="t = "+simT.toFixed(1)+" s / "+active.dur+" s";
   document.getElementById('scrub').value=(simT/active.dur*100); document.getElementById('clock').textContent=st.name;
@@ -365,6 +369,12 @@ function updatePanels(st,eng,per,out){
     add("Position horaire", d.rel>0?(out.valid?out.clock:Math.round(((d.rel+15)%360)/30)||12)+" h":"—");
     add("Rayon bulle @ relèvement", fmt(d.rEgg/NM,' nm',2)+"  (dist "+ (e.dist_m<=d.rEgg?'<':'>') +" bulle)");
     add("Règle déclenchée", d.rule);
+    add("— marges → seuil ROUGE —","");
+    add("Δalt vs vRed", marg(params.vRed-d.dalt," ft"));
+    add("tCPA vs tRed", d.conv?marg(params.tRed-d.tcpa," s"):"—");
+    add("dCPA vs dRed", d.conv?marg((params.dRed-d.dcpa)/NM," nm",2):"—");
+    add("dist vs bulle-œuf", marg(d.rEgg-e.dist_m," m"));
+    add("dist vs plancher", marg(params.floor_m-e.dist_m," m"));
   } else add("Intrus","aucun");
   add("OWN", fmt(st.own.spd,' kt')+" / "+fmt(st.own.alt,' ft'));
 }
