@@ -17,8 +17,9 @@
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px}
   .card h2{font-size:12px;margin:0 0 6px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.04em}
   canvas{display:block;background:#000;border-radius:8px}
-  #live{background:#0a0e13}
-  .controls{display:flex;flex-direction:column;gap:10px;min-width:280px;max-width:340px}
+  #live{background:#0a1420}
+  #profile{background:#0a1018}
+  .controls{display:flex;flex-direction:column;gap:9px;min-width:280px;max-width:340px}
   .row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
   select,button{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:inherit;cursor:pointer}
   button.primary{background:var(--brand);border-color:var(--brand)}
@@ -34,26 +35,41 @@
   th:first-child,td:first-child{text-align:left}
   .toggle{display:flex;align-items:center;gap:6px;font-size:12px}
   .kbd{font:11px ui-monospace,Menlo,monospace;background:#21262d;border:1px solid var(--line);border-radius:4px;padding:1px 5px}
+  .leg{display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:var(--muted)}
+  .leg i{display:inline-block;width:10px;height:3px;vertical-align:middle;margin-right:3px}
 </style>
 </head>
 <body>
 <header>
   <h1>AeroTrace — Simulateur d'alertes trafic</h1>
-  <span class="sub">moteur = miroir JS de <span class="kbd">alert_core.h</span> · bulle-œuf + convergence</span>
+  <span class="sub">moteur = miroir JS de <span class="kbd">alert_core.h</span> · AIP OpenAIP · région EBBY</span>
   <span class="sub" id="clock" style="margin-left:auto"></span>
 </header>
 
 <div class="wrap">
-  <!-- Vue "live traffic" (dessus, absolu) -->
-  <div class="col card">
-    <h2>Live traffic (vue du dessus)</h2>
-    <canvas id="live" width="440" height="440"></canvas>
-    <div class="tag" id="liveScale"></div>
+  <!-- Colonne gauche : plan (live) + coupe altitude -->
+  <div class="col">
+    <div class="card col">
+      <h2>Live map (plan) — AIP + trafic</h2>
+      <canvas id="live" width="440" height="380"></canvas>
+      <div class="leg">
+        <span><i style="background:#dc3232"></i>CTR</span>
+        <span><i style="background:#1e64dc"></i>TMA</span>
+        <span><i style="background:#ff8c00"></i>R/D/P</span>
+        <span><i style="background:#3fb950"></i>ATZ</span>
+        <span id="liveScale"></span>
+      </div>
+    </div>
+    <div class="card col">
+      <h2>Coupe altitude (vue de côté)</h2>
+      <canvas id="profile" width="440" height="180"></canvas>
+      <div class="tag">x = distance horizontale à own · y = altitude (ft) · bande = fenêtre verticale d'alerte</div>
+    </div>
   </div>
 
   <!-- Écran avion 600x450 -->
   <div class="col card">
-    <h2>Écran avion (600 × 450)</h2>
+    <h2>Écran avion (600 × 450 — WS-241)</h2>
     <canvas id="screen" width="600" height="450"></canvas>
     <div class="tag">Radar own-centré, track-up · overlay alerte = flash 1,5× en ROUGE</div>
   </div>
@@ -71,20 +87,23 @@
     <div class="row">
       <label class="sl" style="flex:1"><span>Vitesse ×<b id="spdv">1</b></span>
         <input type="range" id="speed" min="0.25" max="8" step="0.25" value="1"></label>
-      <label class="sl" style="flex:1"><span>Portée radar <b id="rngv">8</b> nm</span>
+      <label class="sl" style="flex:1"><span>Radar <b id="rngv">8</b> nm</span>
         <input type="range" id="range" min="2" max="16" step="1" value="8"></label>
     </div>
+    <label class="sl"><span>Plan (live) <b id="lrngv">15</b> nm</span>
+      <input type="range" id="lrange" min="4" max="60" step="1" value="15"></label>
     <div class="row">
       <span class="toggle"><input type="checkbox" id="audio"> 🔊 Son</span>
       <span class="toggle"><input type="checkbox" id="egg" checked> 🥚 Bulle</span>
       <span class="toggle"><input type="checkbox" id="vec" checked> ➜ Vecteurs</span>
+      <span class="toggle"><input type="checkbox" id="aip" checked> 🗺️ AIP</span>
     </div>
 
     <h2 style="margin-top:6px">Alerte courante</h2>
     <div id="alertBox" class="row"><span class="pill" style="background:#30363d">AUCUNE</span></div>
 
     <h2 style="margin-top:6px">Trafic</h2>
-    <table id="trf"><thead><tr><th>cs</th><th>dist</th><th>Δalt</th><th>clos</th><th>tCPA</th><th>lvl</th></tr></thead><tbody></tbody></table>
+    <table id="trf"><thead><tr><th>cs</th><th>dist</th><th>Δalt</th><th>tCPA</th><th>lvl</th></tr></thead><tbody></tbody></table>
 
     <h2 style="margin-top:6px">Seuils (live)</h2>
     <label class="sl"><span>Lobe avant = vitesse × <b id="fs">30</b> s</span><input type="range" id="pfwd" min="10" max="60" step="1" value="30"></label>
@@ -97,22 +116,35 @@
     <h2 style="margin-top:6px">Charger 2 CSV réels</h2>
     <div class="row"><span class="tag" style="width:52px">own</span><input type="file" id="csvOwn" accept=".csv"></div>
     <div class="row"><span class="tag" style="width:52px">intrus</span><input type="file" id="csvInt" accept=".csv"></div>
-    <div class="tag" id="csvInfo">Format ATCORE_*.csv (UTC Time, Lat, Lon, AltGPS, GndSpd, TRK).</div>
+    <div class="tag" id="csvInfo">Format ATCORE_*.csv. Projetés en repère EBBY (alignés AIP).</div>
   </div>
 </div>
 
 <script src="alert_core.js"></script>
+<script src="aip_ebby.js"></script>
 <script>
-/* Moteur d'alerte : AC / NM / acDefaultParams / acEvalThreats sont fournis par
-   alert_core.js (miroir JS de alert_core.h, verrouillé par altsim/conformance/).
-   → ce que le simu affiche = ce que le firmware calcule. */
+/* Moteur : AC / NM / acDefaultParams / acEvalThreats fournis par alert_core.js
+   (miroir JS de alert_core.h, verrouillé par altsim/conformance/). */
 
-/* ============================================================================
-   SCÉNARIOS — chaque aéronef a une fonction pos(t) (forme fermée → scrub exact).
-   Repère local plan : x=est (m), y=nord (m), alt en ft, hdg deg, spd kt.
-   ============================================================================ */
-function lin(cs,x0,y0,alt,hdg,spd,vfpm){ // droite + taux vertical optionnel (ft/min)
-  vfpm=vfpm||0;
+/* ── Géo : tout en EAST/NORTH mètres depuis EBBY (origine AIP) ────────────── */
+const ORIGIN = (window.AIP && window.AIP.origin) || {lat:50.5666, lon:4.4325};
+const RE=6371000, LAT0=ORIGIN.lat*Math.PI/180;
+function llToEN(lon,lat){ return { x:(lon-ORIGIN.lon)*Math.PI/180*RE*Math.cos(LAT0), y:(lat-ORIGIN.lat)*Math.PI/180*RE }; }
+// Pré-calcule les rings AIP en EN + bbox (une fois)
+const AIPCOL={CTR:"#dc3232",TMA:"#1e64dc",R:"#ff8c00",D:"#ff8c00",P:"#ff8c00",ATZ:"#3fb950"};
+let AIRSPACES=[], AIRPORTS=[];
+if(window.AIP){
+  AIRSPACES = window.AIP.airspaces.map(a=>{
+    let xs=1e18,xM=-1e18,ys=1e18,yM=-1e18;
+    const en=a.c.map(([lo,la])=>{const p=llToEN(lo,la); if(p.x<xs)xs=p.x;if(p.x>xM)xM=p.x;if(p.y<ys)ys=p.y;if(p.y>yM)yM=p.y; return p;});
+    return {n:a.n,k:a.k,u:a.u,l:a.l,en,bb:[xs,ys,xM,yM]};
+  });
+  AIRPORTS = window.AIP.airports.map(a=>({n:a.n,i:a.i,t:a.t,...llToEN(a.x,a.y)}));
+}
+
+/* ── Scénarios (own/intrus). x=est, y=nord (m depuis EBBY), alt ft, hdg deg, spd kt.
+   forme fermée → scrub exact. vfpm = taux vertical ft/min. ─────────────────── */
+function lin(cs,x0,y0,alt,hdg,spd,vfpm){ vfpm=vfpm||0;
   return {cs, pos:(t)=>{const ms=spd*0.514444, r=hdg*Math.PI/180;
     return {x:x0+ms*Math.sin(r)*t, y:y0+ms*Math.cos(r)*t, alt:alt+vfpm/60*t, hdg, spd};}};
 }
@@ -134,12 +166,12 @@ const SCEN = {
     intr:[lin("FJHON",0,7000,2500,180,100), lin("FJCRS",-7000,1500,2600,90,120),
           lin("FJFOL",0,-1300,2500,0,105), lin("FJHI",3000,3000,4200,225,130)]},
 };
-let csvOwnData=null, csvIntData=null;   // {samples:[{t,x,y,alt,hdg,spd}], dur}
+let csvOwnData=null, csvIntData=null;
 
-/* ---- état de simulation ---- */
-let scenKey="headon", playing=false, simT=0, lastRAF=0, speed=1, rangeNm=8;
+/* état */
+let scenKey="headon", playing=false, simT=0, lastRAF=0, speed=1, rangeNm=8, liveNm=15;
 let params=acDefaultParams();
-let audioOn=false, showEgg=true, showVec=true;
+let audioOn=false, showEgg=true, showVec=true, showAip=true;
 
 function curScenario(){
   if(scenKey==="csv" && csvOwnData){
@@ -149,214 +181,209 @@ function curScenario(){
   const s=SCEN[scenKey];
   return {name:s.name, dur:s.dur, ownFn:s.own.pos, intrFns:s.intr.map(a=>a.pos), intrCs:s.intr.map(a=>a.cs)};
 }
+function stateAt(t){ const S=curScenario();
+  return {own:S.ownFn(t), intr:S.intrFns.map((fn,i)=>({cs:S.intrCs[i], ...fn(t)})), dur:S.dur, name:S.name}; }
 
-/* état des aéronefs à l'instant t → own + liste intrus (absolu) */
-function stateAt(t){
-  const S=curScenario();
-  const own=S.ownFn(t);
-  const intr=S.intrFns.map((fn,i)=>({cs:S.intrCs[i], ...fn(t)}));
-  return {own, intr, dur:S.dur, name:S.name};
-}
-
-/* dérive les entrées MOTEUR (relatives à own) + garde l'absolu pour la vue live */
-function buildEngineInput(st){
-  const D=Math.PI/180;
+function buildEngineInput(st){ const D=Math.PI/180;
   const own={ spd_kmh: st.own.spd*1.852, hdg_deg: st.own.hdg, flt_st:1, gps_fix:true, valid:true };
-  const t=st.intr.map(a=>{
-    const dx=a.x-st.own.x, dy=a.y-st.own.y;
-    const dist=Math.hypot(dx,dy);
-    let bear=Math.atan2(dx,dy)/D; if(bear<0)bear+=360;   // 0=nord, atan2(est,nord)
-    return {cs:a.cs, visible:true, alt_rel_100ft:(a.alt-st.own.alt)/100,
-            bear_deg:bear, dist_m:dist, hdg_deg:a.hdg, spd_kt:a.spd, _abs:a};
-  });
+  const t=st.intr.map(a=>{ const dx=a.x-st.own.x, dy=a.y-st.own.y, dist=Math.hypot(dx,dy);
+    let bear=Math.atan2(dx,dy)/D; if(bear<0)bear+=360;
+    return {cs:a.cs, visible:true, alt_rel_100ft:(a.alt-st.own.alt)/100, bear_deg:bear, dist_m:dist,
+            hdg_deg:a.hdg, spd_kt:a.spd, _abs:a}; });
   return {own,t};
 }
 
-/* ============================================================================
-   RENDU
-   ============================================================================ */
-const COL={0:"#3fb950",1:"#e3b341",2:"#f85149"};
-const liveC=document.getElementById('live'), lx=liveC.getContext('2d');
-const scrC=document.getElementById('screen'), sx=scrC.getContext('2d');
-
-function drawLive(st, eng, per){
-  const W=liveC.width,H=liveC.height; lx.clearRect(0,0,W,H);
-  // échelle : englobe tout
-  let maxr=1500; const all=[st.own,...st.intr];
-  all.forEach(a=>{maxr=Math.max(maxr,Math.hypot(a.x-st.own.x,a.y-st.own.y)*1.15);});
-  const sc=(Math.min(W,H)/2-24)/maxr; const cx=W/2, cy=H/2;
-  const X=(a)=>cx+(a.x-st.own.x)*sc, Y=(a)=>cy-(a.y-st.own.y)*sc;
-  // grille
-  lx.strokeStyle="#1b2530"; lx.lineWidth=1;
-  for(let g=1;g<=4;g++){lx.beginPath();lx.arc(cx,cy,(Math.min(W,H)/2-24)*g/4,0,7);lx.stroke();}
-  // intrus
-  eng.t.forEach((e,i)=>{ const a=e._abs; drawPlane(lx,X(a),Y(a),a.hdg,COL[per[i]],9);
-    lx.fillStyle="#c9d4df";lx.font="10px sans-serif";lx.fillText(a.cs,X(a)+8,Y(a)-6);
-    if(showVec) drawVec(lx,X(a),Y(a),a.hdg,a.spd,sc); });
-  // own
-  drawPlane(lx,X(st.own),Y(st.own),st.own.hdg,"#7ee0ff",11,true);
-  if(showVec) drawVec(lx,X(st.own),Y(st.own),st.own.hdg,st.own.spd,sc);
-  document.getElementById('liveScale').textContent="rayon ≈ "+(maxr/NM).toFixed(1)+" nm · own bleu clair, cap ↑ réel";
-}
-
-function drawPlane(c,x,y,hdg,col,r,own){
-  c.save();c.translate(x,y);c.rotate(hdg*Math.PI/180);
-  c.fillStyle=col;c.beginPath();c.moveTo(0,-r);c.lineTo(r*0.6,r*0.7);c.lineTo(0,r*0.35);c.lineTo(-r*0.6,r*0.7);c.closePath();c.fill();
-  if(own){c.strokeStyle="#fff";c.lineWidth=1;c.stroke();}
+/* ── icône avion (top view), rotée par cap, colorée ──────────────────────── */
+function planeIcon(c,x,y,hdg,col,s,own){
+  c.save();c.translate(x,y);c.rotate(hdg*Math.PI/180);c.scale(s/22,s/22);
+  c.fillStyle=col;c.beginPath();
+  c.moveTo(0,-14); c.lineTo(2,-4); c.lineTo(16,4); c.lineTo(16,7); c.lineTo(2,3);
+  c.lineTo(2,11); c.lineTo(6,14); c.lineTo(6,16); c.lineTo(0,14);
+  c.lineTo(-6,16); c.lineTo(-6,14); c.lineTo(-2,11); c.lineTo(-2,3);
+  c.lineTo(-16,7); c.lineTo(-16,4); c.lineTo(-2,-4); c.closePath(); c.fill();
+  if(own){c.strokeStyle="#fff";c.lineWidth=1.5;c.stroke();}
   c.restore();
 }
-function drawVec(c,x,y,hdg,spd,sc){ const ms=spd*0.514444, len=ms*20*sc; // 20 s de projection
-  const r=hdg*Math.PI/180; c.strokeStyle="rgba(180,200,220,.35)";c.lineWidth=1;
-  c.beginPath();c.moveTo(x,y);c.lineTo(x+Math.sin(r)*len,y-Math.cos(r)*len);c.stroke(); }
+const COL={0:"#3fb950",1:"#e3b341",2:"#f85149"};
+const liveC=document.getElementById('live'), lx=liveC.getContext('2d');
+const profC=document.getElementById('profile'), px2=profC.getContext('2d');
+const scrC=document.getElementById('screen'), sx=scrC.getContext('2d');
 
-// Écran avion : radar own-centré, track-up (nez = haut)
+/* ── LIVE MAP (plan, own-centré, nord en haut, AIP) ──────────────────────── */
+function drawLive(st, eng, per){
+  const W=liveC.width,H=liveC.height; lx.clearRect(0,0,W,H); lx.fillStyle="#0a1420";lx.fillRect(0,0,W,H);
+  const cx=W/2, cy=H/2, halfM=liveNm*NM;                 // demi-fenêtre (m)
+  const sc=(Math.min(W,H)/2-8)/halfM;                    // m→px
+  const X=(x)=>cx+(x-st.own.x)*sc, Y=(y)=>cy-(y-st.own.y)*sc;
+  const vb=[st.own.x-halfM*W/Math.min(W,H)-2000, st.own.y-halfM*H/Math.min(W,H)-2000,
+            st.own.x+halfM*W/Math.min(W,H)+2000, st.own.y+halfM*H/Math.min(W,H)+2000];
+  // AIP
+  if(showAip){ lx.lineWidth=1.2;
+    for(const a of AIRSPACES){ if(a.bb[2]<vb[0]||a.bb[0]>vb[2]||a.bb[3]<vb[1]||a.bb[1]>vb[3])continue;
+      lx.strokeStyle=AIPCOL[a.k]||"#888"; lx.setLineDash(a.k==="CTR"?[5,3]:(a.k==="R"||a.k==="D"||a.k==="P")?[3,2]:[]);
+      lx.beginPath(); a.en.forEach((p,i)=>{const sxp=X(p.x),syp=Y(p.y); i?lx.lineTo(sxp,syp):lx.moveTo(sxp,syp);});
+      lx.closePath(); lx.globalAlpha=0.85; lx.stroke(); lx.globalAlpha=1; }
+    lx.setLineDash([]);
+    // aérodromes
+    for(const a of AIRPORTS){ if(a.x<vb[0]||a.x>vb[2]||a.y<vb[1]||a.y>vb[3])continue;
+      const sxp=X(a.x),syp=Y(a.y);
+      lx.fillStyle="#7ea8ff";lx.strokeStyle="#0a1420";lx.lineWidth=1.5;
+      lx.beginPath();lx.arc(sxp,syp,3,0,7);lx.fill();lx.stroke();
+      if(liveNm<=25){lx.fillStyle="#89a";lx.font="9px sans-serif";lx.textAlign="left";lx.fillText(a.i||a.n.slice(0,6),sxp+5,syp+3);} }
+  }
+  // trafic
+  eng.t.forEach((e,i)=>{ const a=e._abs;
+    if(showVec){const ms=a.spd*0.514444,len=ms*30*sc,r=a.hdg*Math.PI/180;
+      lx.strokeStyle="rgba(180,200,220,.35)";lx.lineWidth=1;lx.beginPath();lx.moveTo(X(a.x),Y(a.y));lx.lineTo(X(a.x)+Math.sin(r)*len,Y(a.y)-Math.cos(r)*len);lx.stroke();}
+    planeIcon(lx,X(a.x),Y(a.y),a.hdg,COL[per[i]],16);
+    lx.fillStyle="#c9d4df";lx.font="10px sans-serif";lx.textAlign="left";lx.fillText(a.cs,X(a.x)+10,Y(a.y)-6);
+  });
+  // own
+  if(showVec){const ms=st.own.spd*0.514444,len=ms*30*sc,r=st.own.hdg*Math.PI/180;
+    lx.strokeStyle="rgba(126,224,255,.5)";lx.lineWidth=1.2;lx.beginPath();lx.moveTo(cx,cy);lx.lineTo(cx+Math.sin(r)*len,cy-Math.cos(r)*len);lx.stroke();}
+  planeIcon(lx,cx,cy,st.own.hdg,"#7ee0ff",18,true);
+  // échelle
+  lx.fillStyle="#5b6773";lx.font="10px sans-serif";lx.textAlign="left";
+  document.getElementById('liveScale').textContent="½-fenêtre "+liveNm+" nm";
+}
+
+/* ── COUPE ALTITUDE (x=dist horiz à own, y=alt ft, bande = fenêtre verticale) ─ */
+function drawProfile(st, eng, per){
+  const W=profC.width,H=profC.height; px2.clearRect(0,0,W,H); px2.fillStyle="#0a1018";px2.fillRect(0,0,W,H);
+  const padL=44,padR=8,padT=10,padB=16;
+  // bornes
+  let maxD=2*NM, aMin=st.own.alt, aMax=st.own.alt;
+  eng.t.forEach(e=>{maxD=Math.max(maxD,e.dist_m*1.1); aMin=Math.min(aMin,e._abs.alt); aMax=Math.max(aMax,e._abs.alt);});
+  aMin=Math.min(aMin,st.own.alt-800); aMax=Math.max(aMax,st.own.alt+800);
+  const padA=(aMax-aMin)*0.15+100; aMin-=padA; aMax+=padA;
+  const X=(d)=>padL+(d/maxD)*(W-padL-padR);
+  const Y=(a)=>padT+(1-(a-aMin)/(aMax-aMin))*(H-padT-padB);
+  // fenêtre verticale d'alerte (± vRed rouge, ± vOrg ambre) autour de own
+  px2.fillStyle="rgba(227,179,65,.10)"; px2.fillRect(padL,Y(st.own.alt+params.vOrg),W-padL-padR,Y(st.own.alt-params.vOrg)-Y(st.own.alt+params.vOrg));
+  px2.fillStyle="rgba(248,81,73,.14)";  px2.fillRect(padL,Y(st.own.alt+params.vRed),W-padL-padR,Y(st.own.alt-params.vRed)-Y(st.own.alt+params.vRed));
+  // grille alt
+  px2.strokeStyle="#1b2530";px2.fillStyle="#5b6773";px2.font="9px sans-serif";px2.textAlign="right";px2.lineWidth=1;
+  const step=aMax-aMin>4000?1000:500;
+  for(let a=Math.ceil(aMin/step)*step;a<aMax;a+=step){px2.beginPath();px2.moveTo(padL,Y(a));px2.lineTo(W-padR,Y(a));px2.stroke();px2.fillText(Math.round(a),padL-4,Y(a)+3);}
+  // ligne own alt
+  px2.strokeStyle="rgba(126,224,255,.6)";px2.setLineDash([4,3]);px2.beginPath();px2.moveTo(padL,Y(st.own.alt));px2.lineTo(W-padR,Y(st.own.alt));px2.stroke();px2.setLineDash([]);
+  // graduations dist
+  px2.textAlign="center";px2.fillStyle="#5b6773";
+  for(let d=0;d<=maxD;d+=(maxD>6*NM?4:2)*NM){px2.fillText((d/NM).toFixed(0)+"nm",X(d),H-4);}
+  // own
+  px2.fillStyle="#7ee0ff";px2.beginPath();px2.arc(X(0),Y(st.own.alt),5,0,7);px2.fill();px2.strokeStyle="#fff";px2.lineWidth=1;px2.stroke();
+  // intrus
+  eng.t.forEach((e,i)=>{const xx=X(e.dist_m),yy=Y(e._abs.alt);
+    px2.fillStyle=COL[per[i]];px2.beginPath();px2.arc(xx,yy,5,0,7);px2.fill();
+    px2.fillStyle="#9aa7b3";px2.font="9px sans-serif";px2.textAlign="left";px2.fillText(e.cs,xx+7,yy+3);});
+}
+
+/* ── ÉCRAN AVION (radar own-centré track-up) ─────────────────────────────── */
 const RCX=300,RCY=225,RR=193;
 function drawScreen(st, eng, per, out){
   sx.clearRect(0,0,600,450); sx.fillStyle="#000"; sx.fillRect(0,0,600,450);
-  // anneaux
   sx.strokeStyle="#243040";sx.lineWidth=1;
   sx.beginPath();sx.arc(RCX,RCY,RR,0,7);sx.stroke();
   sx.beginPath();sx.arc(RCX,RCY,RR/2,0,7);sx.stroke();
   sx.beginPath();sx.moveTo(RCX-RR,RCY);sx.lineTo(RCX+RR,RCY);sx.moveTo(RCX,RCY-RR);sx.lineTo(RCX,RCY+RR);sx.stroke();
   const pxPerM = RR/(rangeNm*NM);
-  const oh=st.own.hdg*Math.PI/180;
-  // bulle-œuf (debug) — track-up, symétrique gauche/droite, grande devant
-  if(showEgg){
-    const ogs=st.own.spd*0.514444;
-    let rFwd=ogs*params.fwd_sec; rFwd=Math.max(params.fwd_min,Math.min(params.fwd_max,rFwd));
+  // AIP sur le radar (track-up, bleu discret)
+  if(showAip){ const oh=st.own.hdg*Math.PI/180, vr=rangeNm*NM*1.3;
+    for(const a of AIRSPACES){ if(a.bb[2]<st.own.x-vr||a.bb[0]>st.own.x+vr||a.bb[3]<st.own.y-vr||a.bb[1]>st.own.y+vr)continue;
+      sx.strokeStyle=AIPCOL[a.k]||"#888"; sx.globalAlpha=0.5; sx.lineWidth=1.2;
+      sx.setLineDash(a.k==="CTR"?[5,3]:(a.k==="R"||a.k==="D"||a.k==="P")?[3,2]:[]); sx.beginPath();
+      a.en.forEach((p,i)=>{const dx=p.x-st.own.x,dy=p.y-st.own.y; // rotate track-up
+        const rx=(dx*Math.cos(oh)-dy*Math.sin(oh)), ry=(dx*Math.sin(oh)+dy*Math.cos(oh));
+        const sxp=RCX+rx*pxPerM, syp=RCY-ry*pxPerM; i?sx.lineTo(sxp,syp):sx.moveTo(sxp,syp);});
+      sx.closePath();sx.stroke(); }
+    sx.setLineDash([]);sx.globalAlpha=1;
+  }
+  // bulle-œuf
+  if(showEgg){ const ogs=st.own.spd*0.514444;
+    let rFwd=Math.max(params.fwd_min,Math.min(params.fwd_max,ogs*params.fwd_sec));
     let rAft=Math.max(rFwd*0.2,params.aft_min);
     sx.strokeStyle="rgba(47,129,247,.55)";sx.setLineDash([4,4]);sx.lineWidth=1.5;sx.beginPath();
-    for(let d=0;d<=360;d+=4){const th=d*Math.PI/180; // th=0 → devant (haut)
-      const ceg=Math.cos(th); const R=(rAft+(rFwd-rAft)*(1+ceg)*0.5)*pxPerM;
-      const px=RCX+Math.sin(th)*R, py=RCY-Math.cos(th)*R; d===0?sx.moveTo(px,py):sx.lineTo(px,py);}
+    for(let d=0;d<=360;d+=4){const th=d*Math.PI/180,ceg=Math.cos(th),R=(rAft+(rFwd-rAft)*(1+ceg)*0.5)*pxPerM;
+      const qx=RCX+Math.sin(th)*R,qy=RCY-Math.cos(th)*R; d?sx.lineTo(qx,qy):sx.moveTo(qx,qy);}
     sx.closePath();sx.stroke();sx.setLineDash([]);
-    // plancher
     sx.strokeStyle="rgba(248,81,73,.4)";sx.beginPath();sx.arc(RCX,RCY,params.floor_m*pxPerM,0,7);sx.stroke();
   }
-  // cardinaux (rotation track-up)
+  // cardinaux
   sx.fillStyle="#5b6773";sx.font="13px sans-serif";sx.textAlign="center";sx.textBaseline="middle";
   [["N",0],["E",90],["S",180],["W",270]].forEach(([lab,a])=>{const th=(a-st.own.hdg)*Math.PI/180;
     sx.fillText(lab,RCX+Math.sin(th)*(RR+12),RCY-Math.cos(th)*(RR+12));});
   // trafic
   eng.t.forEach((e,i)=>{ let rp=e.dist_m*pxPerM; if(rp>RR+40)return;
-    const rel=(e.bear_deg-st.own.hdg)*Math.PI/180;
-    const px=RCX+Math.sin(rel)*rp, py=RCY-Math.cos(rel)*rp;
-    drawPlane(sx,px,py,e.hdg_deg-st.own.hdg,COL[per[i]],11);
-    sx.fillStyle=COL[per[i]];sx.font="bold 11px sans-serif";sx.textAlign="left";sx.textBaseline="alphabetic";
-    sx.fillText(e.cs,px+9,py-4);
-    sx.fillStyle="#9aa7b3";sx.font="10px sans-serif";
-    const sign=e.alt_rel_100ft>=0?"+":""; sx.fillText(sign+Math.round(e.alt_rel_100ft)+"  "+Math.round(e.dist_m/NM*10)/10+"nm",px+9,py+8);
+    const rel=(e.bear_deg-st.own.hdg)*Math.PI/180, qx=RCX+Math.sin(rel)*rp, qy=RCY-Math.cos(rel)*rp;
+    planeIcon(sx,qx,qy,e.hdg_deg-st.own.hdg,COL[per[i]],17);
+    sx.fillStyle=COL[per[i]];sx.font="bold 11px sans-serif";sx.textAlign="left";sx.textBaseline="alphabetic";sx.fillText(e.cs,qx+10,qy-5);
+    sx.fillStyle="#9aa7b3";sx.font="10px sans-serif";const sign=e.alt_rel_100ft>=0?"+":"";
+    sx.fillText(sign+Math.round(e.alt_rel_100ft)+"  "+(e.dist_m/NM).toFixed(1)+"nm",qx+10,qy+8);
   });
-  // own triangle vert (nez haut)
-  drawPlane(sx,RCX,RCY,0,"#3fb950",13,true);
-  // capsule cap
-  sx.fillStyle="#0d1117";sx.strokeStyle="#30363d";roundRect(sx,RCX-34,8,68,26,13);sx.fill();sx.stroke();
-  sx.fillStyle="#e6edf3";sx.font="bold 15px sans-serif";sx.textAlign="center";sx.textBaseline="middle";
-  sx.fillText(Math.round(st.own.hdg)+"°",RCX,22);
-  // échelle
+  planeIcon(sx,RCX,RCY,0,"#3fb950",20,true);
+  sx.fillStyle="#0d1117";sx.strokeStyle="#30363d";sx.lineWidth=1;roundRect(sx,RCX-34,8,68,26,13);sx.fill();sx.stroke();
+  sx.fillStyle="#e6edf3";sx.font="bold 15px sans-serif";sx.textAlign="center";sx.textBaseline="middle";sx.fillText(Math.round(st.own.hdg)+"°",RCX,22);
   sx.fillStyle="#5b6773";sx.font="12px sans-serif";sx.textAlign="left";sx.fillText(rangeNm+" nm",12,440);
-  // ── overlay alerte
   drawAlertOverlay(out);
 }
 function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
-
-let flashPhase=0;
 function drawAlertOverlay(out){
   if(out.level===AC.NONE) return;
   const txt="TFC "+out.clock+"h  "+(out.dist_m/NM).toFixed(1)+"nm  "+(out.dalt_ft>=0?"+":"")+out.dalt_ft+"ft  clos "+out.closing_kt+"kt";
-  if(out.level===AC.RED){
-    const on=(Math.floor(performance.now()/220)%2)===0;   // ~2,3 Hz
-    const w=450,h=66,x=(600-w)/2,y=450-90;
-    sx.fillStyle=on?"#f85149":"#ffffff"; roundRect(sx,x,y,w,h,10); sx.fill();
-    sx.fillStyle=on?"#ffffff":"#f85149"; sx.font="bold 22px sans-serif";sx.textAlign="center";sx.textBaseline="middle";
-    sx.fillText(txt,300,y+h/2);
-  } else {
-    const w=300,h=44,x=(600-w)/2,y=450-72;
-    sx.fillStyle="#e3b341"; roundRect(sx,x,y,w,h,10); sx.fill();
-    sx.fillStyle="#111"; sx.font="bold 15px sans-serif";sx.textAlign="center";sx.textBaseline="middle";
-    sx.fillText(txt,300,y+h/2);
-  }
+  if(out.level===AC.RED){ const on=(Math.floor(performance.now()/220)%2)===0;
+    const w=450,h=66,x=(600-w)/2,y=450-90; sx.fillStyle=on?"#f85149":"#ffffff"; roundRect(sx,x,y,w,h,10); sx.fill();
+    sx.fillStyle=on?"#ffffff":"#f85149"; sx.font="bold 22px sans-serif";sx.textAlign="center";sx.textBaseline="middle";sx.fillText(txt,300,y+h/2);
+  } else { const w=300,h=44,x=(600-w)/2,y=450-72; sx.fillStyle="#e3b341"; roundRect(sx,x,y,w,h,10); sx.fill();
+    sx.fillStyle="#111"; sx.font="bold 15px sans-serif";sx.textAlign="center";sx.textBaseline="middle";sx.fillText(txt,300,y+h/2); }
 }
 
-/* ============================================================================
-   AUDIO (Web Audio) — bip selon niveau. RED = triple rapide, ORANGE = simple lent.
-   ============================================================================ */
-let actx=null, lastBeep=0, lastLevel=0;
-function beep(freq,dur,vol){ if(!actx)return; const o=actx.createOscillator(),g=actx.createGain();
-  o.frequency.value=freq;o.type="square";g.gain.value=vol;o.connect(g);g.connect(actx.destination);
-  const t=actx.currentTime;o.start(t);g.gain.setValueAtTime(vol,t);g.gain.exponentialRampToValueAtTime(0.0001,t+dur);o.stop(t+dur);}
-function audioTick(level){
-  if(!audioOn||!actx){lastLevel=level;return;}
-  const now=performance.now();
-  if(level===AC.RED){ if(now-lastBeep>500){beep(1200,0.09,0.25);setTimeout(()=>beep(1200,0.09,0.25),120);setTimeout(()=>beep(1200,0.09,0.25),240);lastBeep=now;} }
-  else if(level===AC.ORANGE){ if(now-lastBeep>1600){beep(760,0.14,0.18);lastBeep=now;} }
-  lastLevel=level;
-}
+/* ── AUDIO ──────────────────────────────────────────────────────────────── */
+let actx=null, lastBeep=0;
+function beep(f,d,v){ if(!actx)return; const o=actx.createOscillator(),g=actx.createGain();
+  o.frequency.value=f;o.type="square";g.gain.value=v;o.connect(g);g.connect(actx.destination);
+  const t=actx.currentTime;o.start(t);g.gain.setValueAtTime(v,t);g.gain.exponentialRampToValueAtTime(1e-4,t+d);o.stop(t+d);}
+function audioTick(level){ if(!audioOn||!actx)return; const now=performance.now();
+  if(level===AC.RED){ if(now-lastBeep>500){beep(1200,.09,.25);setTimeout(()=>beep(1200,.09,.25),120);setTimeout(()=>beep(1200,.09,.25),240);lastBeep=now;} }
+  else if(level===AC.ORANGE){ if(now-lastBeep>1600){beep(760,.14,.18);lastBeep=now;} } }
 
-/* ============================================================================
-   BOUCLE + UI
-   ============================================================================ */
-function tick(now){
-  const dt=lastRAF?(now-lastRAF)/1000:0; lastRAF=now;
-  const S=curScenario();
+/* ── BOUCLE ─────────────────────────────────────────────────────────────── */
+function tick(now){ const dt=lastRAF?(now-lastRAF)/1000:0; lastRAF=now; const S=curScenario();
   if(playing){ simT+=dt*speed; if(simT>=S.dur){simT=S.dur;playing=false;document.getElementById('play').textContent="▶ Play";} }
-  const st=stateAt(simT);
-  const eng=buildEngineInput(st);
-  const {per,out}=acEvalThreats(eng.own, eng.t, params);
-  drawLive(st,eng,per);
-  drawScreen(st,eng,per,out);
-  audioTick(out.level);
-  updatePanels(st,eng,per,out);
+  const st=stateAt(simT), eng=buildEngineInput(st); const {per,out}=acEvalThreats(eng.own,eng.t,params);
+  drawLive(st,eng,per); drawProfile(st,eng,per); drawScreen(st,eng,per,out); audioTick(out.level); updatePanels(st,eng,per,out);
   requestAnimationFrame(tick);
 }
 function updatePanels(st,eng,per,out){
   document.getElementById('tlabel').textContent="t = "+simT.toFixed(1)+" s / "+st.dur+" s";
-  document.getElementById('scrub').value=(simT/st.dur*100);
-  document.getElementById('clock').textContent=st.name;
-  const ab=document.getElementById('alertBox');
-  const names=["AUCUNE","CAUTION (orange)","URGENT (rouge)"];const cols=["#30363d","#e3b341","#f85149"];
-  ab.innerHTML='<span class="pill" style="background:'+cols[out.level]+';color:'+(out.level?"#111":"#8b98a5")+'">'+names[out.level]+(out.valid?(" · "+out.clock+"h "+ (out.dist_m/NM).toFixed(1)+"nm"):"")+'</span>';
+  document.getElementById('scrub').value=(simT/st.dur*100); document.getElementById('clock').textContent=st.name;
+  const ab=document.getElementById('alertBox'); const names=["AUCUNE","CAUTION (orange)","URGENT (rouge)"],cols=["#30363d","#e3b341","#f85149"];
+  ab.innerHTML='<span class="pill" style="background:'+cols[out.level]+';color:'+(out.level?"#111":"#8b98a5")+'">'+names[out.level]+(out.valid?(" · "+out.clock+"h "+(out.dist_m/NM).toFixed(1)+"nm"):"")+'</span>';
   const tb=document.querySelector('#trf tbody');tb.innerHTML="";
-  eng.t.forEach((e,i)=>{const tr=document.createElement('tr');
-    const tcpa=e._tcpa>0?e._tcpa.toFixed(0)+"s":"—";
-    tr.innerHTML="<td>"+e.cs+"</td><td>"+(e.dist_m/NM).toFixed(1)+"</td><td>"+(e.alt_rel_100ft>=0?"+":"")+Math.round(e.alt_rel_100ft*100)+"</td><td>"+
-      (e._tcpa>0?Math.round(Math.hypot(e.spd_kt*0.514,0)):"")+"</td><td>"+tcpa+"</td>"+
+  eng.t.forEach((e,i)=>{const tr=document.createElement('tr'); const tcpa=e._tcpa>0?e._tcpa.toFixed(0)+"s":"—";
+    tr.innerHTML="<td>"+e.cs+"</td><td>"+(e.dist_m/NM).toFixed(1)+"</td><td>"+(e.alt_rel_100ft>=0?"+":"")+Math.round(e.alt_rel_100ft*100)+"</td><td>"+tcpa+"</td>"+
       '<td><span class="pill" style="background:'+COL[per[i]]+';color:#111">'+["·","O","R"][per[i]]+'</span></td>';
     tb.appendChild(tr);});
 }
 
-/* ---- CSV ---- */
-function parseCsv(text){
-  const lines=text.split(/\r?\n/).filter(l=>l.length);
-  // trouver la ligne d'entêtes courtes (contient "Latitude" ou "Lat")
-  let hi=lines.findIndex(l=>/Latitude/i.test(l)&&/Longitude/i.test(l));
-  if(hi<0)hi=1;
+/* ── CSV (projeté en repère EBBY → aligné AIP) ──────────────────────────── */
+function parseCsv(text){ const lines=text.split(/\r?\n/).filter(l=>l.length);
+  let hi=lines.findIndex(l=>/Latitude/i.test(l)&&/Longitude/i.test(l)); if(hi<0)hi=1;
   const cols=lines[hi].split(',').map(s=>s.trim());
   const idx=(names)=>cols.findIndex(c=>names.some(n=>c.toLowerCase()===n));
   const iLat=idx(["latitude","lat"]),iLon=idx(["longitude","lon"]),iAlt=idx(["altgps","gps altitude","alt"]),
-        iSpd=idx(["gndspd","ground speed","gs"]),iTrk=idx(["trk","gps track","track","hdg"]),iT=idx(["utc time","time"]);
-  const rows=[];
-  for(let k=hi+1;k<lines.length;k++){const c=lines[k].split(',');
+        iSpd=idx(["gndspd","ground speed","gs"]),iTrk=idx(["trk","gps track","track","hdg"]);
+  const rows=[]; for(let k=hi+1;k<lines.length;k++){const c=lines[k].split(',');
     const la=parseFloat(c[iLat]),lo=parseFloat(c[iLon]); if(!isFinite(la)||!isFinite(lo))continue;
-    rows.push({lat:la,lon:lo,alt:parseFloat(c[iAlt])||0,spd:parseFloat(c[iSpd])||0,trk:parseFloat(c[iTrk])||0,ts:c[iT]});}
-  if(rows.length<2)throw new Error("CSV: <2 points");
-  // origine = 1er point ; conversion équirectangulaire en m
-  const lat0=rows[0].lat*Math.PI/180, R=6371000;
-  const samples=rows.map((r,i)=>({t:i, x:(r.lon-rows[0].lon)*Math.PI/180*R*Math.cos(lat0),
-    y:(r.lat-rows[0].lat)*Math.PI/180*R, alt:r.alt, hdg:r.trk, spd:r.spd}));
-  // ATCORE ~4 Hz → dt réel inconnu ici : on cadence à 1 pt/s pour le rejeu (t=index)
-  return {samples, dur:samples.length-1, origin:{lat:rows[0].lat,lon:rows[0].lon}};
+    rows.push({lat:la,lon:lo,alt:parseFloat(c[iAlt])||0,spd:parseFloat(c[iSpd])||0,trk:parseFloat(c[iTrk])||0});}
+  if(rows.length<2)throw new Error("CSV <2 points");
+  const samples=rows.map((r,i)=>{const p=llToEN(r.lon,r.lat);return {t:i,x:p.x,y:p.y,alt:r.alt,hdg:r.trk,spd:r.spd};});
+  return {samples, dur:samples.length-1};
 }
-function sampleCsv(d,t){ const s=d.samples; const i=Math.min(s.length-1,Math.max(0,Math.floor(t)));
-  const a=s[i], b=s[Math.min(s.length-1,i+1)], f=t-i;
-  return {x:a.x+(b.x-a.x)*f, y:a.y+(b.y-a.y)*f, alt:a.alt+(b.alt-a.alt)*f, hdg:a.hdg, spd:a.spd}; }
-// Recale l'intrus dans le repère de l'own (via lat/lon d'origine)
-function realignInt(){ if(!csvOwnData||!csvIntData)return; const R=6371000, lat0=csvOwnData.origin.lat*Math.PI/180;
-  const dx=(csvIntData.origin.lon-csvOwnData.origin.lon)*Math.PI/180*R*Math.cos(lat0);
-  const dy=(csvIntData.origin.lat-csvOwnData.origin.lat)*Math.PI/180*R;
-  csvIntData.samples.forEach(s=>{s.x+=dx;s.y+=dy;}); csvIntData.origin=csvOwnData.origin; }
+function sampleCsv(d,t){ const s=d.samples,i=Math.min(s.length-1,Math.max(0,Math.floor(t)));
+  const a=s[i],b=s[Math.min(s.length-1,i+1)],f=t-i;
+  return {x:a.x+(b.x-a.x)*f,y:a.y+(b.y-a.y)*f,alt:a.alt+(b.alt-a.alt)*f,hdg:a.hdg,spd:a.spd}; }
 
-/* ---- init UI ---- */
+/* ── UI ─────────────────────────────────────────────────────────────────── */
 const selScen=document.getElementById('scenario');
 Object.entries(SCEN).forEach(([k,s])=>{const o=document.createElement('option');o.value=k;o.textContent=s.name;selScen.appendChild(o);});
 {const o=document.createElement('option');o.value="csv";o.textContent="— 2 CSV réels croisés —";selScen.appendChild(o);}
@@ -365,25 +392,25 @@ selScen.onchange=()=>{scenKey=selScen.value;simT=0;playing=false;document.getEle
 document.getElementById('play').onclick=(e)=>{ if(!actx&&window.AudioContext)actx=new AudioContext(); if(actx&&actx.state==="suspended")actx.resume();
   playing=!playing;e.target.textContent=playing?"⏸ Pause":"▶ Play"; };
 document.getElementById('reset').onclick=()=>{simT=0;playing=false;document.getElementById('play').textContent="▶ Play";};
-document.getElementById('scrub').oninput=(e)=>{const S=curScenario();simT=e.target.value/100*S.dur;};
+document.getElementById('scrub').oninput=(e)=>{simT=e.target.value/100*curScenario().dur;};
 document.getElementById('speed').oninput=(e)=>{speed=+e.target.value;document.getElementById('spdv').textContent=speed;};
 document.getElementById('range').oninput=(e)=>{rangeNm=+e.target.value;document.getElementById('rngv').textContent=rangeNm;};
-document.getElementById('audio').onchange=(e)=>{audioOn=e.target.checked; if(audioOn&&!actx&&window.AudioContext){actx=new AudioContext();}};
+document.getElementById('lrange').oninput=(e)=>{liveNm=+e.target.value;document.getElementById('lrngv').textContent=liveNm;};
+document.getElementById('audio').onchange=(e)=>{audioOn=e.target.checked;if(audioOn&&!actx&&window.AudioContext)actx=new AudioContext();};
 document.getElementById('egg').onchange=(e)=>showEgg=e.target.checked;
 document.getElementById('vec').onchange=(e)=>showVec=e.target.checked;
-function bindP(id,key,lab,scale){const el=document.getElementById(id);el.oninput=()=>{params[key]=+el.value*(scale||1);
-  document.getElementById(lab).textContent=el.value;};}
-bindP('pfwd','fwd_sec','fs'); bindP('pfloor','floor_m','fl'); bindP('pvred','vRed','vr');
-bindP('ptred','tRed','tr'); document.getElementById('pdred').oninput=(e)=>{params.dRed=+e.target.value*NM;document.getElementById('dr').textContent=e.target.value;};
+document.getElementById('aip').onchange=(e)=>showAip=e.target.checked;
+function bindP(id,key,lab){const el=document.getElementById(id);el.oninput=()=>{params[key]=+el.value;document.getElementById(lab).textContent=el.value;};}
+bindP('pfwd','fwd_sec','fs'); bindP('pfloor','floor_m','fl'); bindP('pvred','vRed','vr'); bindP('ptred','tRed','tr');
+document.getElementById('pdred').oninput=(e)=>{params.dRed=+e.target.value*NM;document.getElementById('dr').textContent=e.target.value;};
 document.getElementById('resetP').onclick=()=>{params=acDefaultParams();
-  pfwd.value=30;fs.textContent=30;pfloor.value=150;fl.textContent=150;pvred.value=400;vr.textContent=400;
-  ptred.value=25;tr.textContent=25;pdred.value=0.5;dr.textContent=0.5;};
+  pfwd.value=30;fs.textContent=30;pfloor.value=150;fl.textContent=150;pvred.value=400;vr.textContent=400;ptred.value=25;tr.textContent=25;pdred.value=0.5;dr.textContent=0.5;};
 document.getElementById('csvOwn').onchange=(e)=>loadCsv(e.target.files[0],'own');
 document.getElementById('csvInt').onchange=(e)=>loadCsv(e.target.files[0],'int');
 function loadCsv(file,which){ if(!file)return; const rd=new FileReader();
-  rd.onload=()=>{try{const d=parseCsv(rd.result); if(which==='own')csvOwnData=d;else csvIntData=d; realignInt();
+  rd.onload=()=>{try{const d=parseCsv(rd.result); if(which==='own')csvOwnData=d;else csvIntData=d;
     scenKey="csv";selScen.value="csv";simT=0;playing=false;
-    document.getElementById('csvInfo').textContent=(which==='own'?"OWN":"INTRUS")+" chargé : "+d.samples.length+" pts";
+    document.getElementById('csvInfo').textContent=(which==='own'?"OWN":"INTRUS")+" : "+d.samples.length+" pts chargés";
   }catch(err){document.getElementById('csvInfo').textContent="Erreur CSV: "+err.message;}};
   rd.readAsText(file); }
 
