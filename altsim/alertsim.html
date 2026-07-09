@@ -141,6 +141,9 @@
     <label class="sl"><span>Vertical ROUGE <b id="vr">400</b> ft</span><input type="range" id="pvred" min="200" max="1000" step="50" value="400"></label>
     <label class="sl"><span>tCPA ROUGE <b id="tr">25</b> s</span><input type="range" id="ptred" min="10" max="60" step="5" value="25"></label>
     <label class="sl"><span>dCPA ROUGE <b id="dr">0.5</b> nm</span><input type="range" id="pdred" min="0.1" max="2" step="0.1" value="0.5"></label>
+    <label class="sl"><span>Vertical ORANGE <b id="vro">500</b> ft</span><input type="range" id="pvorg" min="200" max="1200" step="50" value="500"></label>
+    <label class="sl"><span>tCPA ORANGE <b id="tro">45</b> s</span><input type="range" id="ptorg" min="20" max="90" step="5" value="45"></label>
+    <label class="sl"><span>dCPA ORANGE <b id="dro">1.0</b> nm</span><input type="range" id="pdorg" min="0.3" max="2" step="0.1" value="1.0"></label>
     <div class="row"><button id="resetP">Seuils par défaut</button></div>
 
     <h2 style="margin-top:6px">Charger 2 CSV réels</h2>
@@ -568,8 +571,10 @@ $('ispd').oninput=(e)=>{active.intr.forEach(a=>a.spd=+e.target.value);$('ispdv')
 $('ialt').oninput=(e)=>{active.intr.forEach(a=>a.alt=+e.target.value);$('ialtv').textContent=e.target.value;};
 function bindP(id,key,lab){const el=$(id);el.oninput=()=>{params[key]=+el.value;$(lab).textContent=el.value;};}
 bindP('pfwd','fwd_sec','fs');bindP('pfloor','floor_m','fl');bindP('pvred','vRed','vr');bindP('ptred','tRed','tr');
+bindP('pvorg','vOrg','vro');bindP('ptorg','tOrg','tro');
 $('pdred').oninput=(e)=>{params.dRed=+e.target.value*NM;$('dr').textContent=e.target.value;};
-$('resetP').onclick=()=>{params=acDefaultParams();pfwd.value=30;fs.textContent=30;pfloor.value=150;fl.textContent=150;pvred.value=400;vr.textContent=400;ptred.value=25;tr.textContent=25;pdred.value=0.5;dr.textContent=0.5;};
+$('pdorg').oninput=(e)=>{params.dOrg=+e.target.value*NM;$('dro').textContent=e.target.value;};
+$('resetP').onclick=()=>{params=acDefaultParams();pfwd.value=30;fs.textContent=30;pfloor.value=150;fl.textContent=150;pvred.value=400;vr.textContent=400;ptred.value=25;tr.textContent=25;pdred.value=0.5;dr.textContent=0.5;pvorg.value=500;vro.textContent=500;ptorg.value=45;tro.textContent=45;pdorg.value=1.0;dro.textContent="1.0";};
 $('csvOwn').onchange=(e)=>loadCsv(e.target.files[0],'own'); $('csvInt').onchange=(e)=>loadCsv(e.target.files[0],'int');
 $('trfLog').onchange=(e)=>loadTrf(e.target.files[0]);
 function loadTrf(file){ if(!file)return; const rd=new FileReader();
