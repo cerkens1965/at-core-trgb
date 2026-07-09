@@ -128,6 +128,13 @@
       <span class="toggle"><input type="checkbox" id="trace" checked> 〜 Trace</span>
     </div>
 
+    <div class="fieldset">
+      <span class="lg">🧪 Expérimental (hors firmware — à évaluer)</span>
+      <span class="toggle"><input type="checkbox" id="e3d"> CPA 3D — vertical projeté (détecte montée/descente tôt)</span>
+      <span class="toggle"><input type="checkbox" id="ehy"> Hystérésis — anti-clignotement (maintien 3-4 s)</span>
+      <span class="toggle"><input type="checkbox" id="enoise"> Bruit données réaliste (GPS/SafeSky)</span>
+    </div>
+
     <h2 style="margin-top:6px">Seuils (live)</h2>
     <label class="sl"><span>Lobe avant = vitesse × <b id="fs">30</b> s</span><input type="range" id="pfwd" min="10" max="60" step="1" value="30"></label>
     <label class="sl"><span>Plancher <b id="fl">150</b> m</span><input type="range" id="pfloor" min="50" max="500" step="10" value="150"></label>
@@ -175,7 +182,7 @@ const SCEN = {
 };
 function clone(s){ return {name:s.name,dur:s.dur,own:{...s.own},intr:s.intr.map(a=>({...a})),csv:false}; }
 function posOf(a,t){ const ms=a.spd*0.514444, r=a.hdg*Math.PI/180;
-  return {x:a.x0+ms*Math.sin(r)*t, y:a.y0+ms*Math.cos(r)*t, alt:a.alt+a.vfpm/60*t, hdg:a.hdg, spd:a.spd}; }
+  return {x:a.x0+ms*Math.sin(r)*t, y:a.y0+ms*Math.cos(r)*t, alt:a.alt+a.vfpm/60*t, hdg:a.hdg, spd:a.spd, vspd:a.vfpm}; }
 
 let active=clone(SCEN.headon);       // scénario COURANT éditable (sliders own/intrus)
 let csvOwnData=null, csvIntData=null;
@@ -192,11 +199,11 @@ function stateAt(t){
   return {own:posOf(active.own,t), intr:active.intr.map(a=>({cs:a.cs,...posOf(a,t)})), dur:active.dur, name:active.name};
 }
 function buildEngineInput(st){ const D=Math.PI/180;
-  const own={ spd_kmh: st.own.spd*1.852, hdg_deg: st.own.hdg, flt_st:1, gps_fix:true, valid:true };
+  const own={ spd_kmh: st.own.spd*1.852, hdg_deg: st.own.hdg, flt_st:1, gps_fix:true, valid:true, vspd_fpm: st.own.vspd||0 };
   const t=st.intr.map(a=>{ const dx=a.x-st.own.x, dy=a.y-st.own.y, dist=Math.hypot(dx,dy);
     let bear=Math.atan2(dx,dy)/D; if(bear<0)bear+=360;
     return {cs:a.cs, visible:true, alt_rel_100ft:(a.alt-st.own.alt)/100, bear_deg:bear, dist_m:dist,
-            hdg_deg:a.hdg, spd_kt:a.spd, _abs:a}; });
+            hdg_deg:a.hdg, spd_kt:a.spd, vspd_fpm:a.vspd||0, _abs:a}; });
   return {own,t};
 }
 
@@ -239,6 +246,58 @@ function infoTier(own,e){ const D=Math.PI/180, ogs=own.spd_kmh/3.6;
 function colOf(pi,i){ return pi?COL[pi]:(curInfo[i]?INFO_COL:COL[0]); }
 let autoZoom=false, showTrace=true;
 
+/* ══ EXPÉRIMENTAL (simu, HORS core/firmware) : CPA 3D + hystérésis + bruit ════
+   Variantes comparées au core verrouillé via toggles → on ÉVALUE avant toute
+   promotion. acEvalThreats (alert_core.js) reste 0/1/2, conformance intacte. */
+let use3D=false, useHyst=false, useNoise=false, curRedAlert=false;
+
+// (A) CPA 3D : la fenêtre verticale est testée sur le Δalt PROJETÉ au tCPA
+// (fermeture verticale) → détecte tôt un intrus qui monte/descend vers ton niveau.
+function acEvalThreats3D(o,t,P){
+  const per=t.map(()=>AC.NONE);
+  const out={level:AC.NONE,clock:0,dist_m:0,dalt_ft:0,closing_kt:0,idx:-1,valid:false};
+  if(!o.valid||!o.gps_fix||o.flt_st===0) return {per,out};
+  const D=Math.PI/180, ogs=o.spd_kmh/3.6;
+  let rFwd=Math.max(P.fwd_min,Math.min(P.fwd_max,ogs*P.fwd_sec)), rAft=Math.max(rFwd*0.2,P.aft_min);
+  const ovx=ogs*Math.sin(o.hdg_deg*D), ovy=ogs*Math.cos(o.hdg_deg*D), ovz=(o.vspd_fpm||0)/60;
+  for(let i=0;i<t.length;i++){ const e=t[i]; if(!e.visible)continue;
+    const daltNow=Math.abs(e.alt_rel_100ft*100);
+    const br=e.bear_deg*D,Rx=e.dist_m*Math.sin(br),Ry=e.dist_m*Math.cos(br);
+    const tt=e.hdg_deg*D,tgs=e.spd_kt*0.514444,vrx=tgs*Math.sin(tt)-ovx,vry=tgs*Math.cos(tt)-ovy,vr2=vrx*vrx+vry*vry;
+    const tcpa=vr2>0.05?-(Rx*vrx+Ry*vry)/vr2:-1;
+    let dcpa=e.dist_m; if(tcpa>0){const cx=Rx+vrx*tcpa,cy=Ry+vry*tcpa; dcpa=Math.hypot(cx,cy);}
+    const closing=Math.trunc(Math.sqrt(vr2)/0.514444), conv=tcpa>0, evz=(e.vspd_fpm||0)/60;
+    const daltCpa=conv?Math.abs(e.alt_rel_100ft*100+(evz-ovz)*tcpa):daltNow;   // Δalt au CPA
+    const rel=e.bear_deg-o.hdg_deg, rEgg=rAft+(rFwd-rAft)*(1+Math.cos(rel*D))*0.5;
+    let lvl=AC.NONE;
+    if(daltCpa<=P.vOrg && conv && tcpa<=P.tOrg && dcpa<=P.dOrg) lvl=AC.ORANGE;
+    if(daltCpa<=P.vRed && conv && tcpa<=P.tRed && dcpa<=P.dRed) lvl=AC.RED;
+    if(daltNow<=P.vOrg && conv && e.dist_m<=rEgg && lvl<AC.ORANGE) lvl=AC.ORANGE;   // bulle = maintenant
+    if(daltNow<=P.vRed && e.dist_m<=P.floor_m) lvl=AC.RED;                          // plancher = maintenant
+    per[i]=lvl; e._tcpa=tcpa; e._dcpa=dcpa;
+    if(lvl>out.level){ let clk=(((Math.trunc(e.bear_deg-o.hdg_deg))%360)+360)%360, hr=Math.trunc((clk+15)/30)%12; if(hr===0)hr=12;
+      out.level=lvl;out.clock=hr;out.dist_m=Math.trunc(e.dist_m);out.dalt_ft=Math.trunc(e.alt_rel_100ft*100);out.closing_kt=closing;out.idx=i;out.valid=true; } }
+  return {per,out};
+}
+// (B) hystérésis : monte direct, redescend après maintien (ROUGE 4 s / ORANGE 3 s).
+let hyLevel=0, hyUntil=0;
+function hysteresis(raw,nowMs){
+  if(raw>hyLevel){ hyLevel=raw; hyUntil=nowMs+(raw===AC.RED?4000:3000); }
+  else if(raw<hyLevel && nowMs>=hyUntil){ hyLevel=raw; }
+  return hyLevel;
+}
+// (D) bruit réaliste : perturbe ce que VOIT le moteur (pas le mouvement réel),
+// offset lissé régénéré ~0,5 s → montre le jitter des données SafeSky/GPS.
+let noiseState=new Map(), noiseT=0;
+function applyNoise(tArr,nowMs){
+  if(nowMs-noiseT>500){ noiseT=nowMs; noiseState.clear(); }
+  return tArr.map((e,i)=>{ let n=noiseState.get(i);
+    if(!n){ const g=()=>(Math.random()+Math.random()+Math.random()-1.5);
+      n={dd:g()*40,da:g()*0.8,db:g()*1.2,dh:g()*6}; noiseState.set(i,n); }
+    return {...e, dist_m:Math.max(0,e.dist_m+n.dd), alt_rel_100ft:e.alt_rel_100ft+n.da,
+            bear_deg:(e.bear_deg+n.db+360)%360, hdg_deg:(e.hdg_deg+n.dh+360)%360}; });
+}
+
 /* ── icône avion ──────────────────────────────────────────────────────────── */
 function planeIcon(c,x,y,hdg,col,s,own){
   c.save();c.translate(x,y);c.rotate(hdg*Math.PI/180);c.scale(s/22,s/22);
@@ -278,7 +337,7 @@ function drawLive(st, eng, per){
       for(let j=0;j<=30;j++){ const tt=t0+(simT-t0)*j/30, ss=stateAt(tt), p=(k===0?ss.own:ss.intr[k-1]); if(!p)continue;
         const sp=X(p.x),sq=Y(p.y); on?lx.lineTo(sp,sq):(lx.moveTo(sp,sq),on=true); }
       lx.strokeStyle=k===0?"rgba(126,224,255,.35)":"rgba(200,210,220,.22)"; lx.lineWidth=1.4; lx.stroke(); } }
-  const redAlert=per.some(p=>p===AC.RED);
+  const redAlert=curRedAlert;
   eng.t.forEach((e,i)=>{ const a=e._abs;
     if(showVec){const ms=a.spd*0.514444,len=ms*30*sc,r=a.hdg*Math.PI/180;
       lx.strokeStyle="rgba(180,200,220,.35)";lx.lineWidth=1;lx.beginPath();lx.moveTo(X(a.x),Y(a.y));lx.lineTo(X(a.x)+Math.sin(r)*len,Y(a.y)-Math.cos(r)*len);lx.stroke();}
@@ -339,7 +398,7 @@ function drawScreen(st, eng, per, out){
   }
   sx.fillStyle="#5b6773";sx.font="13px sans-serif";sx.textAlign="center";sx.textBaseline="middle";
   [["N",0],["E",90],["S",180],["W",270]].forEach(([lab,a])=>{const th=(a-st.own.hdg)*Math.PI/180;sx.fillText(lab,RCX+Math.sin(th)*(RR+12),RCY-Math.cos(th)*(RR+12));});
-  const redAlert=per.some(p=>p===AC.RED);   // alerte rouge → focus : intrus ×1,5, autres gris léger
+  const redAlert=curRedAlert;   // (éventuellement hystérésis) → focus : intrus ×1,5, autres gris léger
   eng.t.forEach((e,i)=>{ let rp=e.dist_m*pxPerM; if(rp>RR+40)return;
     const rel=(e.bear_deg-st.own.hdg)*Math.PI/180, qx=RCX+Math.sin(rel)*rp, qy=RCY-Math.cos(rel)*rp;
     let col=colOf(per[i],i), sz=17, dim=false;
@@ -373,7 +432,11 @@ function audioTick(l){ if(!audioOn||!actx)return; const now=performance.now();
 /* boucle */
 function tick(now){ const dt=lastRAF?(now-lastRAF)/1000:0; lastRAF=now;
   if(playing){ simT+=dt*speed; if(simT>=active.dur){simT=active.dur;playing=false;document.getElementById('play').textContent="▶ Play";} }
-  const st=stateAt(simT), eng=buildEngineInput(st); const {per,out}=acEvalThreats(eng.own,eng.t,params);
+  const st=stateAt(simT), eng=buildEngineInput(st);
+  const inT = useNoise? applyNoise(eng.t, now) : eng.t;                       // (D) bruit vu par le moteur
+  const {per,out}=(use3D?acEvalThreats3D:acEvalThreats)(eng.own,inT,params); // (A) core ou 3D
+  if(useHyst) out.level=hysteresis(out.level, now);                          // (B) hystérésis
+  curRedAlert=(out.level===AC.RED);
   curInfo = eng.t.map((e,i)=> per[i]===AC.NONE && infoTier(eng.own,e));   // étage info (bleu, simu)
   if(autoZoom && eng.t.length){ let nd=1e18; eng.t.forEach(e=>{if(e.dist_m<nd)nd=e.dist_m;});   // 2022 "Dynamic View"
     const tiers=[2,4,6,8,10,16]; rangeNm=tiers.find(r=>r*NM>=nd*1.6)||16;
@@ -440,7 +503,8 @@ function parseCsv(text){ const lines=text.split(/\r?\n/).filter(l=>l.length);
   return {samples, dt, dur:(samples.length-1)*dt};
 }
 function sampleCsv(d,t){const s=d.samples,ix=t/d.dt,i=Math.min(s.length-1,Math.max(0,Math.floor(ix))),a=s[i],b=s[Math.min(s.length-1,i+1)],f=ix-i;
-  return {x:a.x+(b.x-a.x)*f,y:a.y+(b.y-a.y)*f,alt:a.alt+(b.alt-a.alt)*f,hdg:a.hdg,spd:a.spd};}
+  const vspd=(b.alt-a.alt)/(d.dt||1)*60;   // fpm depuis la pente
+  return {x:a.x+(b.x-a.x)*f,y:a.y+(b.y-a.y)*f,alt:a.alt+(b.alt-a.alt)*f,hdg:a.hdg,spd:a.spd,vspd};}
 
 /* ── UI ─────────────────────────────────────────────────────────────────── */
 const $=(id)=>document.getElementById(id);
@@ -464,6 +528,7 @@ $('lrange').oninput=(e)=>{liveNm=+e.target.value;$('lrngv').textContent=liveNm;}
 $('audio').onchange=(e)=>{audioOn=e.target.checked;if(audioOn&&!actx&&window.AudioContext)actx=new AudioContext();};
 $('egg').onchange=(e)=>showEgg=e.target.checked; $('vec').onchange=(e)=>showVec=e.target.checked; $('aip').onchange=(e)=>showAip=e.target.checked;
 $('autoz').onchange=(e)=>autoZoom=e.target.checked; $('trace').onchange=(e)=>showTrace=e.target.checked;
+$('e3d').onchange=(e)=>use3D=e.target.checked; $('ehy').onchange=(e)=>useHyst=e.target.checked; $('enoise').onchange=(e)=>useNoise=e.target.checked;
 // sliders own / intrus (éditent le scénario courant, effet immédiat via forme fermée)
 $('ospd').oninput=(e)=>{active.own.spd=+e.target.value;$('ospdv').textContent=e.target.value;};
 $('oalt').oninput=(e)=>{active.own.alt=+e.target.value;$('oaltv').textContent=e.target.value;};

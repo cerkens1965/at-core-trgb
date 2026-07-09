@@ -106,3 +106,17 @@ conflit, AIP + aérodromes. Les temps **TA = 45 s / RA = 25 s sont IDENTIQUES** 
 
 ➡️ Si l'un de ces trois est validé, il faut le **promouvoir** : le niveau info dans `alert_core.h`
 (+ `.js` + conformance + payload BLE + rendu écran firmware) ; l'auto-zoom/trace côté firmware écran.
+
+### Améliorations du MODÈLE (togglables — critique 2026-07-09)
+Faiblesses réelles du modèle actuel, à évaluer dans le simu avant promotion au core :
+- 🧪 **CPA 3D** (`e3d`) : fenêtre verticale testée sur le **Δalt PROJETÉ au tCPA** (fermeture
+  verticale) → un intrus qui **monte/descend** vers ton niveau alerte **tôt** (aujourd'hui :
+  seulement en entrant dans la bande, ~12 s avant). **Identique au core en palier** (vspd=0).
+  ⚠️ nécessite la vspd de l'intrus (SafeSky la donne ; à propager dans `TrafficEntry` écran pour la promo).
+- 🧪 **Hystérésis** (`ehy`) : maintien 3-4 s → fin du **clignotement** au ras des seuils.
+- 🧪 **Bruit** (`enoise`) : perturbe ce que voit le moteur (±40 m, ±80 ft, ±1-6°) → montre pourquoi
+  l'hystérésis est nécessaire sur données réelles.
+
+Autres pistes (pas codées) : gate dCPA sur la bulle · dégrader sur beacon vieux · de-weight du CPA
+quand own tourne · scénario **circuit avec virages** · **⭐ logguer la table trafic IN sur le boîtier**
+(rejouer de VRAIS conflits = le point le plus important pour une validation crédible).
