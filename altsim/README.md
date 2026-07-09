@@ -117,6 +117,11 @@ Faiblesses réelles du modèle actuel, à évaluer dans le simu avant promotion 
 - 🧪 **Bruit** (`enoise`) : perturbe ce que voit le moteur (±40 m, ±80 ft, ±1-6°) → montre pourquoi
   l'hystérésis est nécessaire sur données réelles.
 
+**⭐ Rejeu de VRAIS conflits — FAIT (firmware ATC v61)** : le boîtier loggue la table trafic IN
+dans `/ATCORE_TRF_<fid>.csv` (own + intrus, en vol, 1 ligne/intrus/2 s). Charge-le dans le simu via
+**« Rejeu trafic RÉEL (boîtier) »** → on rejoue une **vraie rencontre** (own + trafic reçu) au lieu
+d'inventer. C'était le point le plus important pour une validation crédible. ⚠️ nécessite de **flasher
+un boîtier en v61** puis récupérer le fichier après un vol.
+
 Autres pistes (pas codées) : gate dCPA sur la bulle · dégrader sur beacon vieux · de-weight du CPA
-quand own tourne · scénario **circuit avec virages** · **⭐ logguer la table trafic IN sur le boîtier**
-(rejouer de VRAIS conflits = le point le plus important pour une validation crédible).
+quand own tourne · scénario **circuit avec virages**.

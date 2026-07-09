@@ -147,6 +147,10 @@
     <div class="row"><span class="tag" style="width:52px">own</span><input type="file" id="csvOwn" accept=".csv"></div>
     <div class="row"><span class="tag" style="width:52px">intrus</span><input type="file" id="csvInt" accept=".csv"></div>
     <div class="tag" id="csvInfo">Format ATCORE_*.csv. Projetés en repère EBBY (alignés AIP).</div>
+
+    <h2 style="margin-top:6px">⭐ Rejeu trafic RÉEL (boîtier)</h2>
+    <div class="row"><span class="tag" style="width:52px">TRF</span><input type="file" id="trfLog" accept=".csv"></div>
+    <div class="tag" id="trfInfo">ATCORE_TRF_*.csv (own + trafic IN loggés en vol) → vrais conflits.</div>
   </div>
 </div>
 
@@ -185,7 +189,7 @@ function posOf(a,t){ const ms=a.spd*0.514444, r=a.hdg*Math.PI/180;
   return {x:a.x0+ms*Math.sin(r)*t, y:a.y0+ms*Math.cos(r)*t, alt:a.alt+a.vfpm/60*t, hdg:a.hdg, spd:a.spd, vspd:a.vfpm}; }
 
 let active=clone(SCEN.headon);       // scénario COURANT éditable (sliders own/intrus)
-let csvOwnData=null, csvIntData=null;
+let csvOwnData=null, csvIntData=null, logData=null;
 
 /* état */
 let playing=false, simT=0, lastRAF=0, speed=1, rangeNm=8, liveNm=15;
@@ -193,6 +197,10 @@ let params=acDefaultParams();
 let audioOn=false, showEgg=true, showVec=true, showAip=true;
 
 function stateAt(t){
+  if(active.log && logData){ const L=logData; let i=0; while(i<L.snaps.length-1 && L.snaps[i+1].t<=t)i++;
+    const a=L.snaps[i], b=L.snaps[Math.min(L.snaps.length-1,i+1)], span=(b.t-a.t)||1, f=Math.max(0,Math.min(1,(t-a.t)/span));
+    const own={x:a.own.x+(b.own.x-a.own.x)*f, y:a.own.y+(b.own.y-a.own.y)*f, alt:a.own.alt+(b.own.alt-a.own.alt)*f, hdg:a.own.hdg, spd:a.own.spd, vspd:a.own.vspd};
+    return {own, intr:a.intr.map(z=>({cs:z.cs,x:z.x,y:z.y,alt:z.alt,hdg:z.hdg,spd:z.spd,vspd:z.vspd})), dur:L.dur, name:active.name}; }
   if(active.csv){ const own=sampleCsv(csvOwnData,t);
     const intr=csvIntData?[{cs:"INTRUS",...sampleCsv(csvIntData,t)}]:[];
     return {own,intr,dur:active.dur,name:active.name}; }
@@ -506,13 +514,37 @@ function sampleCsv(d,t){const s=d.samples,ix=t/d.dt,i=Math.min(s.length-1,Math.m
   const vspd=(b.alt-a.alt)/(d.dt||1)*60;   // fpm depuis la pente
   return {x:a.x+(b.x-a.x)*f,y:a.y+(b.y-a.y)*f,alt:a.alt+(b.alt-a.alt)*f,hdg:a.hdg,spd:a.spd,vspd};}
 
+/* Rejeu du LOG TRAFIC RÉEL du boîtier (ATCORE_TRF_*.csv v2) : own + intrus par ts. */
+function parseTrafficLog(text){
+  const lines=text.split(/\r?\n/).filter(l=>l.length && !l.startsWith('#'));
+  if(!lines.length) throw new Error("fichier vide");
+  const hdr=lines[0].split(',').map(s=>s.trim().toLowerCase());
+  const ix=n=>hdr.indexOf(n);
+  const iTs=ix('ts_utc'),iOla=ix('own_lat'),iOlo=ix('own_lon'),iOa=ix('own_alt_ft'),iOh=ix('own_hdg'),iOs=ix('own_spd_kt'),
+        iIc=ix('icao24'),iCs=ix('callsign'),iLa=ix('lat'),iLo=ix('lon'),iA=ix('alt_ft'),iS=ix('spd_kt'),iH=ix('hdg'),iV=ix('vspd_fpm');
+  if(iTs<0||iOla<0||iLa<0) throw new Error("colonnes ATCORE_TRF attendues");
+  const hms=s=>{const m=/(\d{1,2}):(\d{2}):(\d{2})/.exec(s||"");return m?(+m[1]*3600+ +m[2]*60+ +m[3]):null;};
+  const bySec=new Map();
+  for(let k=1;k<lines.length;k++){ const c=lines[k].split(','); const sec=hms(c[iTs]); if(sec==null)continue;
+    if(!bySec.has(sec)) bySec.set(sec,{own:{lat:+c[iOla],lon:+c[iOlo],alt:+c[iOa],hdg:+c[iOh],spd:+c[iOs]},intr:[]});
+    bySec.get(sec).intr.push({cs:(c[iCs]||c[iIc]||"?").trim(),lat:+c[iLa],lon:+c[iLo],alt:+c[iA],hdg:+c[iH]||0,spd:+c[iS]||0,vspd:iV>=0?+c[iV]||0:0}); }
+  const secs=[...bySec.keys()].sort((a,b)=>a-b);
+  if(secs.length<2) throw new Error("<2 instants");
+  const t0=secs[0];
+  const snaps=secs.map(s=>{const S=bySec.get(s),op=llToEN(S.own.lon,S.own.lat);
+    return {t:s-t0, own:{x:op.x,y:op.y,alt:S.own.alt,hdg:S.own.hdg,spd:S.own.spd,vspd:0},
+      intr:S.intr.map(a=>{const p=llToEN(a.lon,a.lat);return {cs:a.cs,x:p.x,y:p.y,alt:a.alt,hdg:a.hdg,spd:a.spd,vspd:a.vspd};})};});
+  for(let i=0;i<snaps.length-1;i++){ const dtt=(snaps[i+1].t-snaps[i].t)||1; snaps[i].own.vspd=(snaps[i+1].own.alt-snaps[i].own.alt)/dtt*60; }
+  return {snaps, dur:snaps[snaps.length-1].t};
+}
+
 /* ── UI ─────────────────────────────────────────────────────────────────── */
 const $=(id)=>document.getElementById(id);
 const selScen=$('scenario');
 Object.entries(SCEN).forEach(([k,s])=>{const o=document.createElement('option');o.value=k;o.textContent=s.name;selScen.appendChild(o);});
 {const o=document.createElement('option');o.value="csv";o.textContent="— 2 CSV réels croisés —";selScen.appendChild(o);}
 selScen.value="headon";
-function syncAcSliders(){ if(active.csv)return;
+function syncAcSliders(){ if(active.csv||active.log)return;
   $('ospd').value=active.own.spd;$('ospdv').textContent=active.own.spd;$('oalt').value=active.own.alt;$('oaltv').textContent=active.own.alt;
   const i0=active.intr[0]; if(i0){$('ispd').value=i0.spd;$('ispdv').textContent=i0.spd;$('ialt').value=i0.alt;$('ialtv').textContent=i0.alt;} }
 selScen.onchange=()=>{ if(selScen.value==="csv"){ active=clone(SCEN.headon); active.csv=true; active.name="2 CSV croisés";
@@ -539,6 +571,13 @@ bindP('pfwd','fwd_sec','fs');bindP('pfloor','floor_m','fl');bindP('pvred','vRed'
 $('pdred').oninput=(e)=>{params.dRed=+e.target.value*NM;$('dr').textContent=e.target.value;};
 $('resetP').onclick=()=>{params=acDefaultParams();pfwd.value=30;fs.textContent=30;pfloor.value=150;fl.textContent=150;pvred.value=400;vr.textContent=400;ptred.value=25;tr.textContent=25;pdred.value=0.5;dr.textContent=0.5;};
 $('csvOwn').onchange=(e)=>loadCsv(e.target.files[0],'own'); $('csvInt').onchange=(e)=>loadCsv(e.target.files[0],'int');
+$('trfLog').onchange=(e)=>loadTrf(e.target.files[0]);
+function loadTrf(file){ if(!file)return; const rd=new FileReader();
+  rd.onload=()=>{try{ logData=parseTrafficLog(rd.result);
+    active={csv:false,log:true,name:"Rejeu trafic réel ("+file.name+")",dur:logData.dur,own:null,intr:[]};
+    simT=0;playing=false;$('play').textContent="▶ Play";
+    $('trfInfo').textContent="Rejeu : "+logData.snaps.length+" instants sur "+logData.dur.toFixed(0)+" s. ▶ pour jouer.";
+  }catch(err){$('trfInfo').textContent="Erreur TRF: "+err.message;}}; rd.readAsText(file); }
 function loadCsv(file,which){ if(!file)return; const rd=new FileReader();
   rd.onload=()=>{try{const d=parseCsv(rd.result); if(which==='own')csvOwnData=d;else csvIntData=d;
     active=clone(SCEN.headon);active.csv=true;active.name="2 CSV croisés";active.dur=Math.min(csvOwnData?csvOwnData.dur:1e9,csvIntData?csvIntData.dur:1e9);
