@@ -83,3 +83,26 @@ curl -s "https://api.core.openaip.net/api/airports?bbox=3.4,49.9,5.8,51.4&limit=
 Format `ATCORE_*.csv` (Garmin G3X). Le simu lit Lat/Lon/AltGPS/GndSpd/TRK + **UTC Time**
 pour rejouer à la **cadence réelle**. ⚠️ nos CSV ne contiennent **que notre trajectoire**
 (pas le trafic reçu) → l'intrus est soit synthétique, soit un 2ᵉ CSV.
+
+---
+
+## Vision 2022 (SafeSky UI Road Map) ↔ implémentation 2026
+Le modèle descend de la road map SafeSky d'oct. 2022
+(`01 - Documentation/RoadMap-V3.0 Oct-2022.key.pdf`). **Fidèle** sur : alertes par **TEMPS**
+(tCPA), **convergence** obligatoire, **bulle de protection**, **bandes verticales**, couleur par
+conflit, AIP + aérodromes. Les temps **TA = 45 s / RA = 25 s sont IDENTIQUES** à nos ORANGE/ROUGE.
+
+**Évolutions 2026 assumées** :
+- **2 niveaux** (ORANGE/ROUGE) au lieu de **4** (No-Threat / PA-info / TA / RA) → l'étage « info » a été retiré.
+- **CPA en mouvement relatif** `−(r·v)/|v|²` au lieu du « temps le plus lent des deux avions » (plus rigoureux).
+- **Bulle décalée vers l'avant** (œuf) au lieu d'une zone symétrique → un suiveur ne déclenche pas.
+- **Fenêtres verticales plus serrées** : 500/400 ft (vs 850/600 ft en 2022).
+
+### Features EXPÉRIMENTALES du simu (hors core/firmware — à évaluer, puis promouvoir si OK)
+- 🔵 **Niveau « info » 90 s** : reprend l'étage **PA** de 2022 (convergence, 45 s < tCPA ≤ 90 s, ±1200 ft).
+  **Affichage SIMU uniquement** — `acEvalThreats` reste 0/1/2 ; c'est `infoTier()`/`curInfo` côté HTML.
+- 🔍 **Auto-zoom (« Dynamic View »)** : l'échelle radar s'ajuste au trafic le plus proche (2/4/6/8/10/16 nm).
+- 〜 **Trace (sillage)** : ~90 s de passé sur la live map (utile en rejeu CSV).
+
+➡️ Si l'un de ces trois est validé, il faut le **promouvoir** : le niveau info dans `alert_core.h`
+(+ `.js` + conformance + payload BLE + rendu écran firmware) ; l'auto-zoom/trace côté firmware écran.
