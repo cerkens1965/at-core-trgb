@@ -134,6 +134,7 @@
       <span class="toggle"><input type="checkbox" id="ehy"> Hystérésis — anti-clignotement (maintien 3-4 s)</span>
       <span class="toggle"><input type="checkbox" id="enoise"> Bruit données réaliste (GPS/SafeSky)</span>
       <span class="toggle"><input type="checkbox" id="edg"> Downgrade caution→info si ça s'écarte (dCPA &gt; rouge)</span>
+      <span class="toggle"><input type="checkbox" id="etau"> 🎯 Tau — temps = dist/rapprochement radial (se relâche au passage)</span>
     </div>
 
     <h2 style="margin-top:6px">Seuils (live)</h2>
@@ -160,6 +161,7 @@
 
 <script src="alert_core.js"></script>
 <script src="aip_ebby.js"></script>
+<script src="flights_default.js"></script>
 <script>
 /* Moteur : AC / NM / acDefaultParams / acEvalThreats via alert_core.js (miroir de alert_core.h). */
 
@@ -206,7 +208,11 @@ function stateAt(t){
     const own={x:a.own.x+(b.own.x-a.own.x)*f, y:a.own.y+(b.own.y-a.own.y)*f, alt:a.own.alt+(b.own.alt-a.own.alt)*f, hdg:a.own.hdg, spd:a.own.spd, vspd:a.own.vspd};
     return {own, intr:a.intr.map(z=>({cs:z.cs,x:z.x,y:z.y,alt:z.alt,hdg:z.hdg,spd:z.spd,vspd:z.vspd})), dur:L.dur, name:active.name}; }
   if(active.csv){ const own=sampleCsv(csvOwnData,t);
-    const intr=csvIntData?[{cs:"INTRUS",...sampleCsv(csvIntData,t)}]:[];
+    // Alignement UTC absolu : l'intrus est échantillonné à la MÊME heure murale que own
+    // (delta des t0) → si les 2 vols ont volé en même temps, la vraie géométrie de rencontre apparaît.
+    let tInt=t; if(csvIntData && csvOwnData && csvOwnData.t0!=null && csvIntData.t0!=null){
+      let d=csvOwnData.t0-csvIntData.t0; if(d>43200)d-=86400; if(d<-43200)d+=86400; tInt=t+d; }
+    const intr=csvIntData?[{cs:active.intCs||"INTRUS",...sampleCsv(csvIntData,tInt)}]:[];
     return {own,intr,dur:active.dur,name:active.name}; }
   return {own:posOf(active.own,t), intr:active.intr.map(a=>({cs:a.cs,...posOf(a,t)})), dur:active.dur, name:active.name};
 }
@@ -231,6 +237,9 @@ function diagnose(own, e){ const D=Math.PI/180;
   const tcpa=vr2>0.05?-(Rx*vrx+Ry*vry)/vr2:-1;
   let dcpa=e.dist_m; if(tcpa>0){const cx=Rx+vrx*tcpa,cy=Ry+vry*tcpa; dcpa=Math.hypot(cx,cy);}
   const closing=Math.sqrt(vr2)/0.514444;              // kt (vitesse de rapprochement relative)
+  const closeRate=-(Rx*vrx+Ry*vry)/e.dist_m;          // m/s radial signé (>0 = on se rapproche)
+  const closeRadKt=closeRate/0.514444;                // kt radial signé
+  const tau=closeRate>0.1?e.dist_m/closeRate:1e9;     // s — dist/rapprochement radial
   const rel=e.bear_deg-own.hdg_deg, rEgg=rAft+(rFwd-rAft)*(1+Math.cos(rel*D))*0.5;
   const dalt=Math.abs(e.alt_rel_100ft*100), conv=tcpa>0;
   // règle qui déclencherait (mêmes conditions que le core, pour l'explication)
@@ -241,7 +250,7 @@ function diagnose(own, e){ const D=Math.PI/180;
   else if(dalt<=params.vOrg && conv && e.dist_m<=rEgg) rule="Bulle-œuf (proximité)";
   else if(!conv) rule="on s'éloigne → rien";
   else rule="hors seuils → rien";
-  return {closing,tcpa,dcpa,rEgg,dalt,conv,rel:((rel%360)+360)%360,rule};
+  return {closing,closeRadKt,tau,tcpa,dcpa,rEgg,dalt,conv,rel:((rel%360)+360)%360,rule};
 }
 
 /* ── Niveau « INFO » (proximité 90 s) — VISU SIMU SEULEMENT, hors core/firmware.
@@ -261,7 +270,7 @@ let autoZoom=false, showTrace=true;
 /* ══ EXPÉRIMENTAL (simu, HORS core/firmware) : CPA 3D + hystérésis + bruit ════
    Variantes comparées au core verrouillé via toggles → on ÉVALUE avant toute
    promotion. acEvalThreats (alert_core.js) reste 0/1/2, conformance intacte. */
-let use3D=false, useHyst=false, useNoise=false, curRedAlert=false, useDowngrade=false, dgInfo=[];
+let use3D=false, useHyst=false, useNoise=false, curRedAlert=false, useDowngrade=false, dgInfo=[], useTau=false;
 
 // (A) CPA 3D : la fenêtre verticale est testée sur le Δalt PROJETÉ au tCPA
 // (fermeture verticale) → détecte tôt un intrus qui monte/descend vers ton niveau.
@@ -280,18 +289,23 @@ function acEvalThreats3D(o,t,P){
     let dcpa=e.dist_m; if(tcpa>0){const cx=Rx+vrx*tcpa,cy=Ry+vry*tcpa; dcpa=Math.hypot(cx,cy);}
     const closing=Math.trunc(Math.sqrt(vr2)/0.514444), conv=tcpa>0, evz=(e.vspd_fpm||0)/60;
     const daltCpa=conv?Math.abs(e.alt_rel_100ft*100+(evz-ovz)*tcpa):daltNow;   // Δalt au CPA
+    // (TAU) rapprochement RADIAL signé → tau = dist/rapprochement. Diverge → jamais d'alerte ;
+    // converge → temps = tau. Se relâche au PASSAGE (rapprochement radial→0 → tau→∞) : idéal circuit.
+    const closeRate=-(Rx*vrx+Ry*vry)/e.dist_m;                 // m/s (>0 = on se rapproche)
+    const tau=closeRate>0.1?e.dist_m/closeRate:1e9;
+    const converging=useTau?(closeRate>0.1):conv, T=useTau?tau:tcpa;
     const rel=e.bear_deg-o.hdg_deg, rEgg=rAft+(rFwd-rAft)*(1+Math.cos(rel*D))*0.5;
-    const cpaOrange=(daltCpa<=P.vOrg && conv && tcpa<=P.tOrg && dcpa<=P.dOrg);
-    const eggOrange=(daltNow<=P.vOrg && conv && e.dist_m<=rEgg);
+    const cpaOrange=(daltCpa<=P.vOrg && converging && T<=P.tOrg && dcpa<=P.dOrg);
+    const eggOrange=(daltNow<=P.vOrg && converging && e.dist_m<=rEgg);
     let lvl=AC.NONE;
     if(cpaOrange) lvl=AC.ORANGE;
-    if(daltCpa<=P.vRed && conv && tcpa<=P.tRed && dcpa<=P.dRed) lvl=AC.RED;
+    if(daltCpa<=P.vRed && converging && T<=P.tRed && dcpa<=P.dRed) lvl=AC.RED;
     if(eggOrange && lvl<AC.ORANGE) lvl=AC.ORANGE;                                   // bulle = maintenant
     if(daltNow<=P.vRed && e.dist_m<=P.floor_m) lvl=AC.RED;                          // plancher = maintenant
     // (option 3) DOWNGRADE : une CAUTION due au SEUL CPA qui va s'écarter (dRed < dcpa ≤ dOrg)
     // = passage qui clear → INFO bleu, pas de caution. La bulle (proximité réelle) et le rouge restent.
     if(useDowngrade && lvl===AC.ORANGE && cpaOrange && !eggOrange && dcpa>P.dRed){ lvl=AC.NONE; dgInfo[i]=true; }
-    per[i]=lvl; e._tcpa=tcpa; e._dcpa=dcpa;
+    per[i]=lvl; e._tcpa=tcpa; e._dcpa=dcpa; e._tau=tau; e._closeRate=closeRate;
     if(lvl>out.level){ let clk=(((Math.trunc(e.bear_deg-o.hdg_deg))%360)+360)%360, hr=Math.trunc((clk+15)/30)%12; if(hr===0)hr=12;
       out.level=lvl;out.clock=hr;out.dist_m=Math.trunc(e.dist_m);out.dalt_ft=Math.trunc(e.alt_rel_100ft*100);out.closing_kt=closing;out.idx=i;out.valid=true; } }
   return {per,out};
@@ -451,7 +465,7 @@ function tick(now){ const dt=lastRAF?(now-lastRAF)/1000:0; lastRAF=now;
   if(playing){ simT+=dt*speed; if(simT>=active.dur){simT=active.dur;playing=false;document.getElementById('play').textContent="▶ Play";} }
   const st=stateAt(simT), eng=buildEngineInput(st);
   const inT = useNoise? applyNoise(eng.t, now) : eng.t;                       // (D) bruit vu par le moteur
-  const use3Deng = use3D || useDowngrade;                                     // 3D et downgrade utilisent la variante exp.
+  const use3Deng = use3D || useDowngrade || useTau;                           // 3D/downgrade/tau → variante exp.
   const {per,out}=(use3Deng?acEvalThreats3D:acEvalThreats)(eng.own,inT,params);
   if(useHyst) out.level=hysteresis(out.level, now);                          // (B) hystérésis
   curRedAlert=(out.level===AC.RED);
@@ -482,6 +496,8 @@ function updatePanels(st,eng,per,out){
     add("Intrus", e.cs);
     add("Distance", fmt(e.dist_m/NM,' nm',1));
     add("Vitesse de rapprochement", d.closing>0?fmt(d.closing,' kt'):'<span style="color:#3fb950">s\'éloigne</span>');
+    add("Rapprochement RADIAL", d.closeRadKt>0.2?fmt(d.closeRadKt,' kt'):(d.closeRadKt<-0.2?'<span style="color:#3fb950">'+fmt(d.closeRadKt,' kt')+' (éloigne)</span>':'≈0 (abeam)'),useTau?"big":"");
+    add("tau = dist / rappr. radial", d.closeRadKt>0.2?fmt(d.tau,' s',0):'∞ (pas de rappr.)',useTau?"big":"");
     add("Temps à l'impact (tCPA)", d.conv?fmt(d.tcpa,' s',0):'—');
     add("Distance de passage (dCPA)", d.conv?fmt(d.dcpa/NM,' nm',2):'—');
     add("Δ altitude", fmt(e.alt_rel_100ft*100,' ft'));
@@ -506,7 +522,9 @@ function updatePanels(st,eng,per,out){
 /* CSV → repère EBBY, avec CADENCE RÉELLE (UTC Time) → replay temps réel (×speed) */
 function hms(s){ const m=/(\d{1,2}):(\d{2}):(\d{2})/.exec(s||""); return m?(+m[1]*3600+ +m[2]*60+ +m[3]):null; }
 function parseCsv(text){ const lines=text.split(/\r?\n/).filter(l=>l.length);
-  let hi=lines.findIndex(l=>/Latitude/i.test(l)&&/Longitude/i.test(l)); if(hi<0)hi=1;
+  // G3X a DEUX lignes d'en-tête avec Latitude/Longitude (noms longs puis courts) → prendre la DERNIÈRE
+  // (noms courts : AltGPS/GndSpd/TRK) sinon alt/spd/trk restent introuvables (=0).
+  let hi=1; for(let k=0;k<Math.min(lines.length,6);k++){ if(/Latitude/i.test(lines[k])&&/Longitude/i.test(lines[k])) hi=k; }
   const cols=lines[hi].split(',').map(s=>s.trim());
   const idx=(names)=>cols.findIndex(c=>names.some(n=>c.toLowerCase()===n));
   const iLat=idx(["latitude","lat"]),iLon=idx(["longitude","lon"]),iAlt=idx(["altgps","gps altitude","alt"]),
@@ -519,7 +537,7 @@ function parseCsv(text){ const lines=text.split(/\r?\n/).filter(l=>l.length);
   let t0=hms(rows[0].ts), t1=hms(rows[rows.length-1].ts), span=(t0!=null&&t1!=null)?(t1-t0):null;
   if(span!=null&&span<0)span+=86400;
   const dt=(span&&span>0)?span/(samples.length-1):0.25;      // 4 Hz par défaut si pas d'heure
-  return {samples, dt, dur:(samples.length-1)*dt};
+  return {samples, dt, dur:(samples.length-1)*dt, t0};         // t0 = seconde UTC absolue du 1er point (align. réel)
 }
 function sampleCsv(d,t){const s=d.samples,ix=t/d.dt,i=Math.min(s.length-1,Math.max(0,Math.floor(ix))),a=s[i],b=s[Math.min(s.length-1,i+1)],f=ix-i;
   const vspd=(b.alt-a.alt)/(d.dt||1)*60;   // fpm depuis la pente
@@ -552,15 +570,24 @@ function parseTrafficLog(text){
 /* ── UI ─────────────────────────────────────────────────────────────────── */
 const $=(id)=>document.getElementById(id);
 const selScen=$('scenario');
+// Paire réelle EBBY embarquée (flights_default.js) — dispo sans file-picker
+const DEF=window.DEFAULT_FLIGHTS||null;
+if(DEF){const o=document.createElement('option');o.value="ebby";o.textContent="★ 2 vols réels EBBY 08/07 (FJFVB ↔ FJMLV)";selScen.appendChild(o);}
 Object.entries(SCEN).forEach(([k,s])=>{const o=document.createElement('option');o.value=k;o.textContent=s.name;selScen.appendChild(o);});
 {const o=document.createElement('option');o.value="csv";o.textContent="— 2 CSV réels croisés —";selScen.appendChild(o);}
-selScen.value="headon";
+function loadDefaultPair(){ if(!DEF)return false;
+  try{ csvOwnData=parseCsv(DEF.fjfvb.csv); csvIntData=parseCsv(DEF.fjmlv.csv); }catch(e){ console.error("défaut CSV:",e); return false; }
+  active=clone(SCEN.headon); active.csv=true; active.name="2 vols réels EBBY (FJFVB own ↔ FJMLV)"; active.intCs="FJMLV";
+  active.dur=csvOwnData.dur; simT=0;playing=false; return true; }
 function syncAcSliders(){ if(active.csv||active.log)return;
   $('ospd').value=active.own.spd;$('ospdv').textContent=active.own.spd;$('oalt').value=active.own.alt;$('oaltv').textContent=active.own.alt;
   const i0=active.intr[0]; if(i0){$('ispd').value=i0.spd;$('ispdv').textContent=i0.spd;$('ialt').value=i0.alt;$('ialtv').textContent=i0.alt;} }
-selScen.onchange=()=>{ if(selScen.value==="csv"){ active=clone(SCEN.headon); active.csv=true; active.name="2 CSV croisés";
+selScen.onchange=()=>{ if(selScen.value==="ebby"){ loadDefaultPair(); }
+  else if(selScen.value==="csv"){ active=clone(SCEN.headon); active.csv=true; active.name="2 CSV croisés";
     active.dur=csvOwnData?Math.min(csvOwnData.dur,csvIntData?csvIntData.dur:csvOwnData.dur):60; }
   else { active=clone(SCEN[selScen.value]); } simT=0;playing=false;$('play').textContent="▶ Play"; syncAcSliders(); };
+// Démarrage : la paire réelle EBBY si dispo, sinon face-à-face
+if(DEF && loadDefaultPair()){ selScen.value="ebby"; } else { selScen.value="headon"; active=clone(SCEN.headon); }
 $('play').onclick=(e)=>{ if(!actx&&window.AudioContext)actx=new AudioContext(); if(actx&&actx.state==="suspended")actx.resume();
   playing=!playing;e.target.textContent=playing?"⏸ Pause":"▶ Play"; };
 $('reset').onclick=()=>{simT=0;playing=false;$('play').textContent="▶ Play";};
@@ -572,7 +599,7 @@ $('audio').onchange=(e)=>{audioOn=e.target.checked;if(audioOn&&!actx&&window.Aud
 $('egg').onchange=(e)=>showEgg=e.target.checked; $('vec').onchange=(e)=>showVec=e.target.checked; $('aip').onchange=(e)=>showAip=e.target.checked;
 $('autoz').onchange=(e)=>autoZoom=e.target.checked; $('trace').onchange=(e)=>showTrace=e.target.checked;
 $('e3d').onchange=(e)=>use3D=e.target.checked; $('ehy').onchange=(e)=>useHyst=e.target.checked; $('enoise').onchange=(e)=>useNoise=e.target.checked;
-$('edg').onchange=(e)=>useDowngrade=e.target.checked;
+$('edg').onchange=(e)=>useDowngrade=e.target.checked; $('etau').onchange=(e)=>useTau=e.target.checked;
 // sliders own / intrus (éditent le scénario courant, effet immédiat via forme fermée)
 $('ospd').oninput=(e)=>{active.own.spd=+e.target.value;$('ospdv').textContent=e.target.value;};
 $('oalt').oninput=(e)=>{active.own.alt=+e.target.value;$('oaltv').textContent=e.target.value;};
