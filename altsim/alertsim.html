@@ -133,6 +133,7 @@
       <span class="toggle"><input type="checkbox" id="e3d"> CPA 3D — vertical projeté (détecte montée/descente tôt)</span>
       <span class="toggle"><input type="checkbox" id="ehy"> Hystérésis — anti-clignotement (maintien 3-4 s)</span>
       <span class="toggle"><input type="checkbox" id="enoise"> Bruit données réaliste (GPS/SafeSky)</span>
+      <span class="toggle"><input type="checkbox" id="edg"> Downgrade caution→info si ça s'écarte (dCPA &gt; rouge)</span>
     </div>
 
     <h2 style="margin-top:6px">Seuils (live)</h2>
@@ -260,12 +261,12 @@ let autoZoom=false, showTrace=true;
 /* ══ EXPÉRIMENTAL (simu, HORS core/firmware) : CPA 3D + hystérésis + bruit ════
    Variantes comparées au core verrouillé via toggles → on ÉVALUE avant toute
    promotion. acEvalThreats (alert_core.js) reste 0/1/2, conformance intacte. */
-let use3D=false, useHyst=false, useNoise=false, curRedAlert=false;
+let use3D=false, useHyst=false, useNoise=false, curRedAlert=false, useDowngrade=false, dgInfo=[];
 
 // (A) CPA 3D : la fenêtre verticale est testée sur le Δalt PROJETÉ au tCPA
 // (fermeture verticale) → détecte tôt un intrus qui monte/descend vers ton niveau.
 function acEvalThreats3D(o,t,P){
-  const per=t.map(()=>AC.NONE);
+  const per=t.map(()=>AC.NONE); dgInfo=t.map(()=>false);
   const out={level:AC.NONE,clock:0,dist_m:0,dalt_ft:0,closing_kt:0,idx:-1,valid:false};
   if(!o.valid||!o.gps_fix||o.flt_st===0) return {per,out};
   const D=Math.PI/180, ogs=o.spd_kmh/3.6;
@@ -280,11 +281,16 @@ function acEvalThreats3D(o,t,P){
     const closing=Math.trunc(Math.sqrt(vr2)/0.514444), conv=tcpa>0, evz=(e.vspd_fpm||0)/60;
     const daltCpa=conv?Math.abs(e.alt_rel_100ft*100+(evz-ovz)*tcpa):daltNow;   // Δalt au CPA
     const rel=e.bear_deg-o.hdg_deg, rEgg=rAft+(rFwd-rAft)*(1+Math.cos(rel*D))*0.5;
+    const cpaOrange=(daltCpa<=P.vOrg && conv && tcpa<=P.tOrg && dcpa<=P.dOrg);
+    const eggOrange=(daltNow<=P.vOrg && conv && e.dist_m<=rEgg);
     let lvl=AC.NONE;
-    if(daltCpa<=P.vOrg && conv && tcpa<=P.tOrg && dcpa<=P.dOrg) lvl=AC.ORANGE;
+    if(cpaOrange) lvl=AC.ORANGE;
     if(daltCpa<=P.vRed && conv && tcpa<=P.tRed && dcpa<=P.dRed) lvl=AC.RED;
-    if(daltNow<=P.vOrg && conv && e.dist_m<=rEgg && lvl<AC.ORANGE) lvl=AC.ORANGE;   // bulle = maintenant
+    if(eggOrange && lvl<AC.ORANGE) lvl=AC.ORANGE;                                   // bulle = maintenant
     if(daltNow<=P.vRed && e.dist_m<=P.floor_m) lvl=AC.RED;                          // plancher = maintenant
+    // (option 3) DOWNGRADE : une CAUTION due au SEUL CPA qui va s'écarter (dRed < dcpa ≤ dOrg)
+    // = passage qui clear → INFO bleu, pas de caution. La bulle (proximité réelle) et le rouge restent.
+    if(useDowngrade && lvl===AC.ORANGE && cpaOrange && !eggOrange && dcpa>P.dRed){ lvl=AC.NONE; dgInfo[i]=true; }
     per[i]=lvl; e._tcpa=tcpa; e._dcpa=dcpa;
     if(lvl>out.level){ let clk=(((Math.trunc(e.bear_deg-o.hdg_deg))%360)+360)%360, hr=Math.trunc((clk+15)/30)%12; if(hr===0)hr=12;
       out.level=lvl;out.clock=hr;out.dist_m=Math.trunc(e.dist_m);out.dalt_ft=Math.trunc(e.alt_rel_100ft*100);out.closing_kt=closing;out.idx=i;out.valid=true; } }
@@ -445,10 +451,12 @@ function tick(now){ const dt=lastRAF?(now-lastRAF)/1000:0; lastRAF=now;
   if(playing){ simT+=dt*speed; if(simT>=active.dur){simT=active.dur;playing=false;document.getElementById('play').textContent="▶ Play";} }
   const st=stateAt(simT), eng=buildEngineInput(st);
   const inT = useNoise? applyNoise(eng.t, now) : eng.t;                       // (D) bruit vu par le moteur
-  const {per,out}=(use3D?acEvalThreats3D:acEvalThreats)(eng.own,inT,params); // (A) core ou 3D
+  const use3Deng = use3D || useDowngrade;                                     // 3D et downgrade utilisent la variante exp.
+  const {per,out}=(use3Deng?acEvalThreats3D:acEvalThreats)(eng.own,inT,params);
   if(useHyst) out.level=hysteresis(out.level, now);                          // (B) hystérésis
   curRedAlert=(out.level===AC.RED);
-  curInfo = eng.t.map((e,i)=> per[i]===AC.NONE && infoTier(eng.own,e));   // étage info (bleu, simu)
+  // info (bleu) = étage 90 s OU caution CPA rétrogradée (option 3, dgInfo)
+  curInfo = eng.t.map((e,i)=> per[i]===AC.NONE && (infoTier(eng.own,e) || (use3Deng && dgInfo[i])));
   if(autoZoom && eng.t.length){ let nd=1e18; eng.t.forEach(e=>{if(e.dist_m<nd)nd=e.dist_m;});   // 2022 "Dynamic View"
     const tiers=[2,4,6,8,10,16]; rangeNm=tiers.find(r=>r*NM>=nd*1.6)||16;
     document.getElementById('rngv').textContent=rangeNm; document.getElementById('range').value=Math.min(16,rangeNm); }
@@ -564,6 +572,7 @@ $('audio').onchange=(e)=>{audioOn=e.target.checked;if(audioOn&&!actx&&window.Aud
 $('egg').onchange=(e)=>showEgg=e.target.checked; $('vec').onchange=(e)=>showVec=e.target.checked; $('aip').onchange=(e)=>showAip=e.target.checked;
 $('autoz').onchange=(e)=>autoZoom=e.target.checked; $('trace').onchange=(e)=>showTrace=e.target.checked;
 $('e3d').onchange=(e)=>use3D=e.target.checked; $('ehy').onchange=(e)=>useHyst=e.target.checked; $('enoise').onchange=(e)=>useNoise=e.target.checked;
+$('edg').onchange=(e)=>useDowngrade=e.target.checked;
 // sliders own / intrus (éditent le scénario courant, effet immédiat via forme fermée)
 $('ospd').oninput=(e)=>{active.own.spd=+e.target.value;$('ospdv').textContent=e.target.value;};
 $('oalt').oninput=(e)=>{active.own.alt=+e.target.value;$('oaltv').textContent=e.target.value;};
