@@ -210,9 +210,14 @@ function stateAt(t){
   if(active.csv){ const own=sampleCsv(csvOwnData,t);
     // Alignement UTC absolu : l'intrus est échantillonné à la MÊME heure murale que own
     // (delta des t0) → si les 2 vols ont volé en même temps, la vraie géométrie de rencontre apparaît.
-    let tInt=t; if(csvIntData && csvOwnData && csvOwnData.t0!=null && csvIntData.t0!=null){
-      let d=csvOwnData.t0-csvIntData.t0; if(d>43200)d-=86400; if(d<-43200)d+=86400; tInt=t+d; }
-    const intr=csvIntData?[{cs:active.intCs||"INTRUS",...sampleCsv(csvIntData,tInt)}]:[];
+    let tInt=t, intr=[];
+    if(csvIntData){
+      if(csvOwnData && csvOwnData.t0!=null && csvIntData.t0!=null){
+        let d=csvOwnData.t0-csvIntData.t0; if(d>43200)d-=86400; if(d<-43200)d+=86400; tInt=t+d; }
+      // Hors de sa fenêtre d'enregistrement (avant décollage / après atterrissage) → l'intrus
+      // n'existe pas (le boîtier ne logue qu'en vol) → on ne l'affiche PAS (fini le point figé au sol).
+      if(tInt>=-1 && tInt<=csvIntData.dur+1) intr=[{cs:active.intCs||"INTRUS",...sampleCsv(csvIntData,tInt)}];
+    }
     return {own,intr,dur:active.dur,name:active.name}; }
   return {own:posOf(active.own,t), intr:active.intr.map(a=>({cs:a.cs,...posOf(a,t)})), dur:active.dur, name:active.name};
 }
@@ -542,14 +547,23 @@ function parseCsv(text){ const lines=text.split(/\r?\n/).filter(l=>l.length);
   const rows=[]; for(let k=hi+1;k<lines.length;k++){const c=lines[k].split(',');const la=parseFloat(c[iLat]),lo=parseFloat(c[iLon]);if(!isFinite(la)||!isFinite(lo))continue;
     rows.push({lat:la,lon:lo,alt:parseFloat(c[iAlt])||0,spd:parseFloat(c[iSpd])||0,trk:parseFloat(c[iTrk])||0,ts:iT>=0?c[iT]:null});}
   if(rows.length<2)throw new Error("CSV <2 points valides");
-  const samples=rows.map(r=>{const p=llToEN(r.lon,r.lat);return {x:p.x,y:p.y,alt:r.alt,hdg:r.trk,spd:r.spd};});
-  let t0=hms(rows[0].ts), t1=hms(rows[rows.length-1].ts), span=(t0!=null&&t1!=null)?(t1-t0):null;
-  if(span!=null&&span<0)span+=86400;
-  const dt=(span&&span>0)?span/(samples.length-1):0.25;      // 4 Hz par défaut si pas d'heure
-  return {samples, dt, dur:(samples.length-1)*dt, t0};         // t0 = seconde UTC absolue du 1er point (align. réel)
+  const t0=hms(rows[0].ts);
+  // Chaque échantillon porte son TEMPS RÉEL relatif (s depuis t0). Les timestamps sont
+  // IRRÉGULIERS (secondes dupliquées + trous : le boîtier n'enregistre qu'en vol) → on
+  // indexe par le temps réel (sampleCsv), jamais par une cadence uniforme (sinon smear).
+  const samples=rows.map((r,k)=>{const p=llToEN(r.lon,r.lat); let tt=hms(r.ts);
+    if(tt==null) tt=k*0.25; else { tt-=t0; if(tt<0)tt+=86400; }
+    return {t:tt,x:p.x,y:p.y,alt:r.alt,hdg:r.trk,spd:r.spd};});
+  // temps strictement croissant (au cas où) pour la recherche
+  for(let k=1;k<samples.length;k++) if(samples[k].t<=samples[k-1].t) samples[k].t=samples[k-1].t+1e-3;
+  return {samples, dur:samples[samples.length-1].t, t0};       // t0 = seconde UTC absolue du 1er point (align. réel)
 }
-function sampleCsv(d,t){const s=d.samples,ix=t/d.dt,i=Math.min(s.length-1,Math.max(0,Math.floor(ix))),a=s[i],b=s[Math.min(s.length-1,i+1)],f=ix-i;
-  const vspd=(b.alt-a.alt)/(d.dt||1)*60;   // fpm depuis la pente
+function sampleCsv(d,t){const s=d.samples;
+  if(t<=s[0].t)return {x:s[0].x,y:s[0].y,alt:s[0].alt,hdg:s[0].hdg,spd:s[0].spd,vspd:0};
+  const last=s[s.length-1]; if(t>=last.t)return {x:last.x,y:last.y,alt:last.alt,hdg:last.hdg,spd:last.spd,vspd:0};
+  let lo=0,hi=s.length-1; while(hi-lo>1){const m=(lo+hi)>>1; if(s[m].t<=t)lo=m;else hi=m;}   // recherche binaire par temps réel
+  const a=s[lo],b=s[hi],span=(b.t-a.t)||1,f=(t-a.t)/span;
+  const vspd=(b.alt-a.alt)/span*60;   // fpm depuis la pente réelle
   return {x:a.x+(b.x-a.x)*f,y:a.y+(b.y-a.y)*f,alt:a.alt+(b.alt-a.alt)*f,hdg:a.hdg,spd:a.spd,vspd};}
 
 /* Rejeu du LOG TRAFIC RÉEL du boîtier (ATCORE_TRF_*.csv v2) : own + intrus par ts. */
