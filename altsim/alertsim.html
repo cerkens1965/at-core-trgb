@@ -303,7 +303,9 @@ function acEvalThreats3D(o,t,P){
     const converging=useTau?(closeRate>0.1):conv, T=useTau?tau:tcpa;
     const rel=e.bear_deg-o.hdg_deg, rEgg=rAft+(rFwd-rAft)*(1+Math.cos(rel*D))*0.5;
     const cpaOrange=(daltCpa<=P.vOrg && converging && T<=P.tOrg && dcpa<=P.dOrg);
-    const eggOrange=(daltNow<=P.vOrg && converging && e.dist_m<=rEgg);
+    // Avec TAU : la bulle respecte aussi le TEMPS (tau ≤ tOrg) → un trafic qui passe ABEAM
+    // (rapprochement radial faible, tau énorme) ne déclenche plus la bulle = circuit apaisé.
+    const eggOrange=(daltNow<=P.vOrg && converging && e.dist_m<=rEgg && (!useTau || T<=P.tOrg));
     let lvl=AC.NONE;
     if(cpaOrange) lvl=AC.ORANGE;
     if(daltCpa<=P.vRed && converging && T<=P.tRed && dcpa<=P.dRed) lvl=AC.RED;
