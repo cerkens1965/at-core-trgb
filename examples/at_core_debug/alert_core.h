@@ -81,7 +81,7 @@ static inline AC_Params acDefaultParams() {
     const float NM = 1852.0f;
     p.vOrg = 500.0f; p.vRed = 400.0f;
     p.tOrg = 45.0f;  p.tRed = 25.0f;
-    p.dOrg = 1.0f * NM; p.dRed = 0.5f * NM;
+    p.dOrg = 0.6f * NM; p.dRed = 0.5f * NM;   // dCPA orange resserré 1→0,6 nm (densité circuit)
     p.gnd_kt = 30.0f;
     return p;
 }

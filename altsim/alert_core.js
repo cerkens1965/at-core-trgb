@@ -12,7 +12,7 @@
   function acDefaultParams() {
     return {
       fwd_sec: 30, fwd_min: 400, fwd_max: 2000, aft_min: 150, floor_m: 150,
-      vOrg: 500, vRed: 400, tOrg: 45, tRed: 25, dOrg: 1 * NM, dRed: 0.5 * NM,
+      vOrg: 500, vRed: 400, tOrg: 45, tRed: 25, dOrg: 0.6 * NM, dRed: 0.5 * NM,
       gnd_kt: 30
     };
   }
