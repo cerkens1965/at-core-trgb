@@ -25,7 +25,10 @@ dCPA, Δalt, règle déclenchée et **marge à chaque seuil**.
 **Philosophie** : on alerte **seulement** sur un avion qui est **à ta hauteur, sur ta route,
 et qui se rapproche**. Deux niveaux : **🟠 ORANGE** (attention) · **🔴 ROUGE** (urgent, flash + son).
 
-1. **Au sol → rien.** Tant que non en vol (`flt_st==0`), aucune alerte.
+1. **Moi au sol → rien.** Tant que non en vol (`flt_st==0`), aucune alerte.
+1bis. **Intrus au sol → rien.** Un intrus dont la vitesse-sol < 30 kt (parqué/roulage) ne peut
+   **jamais** déclencher d'alerte sur moi — symétrique de la règle 1 (SafeSky diffuse aussi le
+   trafic au sol). *(Défaut à 100 kt si le beacon n'a pas de vitesse → jamais gaté par erreur.)*
 2. **Trop haut/bas → ignoré.** Au-delà de ~±400-500 ft d'écart vertical, pas d'alerte
    (il faut être *co-altitude*).
 3. **Il faut se RAPPROCHER.** Si l'écart ne diminue pas (avion qui s'éloigne, ou **qui suit
@@ -47,6 +50,7 @@ et qui se rapproche**. Deux niveaux : **🟠 ORANGE** (attention) · **🔴 ROUG
 | Bulle avant | vitesse × 30 s (borné 400–2000 m) | — |
 | Bulle arrière | 20 % de l'avant (min 150 m) | — |
 | Plancher | — | 150 m |
+| Intrus au sol (gate) | vitesse-sol intrus < 30 kt → ignoré | idem |
 
 ---
 

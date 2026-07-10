@@ -59,6 +59,7 @@ struct AC_Params {
     float vOrg, vRed;   // gate vertical (ft) orange / rouge
     float tOrg, tRed;   // tCPA (s) orange / rouge
     float dOrg, dRed;   // dCPA distance de passage (m) orange / rouge
+    float gnd_kt;       // plancher vitesse-sol intrus : sous ce seuil = AU SOL/roulage → jamais d'alerte
 };
 
 // Résultat global (menace la plus grave retenue).
@@ -81,6 +82,7 @@ static inline AC_Params acDefaultParams() {
     p.vOrg = 500.0f; p.vRed = 400.0f;
     p.tOrg = 45.0f;  p.tRed = 25.0f;
     p.dOrg = 1.0f * NM; p.dRed = 0.5f * NM;
+    p.gnd_kt = 30.0f;
     return p;
 }
 
@@ -109,6 +111,7 @@ static inline uint8_t acEvalThreats(const AC_Own& o, const AC_Intruder* t, int n
     for (int i = 0; i < n; i++) {
         const AC_Intruder& e = t[i];
         if (!e.visible) continue;
+        if (e.spd_kt < P.gnd_kt) continue;              // intrus au sol/roulage → jamais d'alerte
         const float dalt = fabsf(e.alt_rel_100ft * 100.0f);          // |Δalt| ft
         const float br = e.bear_deg * AC_PI / 180.0f;
         const float Rx = e.dist_m * sinf(br), Ry = e.dist_m * cosf(br);

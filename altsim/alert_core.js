@@ -12,7 +12,8 @@
   function acDefaultParams() {
     return {
       fwd_sec: 30, fwd_min: 400, fwd_max: 2000, aft_min: 150, floor_m: 150,
-      vOrg: 500, vRed: 400, tOrg: 45, tRed: 25, dOrg: 1 * NM, dRed: 0.5 * NM
+      vOrg: 500, vRed: 400, tOrg: 45, tRed: 25, dOrg: 1 * NM, dRed: 0.5 * NM,
+      gnd_kt: 30
     };
   }
 
@@ -30,6 +31,7 @@
     const ot = o.hdg_deg * D, ovx = ogs * Math.sin(ot), ovy = ogs * Math.cos(ot);
     for (let i = 0; i < t.length; i++) {
       const e = t[i]; if (!e.visible) continue;
+      if (e.spd_kt < P.gnd_kt) continue;              // intrus au sol/roulage → jamais d'alerte
       const dalt = Math.abs(e.alt_rel_100ft * 100);
       const br = e.bear_deg * D, Rx = e.dist_m * Math.sin(br), Ry = e.dist_m * Math.cos(br);
       const tt = e.hdg_deg * D, tgs = e.spd_kt * 0.514444;

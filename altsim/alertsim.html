@@ -244,7 +244,8 @@ function diagnose(own, e){ const D=Math.PI/180;
   const dalt=Math.abs(e.alt_rel_100ft*100), conv=tcpa>0;
   // règle qui déclencherait (mêmes conditions que le core, pour l'explication)
   let rule="—";
-  if(dalt<=params.vRed && e.dist_m<=params.floor_m) rule="PLANCHER (rouge)";
+  if(e.spd_kt<params.gnd_kt) rule="intrus AU SOL ("+Math.round(e.spd_kt)+" kt) → rien";
+  else if(dalt<=params.vRed && e.dist_m<=params.floor_m) rule="PLANCHER (rouge)";
   else if(dalt<=params.vRed && conv && tcpa<=params.tRed && dcpa<=params.dRed) rule="CPA rouge (tCPA+dCPA)";
   else if(dalt<=params.vOrg && conv && tcpa<=params.tOrg && dcpa<=params.dOrg) rule="CPA orange (tCPA+dCPA)";
   else if(dalt<=params.vOrg && conv && e.dist_m<=rEgg) rule="Bulle-œuf (proximité)";
@@ -282,6 +283,7 @@ function acEvalThreats3D(o,t,P){
   let rFwd=Math.max(P.fwd_min,Math.min(P.fwd_max,ogs*P.fwd_sec)), rAft=Math.max(rFwd*0.2,P.aft_min);
   const ovx=ogs*Math.sin(o.hdg_deg*D), ovy=ogs*Math.cos(o.hdg_deg*D), ovz=(o.vspd_fpm||0)/60;
   for(let i=0;i<t.length;i++){ const e=t[i]; if(!e.visible)continue;
+    if(e.spd_kt<P.gnd_kt)continue;                    // intrus au sol/roulage → jamais d'alerte
     const daltNow=Math.abs(e.alt_rel_100ft*100);
     const br=e.bear_deg*D,Rx=e.dist_m*Math.sin(br),Ry=e.dist_m*Math.cos(br);
     const tt=e.hdg_deg*D,tgs=e.spd_kt*0.514444,vrx=tgs*Math.sin(tt)-ovx,vry=tgs*Math.cos(tt)-ovy,vr2=vrx*vrx+vry*vry;
