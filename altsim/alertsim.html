@@ -338,15 +338,35 @@ function applyNoise(tArr,nowMs){
             bear_deg:(e.bear_deg+n.db+360)%360, hdg_deg:(e.hdg_deg+n.dh+360)%360}; });
 }
 
-/* ── icône avion ──────────────────────────────────────────────────────────── */
+/* ── icône avion (silhouette VL3 vue de dessus : aile basse effilée + verrière
+ *    + empennage classique) — nez vers -y ─────────────────────────────────── */
 function planeIcon(c,x,y,hdg,col,s,own){
   c.save();c.translate(x,y);c.rotate(hdg*Math.PI/180);c.scale(s/22,s/22);
   c.fillStyle=col;c.beginPath();
-  c.moveTo(0,-14);c.lineTo(2,-4);c.lineTo(16,4);c.lineTo(16,7);c.lineTo(2,3);
-  c.lineTo(2,11);c.lineTo(6,14);c.lineTo(6,16);c.lineTo(0,14);
-  c.lineTo(-6,16);c.lineTo(-6,14);c.lineTo(-2,11);c.lineTo(-2,3);
-  c.lineTo(-16,7);c.lineTo(-16,4);c.lineTo(-2,-4);c.closePath();c.fill();
-  if(own){c.strokeStyle="#12303f";c.lineWidth=1.5;c.stroke();}
+  c.moveTo(0,-15.5);                 // pointe de spinner
+  c.bezierCurveTo(1.7,-14,2.2,-11,2.1,-8);   // capot / nez galbé
+  c.lineTo(2.4,-2.5);                // emplanture bord d'attaque
+  c.lineTo(17.5,2.2);                // saumon d'aile — bord d'attaque
+  c.lineTo(17.5,4.0);                // saumon — bord de fuite
+  c.lineTo(2.6,5.5);                 // emplanture bord de fuite
+  c.lineTo(1.9,11.0);                // fuselage arrière
+  c.lineTo(7.2,13.2);                // stab horizontal droit — BA
+  c.lineTo(7.2,14.4);                // stab — BF
+  c.lineTo(1.2,15.0);                // raccord dérive
+  c.lineTo(0,15.6);                  // cône de queue
+  c.lineTo(-1.2,15.0);               // ── miroir gauche ──
+  c.lineTo(-7.2,14.4);
+  c.lineTo(-7.2,13.2);
+  c.lineTo(-1.9,11.0);
+  c.lineTo(-2.6,5.5);
+  c.lineTo(-17.5,4.0);
+  c.lineTo(-17.5,2.2);
+  c.lineTo(-2.4,-2.5);
+  c.bezierCurveTo(-2.2,-11,-1.7,-14,0,-15.5);
+  c.closePath();c.fill();
+  if(own){c.strokeStyle="#12303f";c.lineWidth=1.4;c.stroke();}
+  // verrière (bulle) — petite ellipse plus sombre sur le fuselage avant
+  c.globalAlpha=.30;c.fillStyle="#0c2230";c.beginPath();c.ellipse(0,-5.5,1.7,3.4,0,0,7);c.fill();c.globalAlpha=1;
   c.restore();
 }
 const COL={0:"#3fb950",1:"#e3b341",2:"#f85149"};
