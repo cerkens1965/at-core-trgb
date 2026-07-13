@@ -122,16 +122,23 @@ static inline uint8_t acEvalThreats(const AC_Own& o, const AC_Intruder* t, int n
         float dcpa = e.dist_m;
         if (tcpa > 0) { float cx = Rx + vrx * tcpa, cy = Ry + vry * tcpa; dcpa = sqrtf(cx * cx + cy * cy); }
         const int  closing = (int)(sqrtf(vr2) / 0.514444f);
-        const bool converging = (tcpa > 0);
+        // TAU (2026-07-13) : rapprochement RADIAL signé (>0 = on se rapproche) → temps = dist / rapprochement.
+        // Remplace le converging = (tcpa>0) purement géométrique : un trafic qui passe ABEAM ou s'éloigne a un
+        // rapprochement radial ~0 → tau ∞ → PLUS d'alerte (se relâche au passage = circuit/false-alert apaisé).
+        // dcpa reste calculé sur la géométrie CPA ; seul le TEMPS et le « converge » passent en radial.
+        const float closeRate  = -(Rx * vrx + Ry * vry) / e.dist_m;
+        const float tau        = (closeRate > 0.1f) ? e.dist_m / closeRate : 1e9f;
+        const bool  converging = (closeRate > 0.1f);
+        const float T          = tau;
 
         const float rel = e.bear_deg - o.hdg_deg;
         const float ceg = cosf(rel * AC_PI / 180.0f);
         const float rEgg = rAft + (rFwd - rAft) * (1.0f + ceg) * 0.5f;
 
         uint8_t lvl = AC_NONE;
-        if (dalt <= P.vOrg && converging && tcpa <= P.tOrg && dcpa <= P.dOrg) lvl = AC_ORANGE;
-        if (dalt <= P.vRed && converging && tcpa <= P.tRed && dcpa <= P.dRed) lvl = AC_RED;
-        if (dalt <= P.vOrg && converging && e.dist_m <= rEgg && lvl < AC_ORANGE) lvl = AC_ORANGE;
+        if (dalt <= P.vOrg && converging && T <= P.tOrg && dcpa <= P.dOrg) lvl = AC_ORANGE;
+        if (dalt <= P.vRed && converging && T <= P.tRed && dcpa <= P.dRed) lvl = AC_RED;
+        if (dalt <= P.vOrg && converging && e.dist_m <= rEgg && T <= P.tOrg && lvl < AC_ORANGE) lvl = AC_ORANGE;  // (TAU) la bulle respecte aussi le temps
         if (dalt <= P.vRed && e.dist_m <= P.floor_m) lvl = AC_RED;
 
         per[i] = lvl;
@@ -144,4 +151,16 @@ static inline uint8_t acEvalThreats(const AC_Own& o, const AC_Intruder* t, int n
         }
     }
     return out.level;
+}
+
+// ── Hystérésis temporelle (post-filtre du niveau de sortie) ───────────────────
+// Monte IMMÉDIATEMENT vers un niveau supérieur ; ne REDESCEND qu'après un maintien
+// (ROUGE 4 s / ORANGE 3 s) → l'alerte ne clignote pas quand la géométrie oscille au ras
+// d'un seuil. STATEFUL → l'appelant garde un AC_Hyst persistant (pas dans acEvalThreats,
+// qui reste pur/conforme). Miroir JS = acHysteresis() dans alert_core.js.
+struct AC_Hyst { uint8_t level; uint32_t until_ms; };
+static inline uint8_t acHysteresis(uint8_t raw, uint32_t now_ms, AC_Hyst* h) {
+    if (raw > h->level) { h->level = raw; h->until_ms = now_ms + (raw == AC_RED ? 4000u : 3000u); }
+    else if (raw < h->level && now_ms >= h->until_ms) { h->level = raw; }
+    return h->level;
 }

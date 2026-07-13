@@ -36,10 +36,12 @@ function nearBoundary(o, t) {
     const vr2 = vrx * vrx + vry * vry;
     const tcpa = vr2 > 0.05 ? -(Rx * vrx + Ry * vry) / vr2 : -1;
     let dcpa = e.dist_m; if (tcpa > 0) { const cx = Rx + vrx * tcpa, cy = Ry + vry * tcpa; dcpa = Math.hypot(cx, cy); }
+    const closeRate = -(Rx * vrx + Ry * vry) / e.dist_m;          // (TAU) rapprochement radial
+    const tau = closeRate > 0.1 ? e.dist_m / closeRate : 1e9;
     const rel = e.bear_deg - o.hdg_deg, rEgg = rAft + (rFwd - rAft) * (1 + Math.cos(rel * D)) * 0.5;
-    if (m(dalt, P.vOrg) || m(dalt, P.vRed) || m(tcpa, P.tOrg) || m(tcpa, P.tRed) ||
+    if (m(dalt, P.vOrg) || m(dalt, P.vRed) || m(tau, P.tOrg) || m(tau, P.tRed) ||
         m(dcpa, P.dOrg) || m(dcpa, P.dRed) || m(e.dist_m, rEgg) || m(e.dist_m, P.floor_m) ||
-        Math.abs(vr2) < 0.06) return true;
+        Math.abs(closeRate - 0.1) < 0.05 || Math.abs(vr2) < 0.06) return true;   // + frontière du seuil de convergence radial
   }
   return false;
 }

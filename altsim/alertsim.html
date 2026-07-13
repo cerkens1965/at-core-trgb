@@ -102,6 +102,10 @@
       <span class="tag" id="tlabel">t = 0.0 s</span>
     </div>
     <input type="range" id="scrub" min="0" max="100" value="0" step="0.1">
+    <div class="row">
+      <button id="scrConnect">🔌 Connect screen</button>
+      <span class="tag" id="scrStatus">écran : —</span>
+    </div>
 
     <div class="fieldset">
       <span class="lg">✈︎ OWN (moi)</span>
@@ -276,7 +280,10 @@ let autoZoom=false, showTrace=true;
 /* ══ EXPÉRIMENTAL (simu, HORS core/firmware) : CPA 3D + hystérésis + bruit ════
    Variantes comparées au core verrouillé via toggles → on ÉVALUE avant toute
    promotion. acEvalThreats (alert_core.js) reste 0/1/2, conformance intacte. */
-let use3D=false, useHyst=true, useNoise=false, curRedAlert=false, useDowngrade=false, dgInfo=[], useTau=true;
+// (2026-07-13) Tau + hystérésis sont désormais DANS le moteur de base (alert_core.h/js) = ce que tourne le BOÎTIER.
+// Défaut : useTau=false → le sim utilise acEvalThreats de base (qui INCLUT Tau) + hystérésis → identique à l'écran.
+// Les toggles ci-dessous (3D vertical, downgrade, tau-extra via acEvalThreats3D) restent pour l'exploration seule.
+let use3D=false, useHyst=true, useNoise=false, curRedAlert=false, useDowngrade=false, dgInfo=[], useTau=false;
 
 // (A) CPA 3D : la fenêtre verticale est testée sur le Δalt PROJETÉ au tCPA
 // (fermeture verticale) → détecte tôt un intrus qui monte/descend vers ton niveau.
@@ -430,7 +437,7 @@ function drawScreen(st, eng, per, out){
   sx.beginPath();sx.arc(RCX,RCY,RR,0,7);sx.stroke(); sx.beginPath();sx.arc(RCX,RCY,RR/2,0,7);sx.stroke();
   sx.beginPath();sx.moveTo(RCX-RR,RCY);sx.lineTo(RCX+RR,RCY);sx.moveTo(RCX,RCY-RR);sx.lineTo(RCX,RCY+RR);sx.stroke();
   const pxPerM = RR/(rangeNm*NM);
-  if(showAip){ const oh=st.own.hdg*Math.PI/180, vr=rangeNm*NM*1.3;
+  if(showAip){ const oh=0, vr=rangeNm*NM*1.3;   // NORTH-UP : AIP en relèvement absolu (pas de rotation cap)
     for(const a of AIRSPACES){ if(a.bb[2]<st.own.x-vr||a.bb[0]>st.own.x+vr||a.bb[3]<st.own.y-vr||a.bb[1]>st.own.y+vr)continue;
       sx.strokeStyle=AIPCOL[a.k]||"#888"; sx.globalAlpha=0.5; sx.lineWidth=1.2;
       sx.setLineDash(a.k==="CTR"?[5,3]:(a.k==="R"||a.k==="D"||a.k==="P")?[3,2]:[]); sx.beginPath();
@@ -442,21 +449,22 @@ function drawScreen(st, eng, per, out){
   if(showEgg){ const ogs=st.own.spd*0.514444;
     let rFwd=Math.max(params.fwd_min,Math.min(params.fwd_max,ogs*params.fwd_sec)), rAft=Math.max(rFwd*0.2,params.aft_min);
     sx.strokeStyle="rgba(47,129,247,.55)";sx.setLineDash([4,4]);sx.lineWidth=1.5;sx.beginPath();
-    for(let d=0;d<=360;d+=4){const th=d*Math.PI/180,ceg=Math.cos(th),R=(rAft+(rFwd-rAft)*(1+ceg)*0.5)*pxPerM,qx=RCX+Math.sin(th)*R,qy=RCY-Math.cos(th)*R;d?sx.lineTo(qx,qy):sx.moveTo(qx,qy);}
+    const ohr=st.own.hdg*Math.PI/180;   // NORTH-UP : le lobe avant de la bulle pointe vers le CAP d'own
+    for(let d=0;d<=360;d+=4){const th=d*Math.PI/180,ceg=Math.cos(th),R=(rAft+(rFwd-rAft)*(1+ceg)*0.5)*pxPerM,a2=th+ohr,qx=RCX+Math.sin(a2)*R,qy=RCY-Math.cos(a2)*R;d?sx.lineTo(qx,qy):sx.moveTo(qx,qy);}
     sx.closePath();sx.stroke();sx.setLineDash([]);
     sx.strokeStyle="rgba(248,81,73,.4)";sx.beginPath();sx.arc(RCX,RCY,params.floor_m*pxPerM,0,7);sx.stroke();
   }
   sx.fillStyle="#67727d";sx.font="bold 13px sans-serif";sx.textAlign="center";sx.textBaseline="middle";
-  [["N",0],["E",90],["S",180],["W",270]].forEach(([lab,a])=>{const th=(a-st.own.hdg)*Math.PI/180;sx.fillText(lab,RCX+Math.sin(th)*(RR+12),RCY-Math.cos(th)*(RR+12));});
+  [["N",0],["E",90],["S",180],["W",270]].forEach(([lab,a])=>{const th=a*Math.PI/180;sx.fillText(lab,RCX+Math.sin(th)*(RR+12),RCY-Math.cos(th)*(RR+12));});   // NORTH-UP : N fixe en haut
   const redAlert=curRedAlert;   // (éventuellement hystérésis) → focus : intrus ×1,5, autres gris léger
   eng.t.forEach((e,i)=>{ let rp=e.dist_m*pxPerM; if(rp>RR+40)return;
-    const rel=(e.bear_deg-st.own.hdg)*Math.PI/180, qx=RCX+Math.sin(rel)*rp, qy=RCY-Math.cos(rel)*rp;
+    const rel=e.bear_deg*Math.PI/180, qx=RCX+Math.sin(rel)*rp, qy=RCY-Math.cos(rel)*rp;   // NORTH-UP : relèvement absolu
     let col=colOf(per[i],i), sz=17, dim=false;
     if(redAlert){ if(per[i]===AC.NONE){col="rgba(130,140,150,.5)";dim=true;} else {sz=26;} }
-    planeIcon(sx,qx,qy,e.hdg_deg-st.own.hdg,col,sz);
+    planeIcon(sx,qx,qy,e.hdg_deg,col,sz);   // cap absolu
     sx.fillStyle=dim?"rgba(110,120,130,.6)":colOf(per[i],i);sx.font="bold 11px sans-serif";sx.textAlign="left";sx.textBaseline="alphabetic";sx.fillText(e.cs,qx+sz/2+2,qy-5);
     sx.fillStyle=dim?"rgba(110,120,130,.5)":"#44515d";sx.font="10px sans-serif";const sign=e.alt_rel_100ft>=0?"+":"";sx.fillText(sign+Math.round(e.alt_rel_100ft)+"  "+(e.dist_m/NM).toFixed(1)+"nm",qx+sz/2+2,qy+8);});
-  planeIcon(sx,RCX,RCY,0,"#3fb950",20,true);
+  planeIcon(sx,RCX,RCY,st.own.hdg,"#3fb950",20,true);   // NORTH-UP : own tourné selon son cap
   sx.fillStyle="#0d1117";sx.strokeStyle="#30363d";sx.lineWidth=1;roundRect(sx,RCX-34,8,68,26,13);sx.fill();sx.stroke();
   sx.fillStyle="#e6edf3";sx.font="bold 15px sans-serif";sx.textAlign="center";sx.textBaseline="middle";sx.fillText(Math.round(st.own.hdg)+"°",RCX,22);
   sx.fillStyle="#5b6773";sx.font="12px sans-serif";sx.textAlign="left";sx.fillText(rangeNm+" nm",12,440);
@@ -480,9 +488,50 @@ function audioTick(l){ if(!audioOn||!actx)return; const now=performance.now();
   else if(l===AC.ORANGE){if(now-lastBeep>1600){beep(760,.14,.18);lastBeep=now;}} }
 
 /* boucle */
+/* ── Pont WebSerial → écran AT-VIEW physique (USB) ──────────────────────────────
+   Pousse les MÊMES trames que le boîtier (STATUS/TRAFFIC) : "S{json}"/"T{json}", précédées
+   de "SIMON" (armé) / suivies de "SIMOFF" (déconnexion). Le firmware (simSerialTick, v108)
+   les route vers parseStatus/parseTraffic → radar + moteur d'alerte + AUDIO joués au bench. */
+let scrPort=null, scrWriter=null, scrLastEmit=0; const scrEnc=new TextEncoder();
+async function scrSend(str){ if(!scrWriter)return; try{ await scrWriter.write(scrEnc.encode(str)); }catch(e){ scrDisconnect(); } }
+async function scrConnect(){
+  if(scrPort){ scrDisconnect(); return; }
+  if(!('serial' in navigator)){ alert("WebSerial non supporté — utilise Chrome ou Edge sur desktop."); return; }
+  try{
+    scrPort=await navigator.serial.requestPort();
+    await scrPort.open({baudRate:115200});
+    scrWriter=scrPort.writable.getWriter();
+    await scrSend("SIMON\n");
+    document.getElementById('scrStatus').textContent="écran : connecté";
+    document.getElementById('scrConnect').textContent="⛔ Disconnect";
+  }catch(e){ scrPort=null; scrWriter=null; document.getElementById('scrStatus').textContent="écran : erreur"; }
+}
+async function scrDisconnect(){
+  try{ await scrSend("SIMOFF\n"); }catch(e){}
+  try{ if(scrWriter) scrWriter.releaseLock(); }catch(e){}
+  try{ if(scrPort) await scrPort.close(); }catch(e){}
+  scrPort=null; scrWriter=null;
+  document.getElementById('scrStatus').textContent="écran : —";
+  document.getElementById('scrConnect').textContent="🔌 Connect screen";
+}
+function scrEmit(st, eng){
+  if(!scrWriter) return;
+  const now=performance.now(); if(now-scrLastEmit<100) return; scrLastEmit=now;   // ~10 Hz
+  const S={ spd:Math.round(eng.own.spd_kmh), hdg:Math.round(eng.own.hdg_deg), flt_st:1,
+            gps_fix:true, gps_sat:10, csq:20, ss:true, ssm:0, sd_ok:true,
+            alt:Math.round(st.own.alt), lat:0, lon:0, bat:80 };
+  const T={ count:eng.t.length, t:eng.t.map(e=>({ cs:String(e.cs||"SIM").slice(0,8),
+            d:Math.round(e.dist_m), a:+(e.alt_rel_100ft.toFixed(2)), b:Math.round(e.bear_deg),
+            c:Math.round(e.hdg_deg), s:Math.round(e.spd_kt), v:1, tp:0 })) };
+  scrSend("S"+JSON.stringify(S)+"\n"); scrSend("T"+JSON.stringify(T)+"\n");   // 2 écritures séparées (évite un burst > FIFO CDC)
+}
+document.getElementById('scrConnect').addEventListener('click', scrConnect);
+window.addEventListener('beforeunload', ()=>{ if(scrPort) scrDisconnect(); });
+
 function tick(now){ const dt=lastRAF?(now-lastRAF)/1000:0; lastRAF=now;
   if(playing){ simT+=dt*speed; if(simT>=active.dur){simT=active.dur;playing=false;document.getElementById('play').textContent="▶ Play";} }
   const st=stateAt(simT), eng=buildEngineInput(st);
+  scrEmit(st, eng);   // (v108) miroir vers l'écran physique si connecté (WebSerial)
   const inT = useNoise? applyNoise(eng.t, now) : eng.t;                       // (D) bruit vu par le moteur
   const use3Deng = use3D || useDowngrade || useTau;                           // 3D/downgrade/tau → variante exp.
   const {per,out}=(use3Deng?acEvalThreats3D:acEvalThreats)(eng.own,inT,params);

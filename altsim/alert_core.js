@@ -40,13 +40,17 @@
       const tcpa = (vr2 > 0.05) ? -(Rx * vrx + Ry * vry) / vr2 : -1;
       let dcpa = e.dist_m; if (tcpa > 0) { const cx = Rx + vrx * tcpa, cy = Ry + vry * tcpa; dcpa = Math.hypot(cx, cy); }
       const closing = Math.trunc(Math.sqrt(vr2) / 0.514444);
-      const conv = tcpa > 0;
+      // TAU (2026-07-13) : rapprochement RADIAL signé → temps = dist/rapprochement ; abeam/éloigne → tau ∞ → pas d'alerte.
+      const closeRate = -(Rx * vrx + Ry * vry) / e.dist_m;
+      const tau = (closeRate > 0.1) ? e.dist_m / closeRate : 1e9;
+      const converging = (closeRate > 0.1);
+      const T = tau;
       const rel = e.bear_deg - o.hdg_deg, ceg = Math.cos(rel * D);
       const rEgg = rAft + (rFwd - rAft) * (1 + ceg) * 0.5;
       let lvl = AC.NONE;
-      if (dalt <= P.vOrg && conv && tcpa <= P.tOrg && dcpa <= P.dOrg) lvl = AC.ORANGE;
-      if (dalt <= P.vRed && conv && tcpa <= P.tRed && dcpa <= P.dRed) lvl = AC.RED;
-      if (dalt <= P.vOrg && conv && e.dist_m <= rEgg && lvl < AC.ORANGE) lvl = AC.ORANGE;
+      if (dalt <= P.vOrg && converging && T <= P.tOrg && dcpa <= P.dOrg) lvl = AC.ORANGE;
+      if (dalt <= P.vRed && converging && T <= P.tRed && dcpa <= P.dRed) lvl = AC.RED;
+      if (dalt <= P.vOrg && converging && e.dist_m <= rEgg && T <= P.tOrg && lvl < AC.ORANGE) lvl = AC.ORANGE;
       if (dalt <= P.vRed && e.dist_m <= P.floor_m) lvl = AC.RED;
       per[i] = lvl;
       e._tcpa = tcpa; e._dcpa = dcpa;
@@ -60,7 +64,15 @@
     return { per, out };
   }
 
-  const api = { AC, NM, acDefaultParams, acEvalThreats };
+  // Hystérésis temporelle (post-filtre du niveau) — miroir de acHysteresis() dans alert_core.h.
+  // Monte direct, redescend après maintien (ROUGE 4 s / autre 3 s). st = {level, until} persistant.
+  function acHysteresis(raw, nowMs, st) {
+    if (raw > st.level) { st.level = raw; st.until = nowMs + (raw === AC.RED ? 4000 : 3000); }
+    else if (raw < st.level && nowMs >= st.until) { st.level = raw; }
+    return st.level;
+  }
+
+  const api = { AC, NM, acDefaultParams, acEvalThreats, acHysteresis };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;   // node
-  else { root.AlertCore = api; root.AC = AC; root.NM = NM; root.acDefaultParams = acDefaultParams; root.acEvalThreats = acEvalThreats; }
+  else { root.AlertCore = api; root.AC = AC; root.NM = NM; root.acDefaultParams = acDefaultParams; root.acEvalThreats = acEvalThreats; root.acHysteresis = acHysteresis; }
 })(typeof window !== 'undefined' ? window : globalThis);
