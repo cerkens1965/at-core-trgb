@@ -190,7 +190,7 @@ Scan filtre actuellement sur nom `"AT-CORE NimBLE"`.
 | AUTH | `6E400007-...` | **write** | codes pilote/instructeur (V2 popup) |
 | PILOTS | `6E400008-...` | notify | liste pilotes JSON chunké (Firestore). Format : `[{c,n,r,t,i}, ...]` ou `{"_date":"YYYY-MM-DD","pilots":[{...}]}` (wrapper recommandé pour traçabilité). Protocole chunks : `0x01`=start, `0x02`=data, `0x03`=end (déclenche parse). Résilient : DB préservée si JSON invalide / array vide. |
 | CONFIG | `6E400009-...` | **write** | identité aéronef `{r,t,h}` — auto-push depuis `acSave()` (V1) |
-| CONTROL | `6E40000A-...` | **write** | `{"cmd":"bind"\|"unpair"}` (appairage) + `{"cmd":"wifi","s","p"}` / `{"cmd":"upload"}` (Maintenance — Modèle 1). Helpers `sendCtl()` / `sendWifiCreds()` |
+| CONTROL | `6E40000A-...` | **write** | `{"cmd":"bind"\|"unpair"}` (appairage) + `{"cmd":"wifi","s","p"}` / `{"cmd":"upload"}` (Maintenance — Modèle 1) + `{"cmd":"vfilt","ft"}` + **`{"cmd":"cloud","on":0\|1}` (v119, toggle upload cloud)**. Helpers `sendCtl()` / `sendWifiCreds()` / `sendVfilt()` / `sendCloud()` |
 
 Service UUID AT-CORE : `4FAFC201-1FB5-459E-8FCC-C5C9C331914B`
 
@@ -402,3 +402,21 @@ l'upload AIP). Partition `default_16MB.csv` = **2 slots OTA** → aucune migrati
 ### Bloqueur en cours
 - ⚠ Côté AT-CORE : la DB pilotes Firebase n'est pas encore poussée via BLE CHR_PILOTS.
   Côté AT-VIEW tout est prêt. Travail en cours sur le repo AT-CORE pour activer le push.
+
+## Toggle upload cloud — Settings → SYSTEM → Diagnostic (ATV v119, 2026-07-13)
+
+Bouton **« Cloud: ON/OFF »** ajouté à la page **DIAGNOSTIC** (à côté de Test WiFi / Reboot box /
+Unpair box). Pilote l'upload Firebase des CSV **côté boîtier** (miroir de l'AT-CORE v66) :
+
+- **Tap** → `sendCloud(!cup)` = BLE `{"cmd":"cloud","on":0|1}` sur CHR_CONTROL → l'AT-CORE persiste
+  `unit/cloud_up` et coupe/arme tout l'upload auto (Phase A atterrissage + §B uploader sol).
+- **État réel** lu dans STATUS **`cup`** (0/1) → champ `StatusData.cup` : le label reflète l'état
+  boîtier (**vert = ON**, gris = OFF), refresh 1 Hz (`diagCloudBtn()` dans le hook périodique) +
+  màj optimiste au tap. Défaut boîtier = **OFF**.
+- **Motif** : tant que les **antennes WiFi ne sont pas actives**, l'upload OFF évite que le boîtier
+  tente le WiFi STA en boucle (blocage / kill-BLE + reboot). Les CSV restent sur la SD.
+- Le bouton `volBtn` retourne l'objet → stocké dans `g_diag_cloud` (remis à `nullptr` à la
+  fermeture de la page). Layout : Diagnostic passe à 5 boutons (Close descendu d'une rangée),
+  branches T4-S3 (2 colonnes) et rond/carré (1 colonne) mises à jour.
+
+⚠️ Build **`-dev`** non publié Storage → pas d'OTA flotte tant que non béni en canal client (vert).
