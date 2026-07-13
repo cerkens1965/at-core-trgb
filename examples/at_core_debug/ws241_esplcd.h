@@ -25,7 +25,7 @@
 #define WS241_LCD_HOST   SPI2_HOST
 #define WS241_LCD_W      600
 #define WS241_LCD_H      450   // dalle 2.41 = 600×450 (spec Waveshare ; natif SH8601 450×600 portrait)
-#define WS241_LCD_YGAP   0     // offset 0 — le "trop bas" venait du +16 de la démo, pas de la hauteur
+#define WS241_LCD_YGAP   16    // offset EXACT +16 : la dalle démarre en colonne 16 (CASET 0x0010→0x01D1, natif portrait 450 large offset +16). En paysage (swap_xy) ça tombe sur l'axe vertical → sans ça, contenu remonté de 16 px + bande noire de 16 px en bas (bug v97 qui l'avait mis à 0).
 
 // Init SH8601 v2.0.1 — COPIE EXACTE de lcd_init_cmds[] de la démo (AMOLED_Rotate=Rotate_90).
 static const sh8601_lcd_init_cmd_t ws241_lcd_init_cmds[] = {
