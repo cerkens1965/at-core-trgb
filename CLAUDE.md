@@ -11,6 +11,28 @@
 | SD | Slot natif SD_MMC (SDIO 1-bit) — EN=7, SCK=39, CMD=40, DAT=38 |
 | BLE | Client — se connecte à AT-CORE (NimBLE) |
 
+## ⚠️⚠️ HEAP Bluedroid WS-241 — ROOT CAUSE de quasi TOUS les bugs BLE écran (fix v138, 2026-07-15)
+
+**Le WS-241 tourne en Bluedroid** (Arduino BLE lib, ≠ NimBLE), qui **EXIGE de la RAM INTERNE** (il ne peut PAS
+utiliser la PSRAM). Les buffers de dessin LVGL (`ws241_esplcd.h`) étaient en **DOUBLE buffer 1/10 d'écran, en RAM
+INTERNE DMA = ~108 Ko** → il ne restait presque rien pour Bluedroid → **`E BLE_INIT: Malloc failed` EN BOUCLE**.
+
+**Symptômes que ça causait (TOUS la même racine — on a perdu une journée à traiter les symptômes)** :
+- **writes écran→boîtier qui échouent** (`{"cmd":"portal"}`, setreg immat, cloud, upload) : la commande « part »
+  (`[BLE] CTRL ...`) mais **pas de `[BLE] OK`**, le boîtier ne reçoit rien (« Portal requested » vert mais AP
+  jamais levée ; immat inchangée). ⚠️ Ce n'est **NI** `response=false` (ignoré) **NI** `response=true` (fige) — c'est
+  le **heap**.
+- **crash `connectBLE` / boot-loop** à la connexion (surtout AP GDL90 up) : `FreeRTOS::Semaphore`→`xQueueGenericSend`
+  = même OOM Bluedroid.
+- **figes**, `Malloc failed`, écran « stuck ».
+- ⚠️ **Le monitoring série USB-CDC de l'écran AGGRAVE le heap** → déclenche `Malloc failed` à lui seul → **fausse
+  tous les diagnostics** (bug apparaît sous monitoring, disparaît sur powerbank).
+
+**FIX v138 = `ws241_esplcd.h` : buffer SIMPLE 1/20 (~26 Ko)** au lieu du double 1/10 → **libère ~82 Ko de RAM
+interne** pour Bluedroid. Rendu imperceptiblement + lent. ✅ Validé : `Malloc failed = 0` **même sous monitoring USB**,
+bouton « Open portal » + AP OK, tout écran→boîtier réparé. **Si un bug BLE écran réapparaît → penser HEAP d'abord**
+(vrai filet définitif = migrer Bluedroid→NimBLE, mais le fix buffer suffit).
+
 ### Variantes T-RGB supportées
 
 Pinout identique entre toutes les variantes (`src/utilities.h`). `panel.begin()` sans
@@ -420,3 +442,62 @@ Unpair box). Pilote l'upload Firebase des CSV **côté boîtier** (miroir de l'A
   branches T4-S3 (2 colonnes) et rond/carré (1 colonne) mises à jour.
 
 ⚠️ Build **`-dev`** non publié Storage → pas d'OTA flotte tant que non béni en canal client (vert).
+
+## Toggle GDL90 ON/OFF — Settings → SYSTEM → Diagnostic (ATV v139, 2026-07-15)
+
+Bouton **« GDL90: ON/OFF »** à côté de « Cloud » dans DIAGNOSTIC — le pilote bascule le mode **VOL/SOL**
+au doigt, sans console. Calqué exactement sur le toggle Cloud (v119) :
+
+- **Tap** → `sendGdl(!gdl)` = BLE `{"cmd":"gdl90","on":0|1}` sur CHR_CONTROL → le boîtier lève/ferme
+  l'AP `ATCORE-GDL90-<box>` (SkyDemon) et persiste NVS `unit/gdl90`.
+- **État réel** lu dans STATUS **`gdl`** (0/1) → `StatusData.gdl` : label **vert = ON (mode VOL)**,
+  gris = OFF (mode SOL), refresh via `diagGdlBtn()` dans le hook périodique + màj optimiste au tap.
+- **Usage** : **GDL90 ON avant de voler** (SkyDemon reçoit le trafic, reste ON persisté) · **OFF au sol**
+  pour libérer le WiFi (OTA/upload — AP GDL90 ↔ STA mutuellement exclusifs).
+- Layout Diagnostic passe à 6 boutons (GDL90 + Close en bas ; T4-S3 2 colonnes, rond/carré 1 colonne).
+
+⚠️ **Prérequis = le fix heap v138** : avant, les writes CHR_CONTROL de l'écran (dont ce toggle) échouaient
+silencieusement (Bluedroid `Malloc failed`). Depuis v138 (buffers LVGL réduits → +82 Ko), tout écran→boîtier passe.
+
+## Page de saisie hotspot WiFi — Settings → SYSTEM → WIFI (ATV v130→v133, 2026-07-14)
+
+**But** : que **n'importe quel opérateur** provisionne **son** hotspot téléphone pour l'OTA cloud
+**depuis l'écran**, sans USB ni portail (l'AP portail est instable si un écran est connecté en BLE,
+cf saga AT-CORE v70-v76). La tuile **SYSTEM → WIFI** (`_open_wifisetup_cb`) ouvre **`showHotspotEntry()`** :
+
+- Champs **SSID** + **Password** au **clavier LVGL** (toujours visible sur la page dédiée ; `_maint_ta_cb`
+  bascule la cible SSID↔password au tap) → bouton **« Save & send »** = `_maint_save_cb` →
+  `unitSaveHotspot()` (NVS `hs_ssid`/`hs_pass`) **+ `sendWifiCreds()`** = BLE **`{"cmd":"wifi","s","p"}`**
+  sur CHR_CONTROL → le boîtier persiste en NVS. Feedback honnête **« Sent »** (poussé BLE) / « Saved (offline) ».
+- Repli **« Web portal »** (`_hotspot_useportal_cb` → `showWifiSetupInfo`) : boîtier sans écran / SSID à espaces.
+- **Réutilise 100%** des widgets/callbacks du (feu) Maintenance (`g_maint_ov` + `_maint_save_cb`/`_maint_ta_cb`,
+  restés présents). Le Save est un **bouton séparé** (ne détruit pas le clavier dans son event) → **PAS** le
+  freeze use-after-free de l'éditeur immat clavier (v120-127, abandonné). ✅ **Validé hardware WS-241 2026-07-14**
+  (« Sent », fluide). Miroir boîtier = **FW v78** (console `wifi <SSID> <PASS>`).
+- ⚠️ **`Scan` RETIRÉ** (v131) : `WiFi.scanNetworks()` allume le **WiFi STA sur un écran déjà connecté en BLE**
+  (Bluedroid) → coexistence WiFi+BLE fragile sur WS-241 → **HANG**. On saisit le SSID au clavier.
+
+### ⚠️ GOTCHA `lv_keyboard` invisible (la « bêtise » v130-132, corrigée v133)
+
+`lv_keyboard_create()` **s'auto-aligne `LV_ALIGN_BOTTOM_MID`** en interne. Positionner le clavier avec
+**`lv_obj_set_pos()` NE VIDE PAS cet align** → à la passe de layout l'align interne gagne → clavier
+mal placé / **hors zone visible** (les champs/boutons, eux, s'affichaient → fausse piste « flush WS-241 »).
+**Fix : `lv_obj_align(kb, LV_ALIGN_BOTTOM_MID, 0, 0)`** (comme la branche ronde `#else` qui marchait déjà)
++ overlay hauteur **`SCR_H`** (450) et non 480 (sinon 30 px sous l'écran). Réflexe : **toujours `lv_obj_align`
+pour un `lv_keyboard`, jamais `set_pos`**.
+
+### GDL90 (AP WiFi boîtier) ↔ écran BLE — coexistence DURCIE côté boîtier (FW v80, 2026-07-14)
+
+Découvert en testant la page : **quand GDL90 est ON sur le boîtier** (WiFi AP + BLE + LTE), l'écran **boot-loopait à la
+connexion BLE** — crash heap Bluedroid dans `connectBLE()` (`FreeRTOS::Semaphore` → `xQueueGenericSend` sur queue nulle =
+création sémaphore KO faute de heap ; l'AP GDL90 affame le BLE → **découverte GATT** dégradée). **Le crash = la DÉCOUVERTE
+pendant que l'AP est up ; l'AP up pendant écran DÉJÀ connecté = OK** (le steady-state notify n'alloue pas de sémaphore par
+caractéristique).
+- **Fix côté BOÎTIER (FW v80, PAS côté écran)** : `TaskGDL90` **diffère la 1ʳᵉ levée de l'AP** au boot tant que l'écran ne
+  s'est pas connecté + stabilisé (6 s) → l'écran fait sa découverte SANS AP, puis l'AP monte → l'écran reste connecté.
+  ✅ Validé hardware (`ble=1` stable, 0 déconnexion, AP levée à ~17 s). GDL90 + écran tiennent ENSEMBLE.
+- ⚠️ **Limite résiduelle** : un **reboot de l'écran EN VOL** (AP déjà up) re-déclencherait le crash de découverte (rare).
+  Le vrai filet définitif = **migrer le client BLE de l'écran de Bluedroid → NimBLE** (heap ×, comme le boîtier) — TODO si
+  le cas se présente.
+- ⚠️ **Ne pas monitorer le série USB-CDC de l'écran pendant un connect BLE** : ça aggrave la marge heap et **fausse le
+  diagnostic** (le boot-loop apparaissait sous monitoring, disparaissait sur powerbank seul — piège rencontré ce jour).

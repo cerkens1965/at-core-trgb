@@ -164,13 +164,17 @@ public:
 
 static inline void beginLvglHelper(WS241_Panel &p, bool debug = false) {
     lv_init();
-    // Double buffer MALLOC_CAP_DMA, taille H_RES*V_RES/10 (démo Waveshare exacte).
-    const int BUF_H = WS241_LCD_H / 10;                 // 45 lignes
+    // (v138) Buffer SIMPLE 1/20 au lieu du DOUBLE 1/10 (~108 Ko) → libère ~82 Ko de RAM INTERNE.
+    // ROOT FIX : le double buffer 1/10 en RAM DMA affamait le contrôleur Bluetooth (Bluedroid ne
+    // peut PAS utiliser la PSRAM) → `BLE_INIT: Malloc failed` → writes écran→boîtier qui échouaient
+    // (portail/immat/cloud), crashs de reconnexion, figes. Rendu imperceptiblement plus lent (LVGL
+    // flushe en plus de petits morceaux — OK sur cette UI). Buffer simple = LVGL attend le flush DMA.
+    const int BUF_H = WS241_LCD_H / 20;                 // ~22 lignes
     size_t px = (size_t)WS241_LCD_W * BUF_H;
     ws_buf1 = (lv_color_t *)heap_caps_malloc(px * sizeof(lv_color_t), MALLOC_CAP_DMA);
-    ws_buf2 = (lv_color_t *)heap_caps_malloc(px * sizeof(lv_color_t), MALLOC_CAP_DMA);
-    assert(ws_buf1 && ws_buf2);
-    lv_disp_draw_buf_init(&ws_draw_buf, ws_buf1, ws_buf2, px);
+    ws_buf2 = nullptr;
+    assert(ws_buf1);
+    lv_disp_draw_buf_init(&ws_draw_buf, ws_buf1, nullptr, px);
     lv_disp_drv_init(&ws_disp_drv);
     ws_disp_drv.hor_res  = WS241_LCD_W;
     ws_disp_drv.ver_res  = WS241_LCD_H;
