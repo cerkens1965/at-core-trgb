@@ -153,8 +153,10 @@ public:
     }
     bool installSD() { return false; }
     void setBrightness(uint8_t v) {
-        uint8_t b = (v >= 16) ? 255 : (uint8_t)(v * 17);
-        if (ws_io) esp_lcd_panel_io_tx_param(ws_io, 0x51, &b, 1);
+        // v est DÉJÀ en 0-255 (panelBright() a fait le mapping 0-16 → ×17). NE PAS re-mapper :
+        // le double ×17 faisait retomber tout niveau ≥1 (≥17 après panelBright) sur ≥16 → 255
+        // → brightness saturé au max, slider sans effet. Envoi direct de la commande 0x51.
+        if (ws_io) esp_lcd_panel_io_tx_param(ws_io, 0x51, &v, 1);
     }
     const char *getTouchModelName() { return _touch_ok ? "FT6336/FT5x06" : "touch FAIL"; }
     int16_t width()  { return WS241_LCD_W; }
