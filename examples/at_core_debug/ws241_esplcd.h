@@ -42,6 +42,8 @@ static const sh8601_lcd_init_cmd_t ws241_lcd_init_cmds[] = {
     {0x2B, (uint8_t[]){0x00, 0x00, 0x02, 0x57}, 4, 0},
     {0x29, (uint8_t[]){0x00}, 0, 10},
     {0x36, (uint8_t[]){0x30}, 1, 0},
+    {0x53, (uint8_t[]){0x20}, 1, 0},   // WRCTRLD BCTRL=1 : active le bloc brightness (comme le
+                                        // vendor_specific_init_default du driver) → 0x51 pris en compte.
     {0x51, (uint8_t[]){0xFF}, 1, 0},
 };
 
@@ -153,10 +155,12 @@ public:
     }
     bool installSD() { return false; }
     void setBrightness(uint8_t v) {
-        // v est DÉJÀ en 0-255 (panelBright() a fait le mapping 0-16 → ×17). NE PAS re-mapper :
-        // le double ×17 faisait retomber tout niveau ≥1 (≥17 après panelBright) sur ≥16 → 255
-        // → brightness saturé au max, slider sans effet. Envoi direct de la commande 0x51.
-        if (ws_io) esp_lcd_panel_io_tx_param(ws_io, 0x51, &v, 1);
+        // ⚠️ CAUSE RACINE du « slider sans effet » : le driver SH8601 (esp_lcd_sh8601_ws241.c,
+        // tx_param) transforme CHAQUE commande en format QSPI = (cmd<<8)|(0x02<<24). Les commandes
+        // d'init passent par là. Un appel DIRECT à esp_lcd_panel_io_tx_param avec le cmd BRUT (0x51)
+        // envoie un mauvais format → la dalle l'IGNORE (SPI OK mais aucun effet). On applique la
+        // MÊME transformation ici. v est déjà en 0-255 (panelBright fait le mapping 0-16 → ×17).
+        if (ws_io) esp_lcd_panel_io_tx_param(ws_io, ((uint32_t)0x51 << 8) | ((uint32_t)0x02 << 24), &v, 1);
     }
     const char *getTouchModelName() { return _touch_ok ? "FT6336/FT5x06" : "touch FAIL"; }
     int16_t width()  { return WS241_LCD_W; }
