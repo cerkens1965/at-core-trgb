@@ -120,14 +120,16 @@
 
     <div class="row">
       <label class="sl" style="flex:1"><span>Vitesse sim ×<b id="spdv">1</b></span><input type="range" id="speed" min="0.25" max="8" step="0.25" value="1"></label>
-      <label class="sl" style="flex:1"><span>Radar <b id="rngv">8</b> nm</span><input type="range" id="range" min="2" max="16" step="1" value="8"></label>
+      <label class="sl" style="flex:1"><span>Radar <b id="rngv">8</b> nm</span><input type="range" id="range" min="0.5" max="16" step="0.5" value="8"></label>
     </div>
-    <label class="sl"><span>Plan (live) <b id="lrngv">15</b> nm</span><input type="range" id="lrange" min="4" max="60" step="1" value="15"></label>
+    <label class="sl"><span>Plan (live) <b id="lrngv">15</b> nm</span><input type="range" id="lrange" min="1" max="60" step="1" value="15"></label>
     <div class="row">
       <span class="toggle"><input type="checkbox" id="audio"> 🔊 Son</span>
       <span class="toggle"><input type="checkbox" id="egg" checked> 🥚 Bulle</span>
       <span class="toggle"><input type="checkbox" id="vec" checked> ➜ Vec.</span>
       <span class="toggle"><input type="checkbox" id="aip" checked> 🗺️ AIP</span>
+      <span class="toggle"><input type="checkbox" id="map" checked> 🛣️ Carte</span>
+      <span class="toggle"><input type="checkbox" id="grid"> 📐 Grille</span>
       <span class="toggle"><input type="checkbox" id="autoz"> 🔍 Auto-zoom</span>
       <span class="toggle"><input type="checkbox" id="trace" checked> 〜 Trace</span>
     </div>
@@ -165,7 +167,9 @@
 
 <script src="alert_core.js"></script>
 <script src="aip_ebby.js"></script>
+<script src="map_ebby.js"></script>
 <script src="flights_default.js"></script>
+<script src="flights_ebby16.js"></script>
 <script>
 /* Moteur : AC / NM / acDefaultParams / acEvalThreats via alert_core.js (miroir de alert_core.h). */
 
@@ -180,6 +184,14 @@ if(window.AIP){
     const en=a.c.map(([lo,la])=>{const p=llToEN(lo,la); if(p.x<xs)xs=p.x;if(p.x>xM)xM=p.x;if(p.y<ys)ys=p.y;if(p.y>yM)yM=p.y; return p;});
     return {n:a.n,k:a.k,u:a.u,l:a.l,en,bb:[xs,ys,xM,yM]}; });
   AIRPORTS = window.AIP.airports.map(a=>({n:a.n,i:a.i,t:a.t,...llToEN(a.x,a.y)}));
+}
+// Carte légère (OSM) précalculée en repère EN + bbox (culling), comme l'AIP.
+let MAP={roads:[],rivers:[],towns:[]};
+if(window.BASEMAP){
+  const conv=(seg)=>{let xs=1e18,xM=-1e18,ys=1e18,yM=-1e18;const en=seg.map(([lo,la])=>{const p=llToEN(lo,la);if(p.x<xs)xs=p.x;if(p.x>xM)xM=p.x;if(p.y<ys)ys=p.y;if(p.y>yM)yM=p.y;return p;});return {en,bb:[xs,ys,xM,yM]};};
+  MAP.roads =window.BASEMAP.roads.map(conv);
+  MAP.rivers=window.BASEMAP.rivers.map(conv);
+  MAP.towns =window.BASEMAP.towns.map(([lo,la,nm,cat])=>({...llToEN(lo,la),nm,cat}));
 }
 
 /* ── Scénarios : aéronefs = params éditables {x0,y0,alt,hdg,spd,vfpm} ──────── */
@@ -204,7 +216,7 @@ let csvOwnData=null, csvIntData=null, logData=null;
 /* état */
 let playing=false, simT=0, lastRAF=0, speed=1, rangeNm=8, liveNm=15;
 let params=acDefaultParams();
-let audioOn=false, showEgg=true, showVec=true, showAip=true;
+let audioOn=false, showEgg=true, showVec=true, showAip=true, showGrid=false, showMap=true;
 
 function stateAt(t){
   if(active.log && logData){ const L=logData; let i=0; while(i<L.snaps.length-1 && L.snaps[i+1].t<=t)i++;
@@ -370,6 +382,32 @@ function drawLive(st, eng, per){
   const X=(x)=>cx+(x-st.own.x)*sc, Y=(y)=>cy-(y-st.own.y)*sc;
   const mx=halfM*W/Math.min(W,H)+2000, my=halfM*H/Math.min(W,H)+2000;
   const vb=[st.own.x-mx,st.own.y-my,st.own.x+mx,st.own.y+my];
+  // CARTE LÉGÈRE OSM (couche du fond) : rivières + routes majeures + villes. Cull par bbox.
+  if(showMap){
+    const vis=(bb)=>!(bb[2]<vb[0]||bb[0]>vb[2]||bb[3]<vb[1]||bb[1]>vb[3]);
+    lx.setLineDash([]); lx.lineJoin="round"; lx.lineCap="round";
+    lx.strokeStyle="rgba(120,175,225,.55)"; lx.lineWidth=1.6;   // rivières (bleu)
+    for(const r of MAP.rivers){ if(!vis(r.bb))continue; lx.beginPath(); r.en.forEach((p,i)=>{const sp=X(p.x),sq=Y(p.y);i?lx.lineTo(sp,sq):lx.moveTo(sp,sq);}); lx.stroke(); }
+    lx.strokeStyle="rgba(190,150,90,.6)"; lx.lineWidth=1.4;      // autoroutes/voies rapides (ocre)
+    for(const r of MAP.roads){ if(!vis(r.bb))continue; lx.beginPath(); r.en.forEach((p,i)=>{const sp=X(p.x),sq=Y(p.y);i?lx.lineTo(sp,sq):lx.moveTo(sp,sq);}); lx.stroke(); }
+    // villes : point + nom (villes toujours, bourgs si zoom serré)
+    lx.textAlign="left"; lx.textBaseline="middle";
+    for(const t of MAP.towns){ if(t.x<vb[0]||t.x>vb[2]||t.y<vb[1]||t.y>vb[3])continue; if(t.cat===0 && liveNm>18)continue;
+      const sp=X(t.x),sq=Y(t.y); const big=t.cat===1;
+      lx.fillStyle="rgba(90,90,95,.75)"; lx.beginPath(); lx.arc(sp,sq,big?3:2,0,7); lx.fill();
+      if(liveNm<=(big?45:14)){ lx.fillStyle="rgba(60,60,65,.85)"; lx.font=(big?"bold 11px":"10px")+" sans-serif"; lx.fillText(t.nm,sp+5,sq); } }
+  }
+  // Carte légère = GRATICULE lat/lon (offline). Pas adaptatif au zoom (1'..10'), sous l'AIP.
+  if(showGrid){
+    const toLat=(y)=>ORIGIN.lat + y/RE*180/Math.PI, toLon=(x)=>ORIGIN.lon + x/(RE*Math.cos(LAT0))*180/Math.PI;
+    const step=(liveNm<=3?1:liveNm<=8?2:liveNm<=20?5:10)/60;   // pas en minutes d'arc
+    const fmt=(d)=>{const g=Math.floor(Math.abs(d)),m=Math.round((Math.abs(d)-g)*60);return g+"°"+String(m).padStart(2,'0')+"'";};
+    lx.setLineDash([]); lx.lineWidth=1; lx.strokeStyle="rgba(70,100,140,.16)"; lx.fillStyle="rgba(70,100,140,.55)"; lx.font="9px sans-serif"; lx.textBaseline="alphabetic";
+    for(let lo=Math.ceil(toLon(vb[0])/step)*step; lo<=toLon(vb[2]); lo+=step){ const px=X(llToEN(lo,ORIGIN.lat).x);
+      lx.beginPath();lx.moveTo(px,0);lx.lineTo(px,H);lx.stroke(); lx.textAlign="left"; lx.fillText(fmt(lo),px+2,11); }
+    for(let la=Math.ceil(toLat(vb[1])/step)*step; la<=toLat(vb[3]); la+=step){ const py=Y(llToEN(ORIGIN.lon,la).y);
+      lx.beginPath();lx.moveTo(0,py);lx.lineTo(W,py);lx.stroke(); lx.textAlign="left"; lx.fillText(fmt(la),2,py-2); }
+  }
   if(showAip){ lx.lineWidth=1.2;
     for(const a of AIRSPACES){ if(a.bb[2]<vb[0]||a.bb[0]>vb[2]||a.bb[3]<vb[1]||a.bb[1]>vb[3])continue;
       lx.strokeStyle=AIPCOL[a.k]||"#888"; lx.setLineDash(a.k==="CTR"?[5,3]:(a.k==="R"||a.k==="D"||a.k==="P")?[3,2]:[]);
@@ -468,16 +506,42 @@ function drawScreen(st, eng, per, out){
   sx.fillStyle="#0d1117";sx.strokeStyle="#30363d";sx.lineWidth=1;roundRect(sx,RCX-34,8,68,26,13);sx.fill();sx.stroke();
   sx.fillStyle="#e6edf3";sx.font="bold 15px sans-serif";sx.textAlign="center";sx.textBaseline="middle";sx.fillText(Math.round(st.own.hdg)+"°",RCX,22);
   sx.fillStyle="#5b6773";sx.font="12px sans-serif";sx.textAlign="left";sx.fillText(rangeNm+" nm",12,440);
-  drawAlertOverlay(out);
+  drawAlertOverlay(out, eng);
 }
 function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
-function drawAlertOverlay(out){ if(out.level===AC.NONE) return;
-  const txt="TFC "+out.clock+"h  "+(out.dist_m/NM).toFixed(1)+"nm  "+(out.dalt_ft>=0?"+":"")+out.dalt_ft+"ft  clos "+out.closing_kt+"kt";
-  if(out.level===AC.RED){ const on=(Math.floor(performance.now()/220)%2)===0;const w=450,h=66,x=(600-w)/2,y=450-90;
-    sx.fillStyle=on?"#f85149":"#ffffff";roundRect(sx,x,y,w,h,10);sx.fill();
-    sx.fillStyle=on?"#ffffff":"#f85149";sx.font="bold 22px sans-serif";sx.textAlign="center";sx.textBaseline="middle";sx.fillText(txt,300,y+h/2);
-  } else { const w=300,h=44,x=(600-w)/2,y=450-72;sx.fillStyle="#e3b341";roundRect(sx,x,y,w,h,10);sx.fill();
-    sx.fillStyle="#111";sx.font="bold 15px sans-serif";sx.textAlign="center";sx.textBaseline="middle";sx.fillText(txt,300,y+h/2); } }
+function drawAlertOverlay(out, eng){ if(out.level===AC.NONE) return;
+  const red = out.level===AC.RED;
+  const on  = (Math.floor(performance.now()/220)%2)===0;
+  const AR="#f85149", AO="#e3b341";
+  const T = (out.idx>=0 && eng && out.idx<eng.t.length) ? eng.t[out.idx] : null;
+  // 1) SECTEUR D'ALERTE : illumine le quart de cadran où est la menace (±45° autour du relèvement),
+  //    dégradé qui brille vers le bord, ROUGE pulsé / AMBRE. Dit « où regarder dehors ».
+  if(T){
+    const bear=T.bear_deg*Math.PI/180, half=45*Math.PI/180, base=red?"248,81,73":"227,179,65";
+    const a=red?(on?0.55:0.26):0.30;
+    const g=sx.createRadialGradient(RCX,RCY,RR*0.12, RCX,RCY,RR);
+    g.addColorStop(0,`rgba(${base},0)`); g.addColorStop(0.55,`rgba(${base},${(a*0.45).toFixed(3)})`); g.addColorStop(1,`rgba(${base},${a})`);
+    sx.beginPath(); sx.moveTo(RCX,RCY);
+    for(let d=-half; d<=half+1e-3; d+=Math.PI/72){ const a2=bear+d; sx.lineTo(RCX+Math.sin(a2)*RR, RCY-Math.cos(a2)*RR); }
+    sx.closePath(); sx.fillStyle=g; sx.fill();
+    sx.beginPath();                                   // liseré sur l'arc extérieur du secteur
+    for(let d=-half; d<=half+1e-3; d+=Math.PI/72){ const a2=bear+d; const p=RCX+Math.sin(a2)*RR, q=RCY-Math.cos(a2)*RR; (d===-half)?sx.moveTo(p,q):sx.lineTo(p,q); }
+    sx.strokeStyle=red?(on?AR:"rgba(248,81,73,.4)"):AO; sx.lineWidth=red?4:3; sx.lineCap="round"; sx.stroke(); sx.lineCap="butt";
+  }
+  // 2) ANNEAU pulsé autour de la CIBLE (conservé : la menace précise).
+  if(T){ const pxPerM=RR/(rangeNm*NM), rp=Math.min(T.dist_m*pxPerM, RR-6), rel=T.bear_deg*Math.PI/180;
+    const tx=RCX+Math.sin(rel)*rp, ty=RCY-Math.cos(rel)*rp;
+    if(red){ const rr=20+(on?7:0); sx.strokeStyle=AR; sx.lineWidth=4; sx.beginPath(); sx.arc(tx,ty,rr,0,7); sx.stroke(); } }
+  // 3) BADGE POSITION HORAIRE (haut-centre) — « où regarder dehors ».
+  const clk = out.clock + " O'CLOCK";
+  sx.font="bold 27px sans-serif"; const cw=sx.measureText(clk).width+44;
+  sx.fillStyle = red ? (on?AR:"#7f1d1d") : AO; roundRect(sx,300-cw/2,42,cw,48,24); sx.fill();
+  sx.fillStyle="#fff"; sx.textAlign="center"; sx.textBaseline="middle"; sx.fillText(clk,300,66);
+  // 4) BANNIÈRE info (bas) — distance · Δalt · closing.
+  const txt=(out.dist_m/NM).toFixed(1)+" nm    "+(out.dalt_ft>=0?"+":"")+out.dalt_ft+" ft    "+out.closing_kt+" kt";
+  const w=470,h=54,x=(600-w)/2,y=450-82;
+  sx.fillStyle="#0d1117"; roundRect(sx,x,y,w,h,13); sx.fill();
+  sx.fillStyle=red?AR:AO; sx.font="bold 23px sans-serif"; sx.fillText(txt,300,y+h/2); }
 
 /* audio */
 let actx=null,lastBeep=0;
@@ -650,16 +714,22 @@ const selScen=$('scenario');
 // Paire réelle EBBY embarquée (flights_default.js) — dispo sans file-picker
 const DEF=window.DEFAULT_FLIGHTS||null;
 if(DEF){const o=document.createElement('option');o.value="ebby";o.textContent="★ 2 vols réels EBBY 08/07 (FJFVB ↔ FJMLV)";selScen.appendChild(o);}
+if(DEF&&DEF.fjfvb16&&DEF.ooi44_16){const o=document.createElement('option');o.value="ebby16";o.textContent="★ CONFLIT réel EBBY 16/07 — FJFVB ↔ OOI44 (75 m)";selScen.appendChild(o);}
 Object.entries(SCEN).forEach(([k,s])=>{const o=document.createElement('option');o.value=k;o.textContent=s.name;selScen.appendChild(o);});
 {const o=document.createElement('option');o.value="csv";o.textContent="— 2 CSV réels croisés —";selScen.appendChild(o);}
 function loadDefaultPair(){ if(!DEF)return false;
   try{ csvOwnData=parseCsv(DEF.fjfvb.csv); csvIntData=parseCsv(DEF.fjmlv.csv); }catch(e){ console.error("défaut CSV:",e); return false; }
   active=clone(SCEN.headon); active.csv=true; active.name="2 vols réels EBBY (FJFVB own ↔ FJMLV)"; active.intCs="FJMLV";
   active.dur=csvOwnData.dur; simT=0;playing=false; return true; }
+function loadDefaultPair16(){ if(!DEF||!DEF.fjfvb16||!DEF.ooi44_16)return false;
+  try{ csvOwnData=parseCsv(DEF.fjfvb16.csv); csvIntData=parseCsv(DEF.ooi44_16.csv); }catch(e){ console.error("conflit 16/07:",e); return false; }
+  active=clone(SCEN.headon); active.csv=true; active.name="CONFLIT réel EBBY 16/07 (FJFVB own ↔ OOI44)"; active.intCs="OOI44";
+  active.dur=csvOwnData.dur; simT=0;playing=false; return true; }
 function syncAcSliders(){ if(active.csv||active.log)return;
   $('ospd').value=active.own.spd;$('ospdv').textContent=active.own.spd;$('oalt').value=active.own.alt;$('oaltv').textContent=active.own.alt;
   const i0=active.intr[0]; if(i0){$('ispd').value=i0.spd;$('ispdv').textContent=i0.spd;$('ialt').value=i0.alt;$('ialtv').textContent=i0.alt;} }
 selScen.onchange=()=>{ if(selScen.value==="ebby"){ loadDefaultPair(); }
+  else if(selScen.value==="ebby16"){ loadDefaultPair16(); }
   else if(selScen.value==="csv"){ active=clone(SCEN.headon); active.csv=true; active.name="2 CSV croisés";
     active.dur=csvOwnData?Math.min(csvOwnData.dur,csvIntData?csvIntData.dur:csvOwnData.dur):60; }
   else { active=clone(SCEN[selScen.value]); } simT=0;playing=false;$('play').textContent="▶ Play"; syncAcSliders(); };
@@ -674,6 +744,8 @@ $('range').oninput=(e)=>{rangeNm=+e.target.value;$('rngv').textContent=rangeNm;}
 $('lrange').oninput=(e)=>{liveNm=+e.target.value;$('lrngv').textContent=liveNm;};
 $('audio').onchange=(e)=>{audioOn=e.target.checked;if(audioOn&&!actx&&window.AudioContext)actx=new AudioContext();};
 $('egg').onchange=(e)=>showEgg=e.target.checked; $('vec').onchange=(e)=>showVec=e.target.checked; $('aip').onchange=(e)=>showAip=e.target.checked;
+$('grid').onchange=(e)=>showGrid=e.target.checked;
+$('map').onchange=(e)=>showMap=e.target.checked;
 $('autoz').onchange=(e)=>autoZoom=e.target.checked; $('trace').onchange=(e)=>showTrace=e.target.checked;
 $('e3d').onchange=(e)=>use3D=e.target.checked; $('ehy').onchange=(e)=>useHyst=e.target.checked; $('enoise').onchange=(e)=>useNoise=e.target.checked;
 $('edg').onchange=(e)=>useDowngrade=e.target.checked; $('etau').onchange=(e)=>useTau=e.target.checked;
