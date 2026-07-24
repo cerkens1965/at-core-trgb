@@ -13,7 +13,7 @@
     return {
       fwd_sec: 30, fwd_min: 400, fwd_max: 2000, aft_min: 150, floor_m: 150,
       vOrg: 500, vRed: 400, tOrg: 45, tRed: 25, dOrg: 0.6 * NM, dRed: 0.5 * NM,
-      gnd_kt: 30
+      gnd_kt: 30, tImm: 12
     };
   }
 
@@ -21,7 +21,7 @@
   // t: [{visible,alt_rel_100ft,bear_deg,dist_m,hdg_deg,spd_kt}]
   function acEvalThreats(o, t, P) {
     const per = t.map(() => AC.NONE);
-    const out = { level: AC.NONE, clock: 0, dist_m: 0, dalt_ft: 0, closing_kt: 0, idx: -1, valid: false };
+    const out = { level: AC.NONE, clock: 0, dist_m: 0, dalt_ft: 0, closing_kt: 0, idx: -1, valid: false, imminent: false, tcpa_s: -1 };
     if (!o.valid || !o.gps_fix) return { per, out };
     if (o.flt_st === 0) return { per, out };
     const D = Math.PI / 180;
@@ -51,7 +51,8 @@
       if (dalt <= P.vOrg && converging && T <= P.tOrg && dcpa <= P.dOrg) lvl = AC.ORANGE;
       if (dalt <= P.vRed && converging && T <= P.tRed && dcpa <= P.dRed) lvl = AC.RED;
       if (dalt <= P.vOrg && converging && e.dist_m <= rEgg && T <= P.tOrg && lvl < AC.ORANGE) lvl = AC.ORANGE;
-      if (dalt <= P.vRed && e.dist_m <= P.floor_m) lvl = AC.RED;
+      // (v181 — P1) plancher co-altitude : RED seulement si on CONVERGE (formation/circuit parallèle non-convergent = plus de fausse alerte).
+      if (dalt <= P.vRed && converging && e.dist_m <= P.floor_m) lvl = AC.RED;
       per[i] = lvl;
       e._tcpa = tcpa; e._dcpa = dcpa;
       if (lvl > out.level) {
@@ -59,6 +60,9 @@
         let hr = Math.trunc((clk + 15) / 30) % 12; if (hr === 0) hr = 12;
         out.level = lvl; out.clock = hr; out.dist_m = Math.trunc(e.dist_m);
         out.dalt_ft = Math.trunc(e.alt_rel_100ft * 100); out.closing_kt = closing; out.idx = i; out.valid = true;
+        out.tcpa_s = (tcpa > 0) ? Math.trunc(tcpa) : -1;
+        // (v181 — P3-lite) IMMINENT : RED convergeant vite (tau ≤ tImm) ou au plancher → restitution renforcée écran.
+        out.imminent = (lvl === AC.RED) && converging && (T <= P.tImm || e.dist_m <= P.floor_m);
       }
     }
     return { per, out };

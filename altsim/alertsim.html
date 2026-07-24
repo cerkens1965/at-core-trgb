@@ -511,7 +511,9 @@ function drawScreen(st, eng, per, out){
 function roundRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.arcTo(x+w,y,x+w,y+h,r);c.arcTo(x+w,y+h,x,y+h,r);c.arcTo(x,y+h,x,y,r);c.arcTo(x,y,x+w,y,r);c.closePath();}
 function drawAlertOverlay(out, eng){ if(out.level===AC.NONE) return;
   const red = out.level===AC.RED;
-  const on  = (Math.floor(performance.now()/220)%2)===0;
+  // (v181) IMMINENT → pulse 2× plus rapide (110 ms), miroir du firmware.
+  const per = (red && out.imminent) ? 110 : 220;
+  const on  = (Math.floor(performance.now()/per)%2)===0;
   const AR="#f85149", AO="#e3b341";
   const T = (out.idx>=0 && eng && out.idx<eng.t.length) ? eng.t[out.idx] : null;
   // 1) SECTEUR D'ALERTE : illumine le quart de cadran où est la menace (±45° autour du relèvement),
@@ -532,11 +534,15 @@ function drawAlertOverlay(out, eng){ if(out.level===AC.NONE) return;
   if(T){ const pxPerM=RR/(rangeNm*NM), rp=Math.min(T.dist_m*pxPerM, RR-6), rel=T.bear_deg*Math.PI/180;
     const tx=RCX+Math.sin(rel)*rp, ty=RCY-Math.cos(rel)*rp;
     if(red){ const rr=20+(on?7:0); sx.strokeStyle=AR; sx.lineWidth=4; sx.beginPath(); sx.arc(tx,ty,rr,0,7); sx.stroke(); } }
-  // 3) BADGE POSITION HORAIRE (haut-centre) — « où regarder dehors ».
+  // 3) BADGE (haut-centre) — « où regarder dehors » : O'CLOCK + ANNONCE VERTICALE (façon AT-1).
   const clk = out.clock + " O'CLOCK";
-  sx.font="bold 27px sans-serif"; const cw=sx.measureText(clk).width+44;
-  sx.fillStyle = red ? (on?AR:"#7f1d1d") : AO; roundRect(sx,300-cw/2,42,cw,48,24); sx.fill();
-  sx.fillStyle="#fff"; sx.textAlign="center"; sx.textBaseline="middle"; sx.fillText(clk,300,66);
+  const da=out.dalt_ft;
+  const vert = da>=900?"HIGH":da>=200?"ABOVE":da<=-900?"LOW":da<=-200?"BELOW":"LEVEL";
+  sx.textAlign="center"; sx.textBaseline="middle";
+  sx.font="bold 27px sans-serif"; const cw=Math.max(sx.measureText(clk).width, sx.measureText(vert).width)+44;
+  sx.fillStyle = red ? (on?AR:"#7f1d1d") : AO; roundRect(sx,300-cw/2,40,cw,72,22); sx.fill();
+  sx.fillStyle="#fff"; sx.fillText(clk,300,63);
+  sx.font="bold 21px sans-serif"; sx.fillText(vert,300,92);
   // 4) BANNIÈRE info (bas) — distance · Δalt · closing.
   const txt=(out.dist_m/NM).toFixed(1)+" nm    "+(out.dalt_ft>=0?"+":"")+out.dalt_ft+" ft    "+out.closing_kt+" kt";
   const w=470,h=54,x=(600-w)/2,y=450-82;

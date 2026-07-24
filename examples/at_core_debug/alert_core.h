@@ -60,6 +60,7 @@ struct AC_Params {
     float tOrg, tRed;   // tCPA (s) orange / rouge
     float dOrg, dRed;   // dCPA distance de passage (m) orange / rouge
     float gnd_kt;       // plancher vitesse-sol intrus : sous ce seuil = AU SOL/roulage → jamais d'alerte
+    float tImm;         // (v181) tau (s) sous lequel un RED devient « IMMINENT » (restitution renforcée)
 };
 
 // Résultat global (menace la plus grave retenue).
@@ -71,6 +72,8 @@ struct AC_Out {
     int     closing_kt;
     int     idx;        // index de l'intrus retenu (-1 si aucun) → callsign côté appelant
     bool    valid;
+    bool    imminent;   // (v181) RED + convergence rapide (tau ≤ tImm ou plancher) → restitution renforcée
+    int     tcpa_s;     // (v181) tCPA de l'intrus retenu (s ; -1 si divergent) → info restitution
 };
 
 // Défauts = valeurs figées historiquement dans alertEngineTick (comportement inchangé).
@@ -83,6 +86,7 @@ static inline AC_Params acDefaultParams() {
     p.tOrg = 45.0f;  p.tRed = 25.0f;
     p.dOrg = 0.6f * NM; p.dRed = 0.5f * NM;   // dCPA orange resserré 1→0,6 nm (densité circuit)
     p.gnd_kt = 30.0f;
+    p.tImm = 12.0f;   // (v181) RED avec tau ≤ 12 s = IMMINENT (restitution renforcée écran)
     return p;
 }
 
@@ -92,7 +96,7 @@ static inline AC_Params acDefaultParams() {
 static inline uint8_t acEvalThreats(const AC_Own& o, const AC_Intruder* t, int n,
                                     const AC_Params& P, uint8_t* per, AC_Out& out) {
     out.level = AC_NONE; out.clock = 0; out.dist_m = 0; out.dalt_ft = 0;
-    out.closing_kt = 0; out.idx = -1; out.valid = false;
+    out.closing_kt = 0; out.idx = -1; out.valid = false; out.imminent = false; out.tcpa_s = -1;
     for (int i = 0; i < n; i++) per[i] = AC_NONE;
 
     if (!o.valid || !o.gps_fix) return AC_NONE;
@@ -139,7 +143,11 @@ static inline uint8_t acEvalThreats(const AC_Own& o, const AC_Intruder* t, int n
         if (dalt <= P.vOrg && converging && T <= P.tOrg && dcpa <= P.dOrg) lvl = AC_ORANGE;
         if (dalt <= P.vRed && converging && T <= P.tRed && dcpa <= P.dRed) lvl = AC_RED;
         if (dalt <= P.vOrg && converging && e.dist_m <= rEgg && T <= P.tOrg && lvl < AC_ORANGE) lvl = AC_ORANGE;  // (TAU) la bulle respecte aussi le temps
-        if (dalt <= P.vRed && e.dist_m <= P.floor_m) lvl = AC_RED;
+        // (v181 — P1) PLANCHER co-altitude : n'arme RED que si on CONVERGE réellement. Avant, la seule
+        // proximité (<150 m) suffisait → 2 avions en FORMATION/tour de piste (parallèles, séparation STABLE,
+        // rapprochement radial ~0) déclenchaient RED en continu (fausse alerte : 215 s sur le vol 21/07).
+        // Un vrai danger co-altitude à <150 m converge forcément → couvert ; la formation (closeRate~0) non.
+        if (dalt <= P.vRed && converging && e.dist_m <= P.floor_m) lvl = AC_RED;
 
         per[i] = lvl;
         if (lvl > out.level) {
@@ -148,6 +156,10 @@ static inline uint8_t acEvalThreats(const AC_Own& o, const AC_Intruder* t, int n
             out.level = lvl; out.clock = hr; out.dist_m = (int)e.dist_m;
             out.dalt_ft = (int)(e.alt_rel_100ft * 100.0f); out.closing_kt = closing;
             out.idx = i; out.valid = true;
+            out.tcpa_s = (tcpa > 0) ? (int)tcpa : -1;
+            // (v181 — P3-lite) IMMINENT : RED qui converge vite (tau ≤ tImm) ou déjà au plancher → l'écran
+            // renforce la restitution (flash plus rapide + libellé) sans ajouter un 3e niveau de menace.
+            out.imminent = (lvl == AC_RED) && converging && (T <= P.tImm || e.dist_m <= P.floor_m);
         }
     }
     return out.level;
