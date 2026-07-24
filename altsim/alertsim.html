@@ -170,6 +170,7 @@
 <script src="map_ebby.js"></script>
 <script src="flights_default.js"></script>
 <script src="flights_ebby16.js"></script>
+<script src="flights_ebby21.js"></script>
 <script>
 /* Moteur : AC / NM / acDefaultParams / acEvalThreats via alert_core.js (miroir de alert_core.h). */
 
@@ -721,6 +722,7 @@ const selScen=$('scenario');
 const DEF=window.DEFAULT_FLIGHTS||null;
 if(DEF){const o=document.createElement('option');o.value="ebby";o.textContent="★ 2 vols réels EBBY 08/07 (FJFVB ↔ FJMLV)";selScen.appendChild(o);}
 if(DEF&&DEF.fjfvb16&&DEF.ooi44_16){const o=document.createElement('option');o.value="ebby16";o.textContent="★ CONFLIT réel EBBY 16/07 — FJFVB ↔ OOI44 (75 m)";selScen.appendChild(o);}
+if(DEF&&DEF.fjfvb21&&DEF.fjvud21){const o=document.createElement('option');o.value="ebby21";o.textContent="★ FORMATION réelle EBBY 21/07 — FJFVB ↔ FJVUD (16 m · test P1)";selScen.appendChild(o);}
 Object.entries(SCEN).forEach(([k,s])=>{const o=document.createElement('option');o.value=k;o.textContent=s.name;selScen.appendChild(o);});
 {const o=document.createElement('option');o.value="csv";o.textContent="— 2 CSV réels croisés —";selScen.appendChild(o);}
 function loadDefaultPair(){ if(!DEF)return false;
@@ -731,11 +733,16 @@ function loadDefaultPair16(){ if(!DEF||!DEF.fjfvb16||!DEF.ooi44_16)return false;
   try{ csvOwnData=parseCsv(DEF.fjfvb16.csv); csvIntData=parseCsv(DEF.ooi44_16.csv); }catch(e){ console.error("conflit 16/07:",e); return false; }
   active=clone(SCEN.headon); active.csv=true; active.name="CONFLIT réel EBBY 16/07 (FJFVB own ↔ OOI44)"; active.intCs="OOI44";
   active.dur=csvOwnData.dur; simT=0;playing=false; return true; }
+function loadDefaultPair21(){ if(!DEF||!DEF.fjfvb21||!DEF.fjvud21)return false;
+  try{ csvOwnData=parseCsv(DEF.fjfvb21.csv); csvIntData=parseCsv(DEF.fjvud21.csv); }catch(e){ console.error("formation 21/07:",e); return false; }
+  active=clone(SCEN.headon); active.csv=true; active.name="FORMATION réelle EBBY 21/07 (FJFVB own ↔ FJVUD)"; active.intCs="FJVUD";
+  active.dur=csvOwnData.dur; simT=0;playing=false; return true; }
 function syncAcSliders(){ if(active.csv||active.log)return;
   $('ospd').value=active.own.spd;$('ospdv').textContent=active.own.spd;$('oalt').value=active.own.alt;$('oaltv').textContent=active.own.alt;
   const i0=active.intr[0]; if(i0){$('ispd').value=i0.spd;$('ispdv').textContent=i0.spd;$('ialt').value=i0.alt;$('ialtv').textContent=i0.alt;} }
 selScen.onchange=()=>{ if(selScen.value==="ebby"){ loadDefaultPair(); }
   else if(selScen.value==="ebby16"){ loadDefaultPair16(); }
+  else if(selScen.value==="ebby21"){ loadDefaultPair21(); }
   else if(selScen.value==="csv"){ active=clone(SCEN.headon); active.csv=true; active.name="2 CSV croisés";
     active.dur=csvOwnData?Math.min(csvOwnData.dur,csvIntData?csvIntData.dur:csvOwnData.dur):60; }
   else { active=clone(SCEN[selScen.value]); } simT=0;playing=false;$('play').textContent="▶ Play"; syncAcSliders(); };
