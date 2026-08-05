@@ -369,7 +369,7 @@ struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,s
 static CfgData     g_cfg={4,16,3,true,true,false,true,false,true,false,true,2,0};   // (juin 2026) défaut thème = LIGHT (champ dark=false) — aligné maquette
 // ── (v213 T32) MODE CLUB : surface pilote minimale (radar+zoom+pastilles+alertes+témoin REC).
 // g_cfg.club (NVS ui_club) = flag persistant · g_club_unlock = déverrouillage admin TEMPORAIRE
-// (geste caché 8 s sur « ATC vN » accueil + PIN, NVS adm_pin déf. 2712) — re-verrouillé au
+// (geste caché 8 s sur « ATC vN » accueil + PIN, NVS adm_pin déf. 1470) — re-verrouillé au
 // reboot ou après 10 min. Un SEUL firmware, pas de fork (décision Christophe 05/08).
 static bool     g_club_unlock=false;
 static uint32_t g_club_unlock_ms=0;
@@ -2177,7 +2177,7 @@ void buildStatusPage(){
     mkLbl(p,"ATV " VIEW_VSTR,verColor(VIEW_VSTR),FVER,LV_ALIGN_TOP_LEFT,40,verY);
     r_p0_atc=mkLbl(p,"ATC --",TGREY(),FVER,LV_ALIGN_TOP_RIGHT,-40,atcY);  // rempli live (g_status.fws)
     // (v213 T32) GESTE CACHÉ : maintenir ~8 s cette ligne (accueil) en mode club → clavier PIN
-    // admin (NVS adm_pin, déf. 2712) → déverrouillage temporaire de l'UI complète.
+    // admin (NVS adm_pin, déf. 1470) → déverrouillage temporaire de l'UI complète.
     lv_obj_add_flag(r_p0_atc,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(r_p0_atc,[](lv_event_t*e){
         static uint8_t rep8=0; lv_event_code_t c=lv_event_get_code(e);
@@ -7620,7 +7620,7 @@ void updClubUi(){
     //   [ pilule RDY/REC ]   ← témoin d'enregistrement NON interactif (gris prêt / ROUGE rec)
     //   [  ● haut-parleur ]  ← gros glyphe plein cercle (seul réglage pilote : volume alertes)
     bool club = clubActive() && g_page==1;
-    bool spkShow = (g_page==1);   // (v241) bouton son dans LES DEUX modes (retour Christophe)
+    bool spkShow = (g_page==1) && g_aud_ok;   // (v242) les deux modes, SEULEMENT si le moteur audio I2S est init (le DAC PCM5102A n'a pas de retour → présence physique indétectable)
     if(r_gear_btn){ if(clubActive()) lv_obj_add_flag(r_gear_btn,LV_OBJ_FLAG_HIDDEN);
                     else             lv_obj_clear_flag(r_gear_btn,LV_OBJ_FLAG_HIDDEN); }
     // ── haut-parleur : cercle 88 px — en CLUB à la place de l'engrenage, en COMPLET au-dessus
