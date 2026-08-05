@@ -1120,7 +1120,7 @@ static void encoderPoll(){        // appelé depuis loop() (contexte LVGL, jamai
     // geste tactile 8 s, gardé en secours). Une seule fois par appui.
     static bool pinFired=false;
     if(!pressed) pinFired=false;
-    if(pressed && down && clubActive() && !g_pin_ov && !pinFired && now-t0>=6000){ pinFired=true; pinShow(); }
+    if(pressed && down && clubActive() && !pinFired && now-t0>=6000)   /* pinShow() gère lui-même le re-open */{ pinFired=true; pinShow(); }
     else if(pressed && down && !longFired && now-t0>=ENC_LONG_MS){ longFired=true;   // (v90) APPUI LONG = SORTIE
         if(g_maint_ov){ _maint_close(); }                         // page WiFi : ferme (sortie molette OK malgré nav off)
         else if(g_acedit_ov){ /* éditeur immat : sortie tactile seule */ }
