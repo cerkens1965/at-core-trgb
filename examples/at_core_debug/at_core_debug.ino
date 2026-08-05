@@ -7174,7 +7174,7 @@ void buildDebugPage(){
     // Re-probe à chaque build de la page : une carte insérée après le boot est détectée ici.
     {
 #if defined(BOARD_WS241)
-        if(!g_sd_ok){ g_sd_ok=SD_MMC.begin("/sdcard",true,false,SDMMC_FREQ_DEFAULT);
+        if(!g_sd_ok){ SD_MMC.setPins(39,40,38); g_sd_ok=SD_MMC.begin("/sdcard",true,false,20000);   /* 20 MHz = SDMMC_FREQ_DEFAULT (symbole hors scope ici) */
                       if(g_sd_ok) g_sd_gb=(uint32_t)(SD_MMC.totalBytes()/(1024ULL*1024*1024)); }
 #endif
         char sd[16]; if(g_sd_ok)snprintf(sd,sizeof(sd),"%u GB",g_sd_gb);else strlcpy(sd,"NO CARD",sizeof(sd));
