@@ -1055,6 +1055,20 @@ static void radarZoom(int dir){   // (v112) ENCODEUR : paliers préréglés 1-2-
     if(si<0)si=0; if(si>=n)si=n-1;
     g_cfg.scale_nm=kScaleOpts[si]; cfgSave(); updSetPage();
 }
+// ── (v221) Popup volume : état + helpers (AVANT encStep qui les consomme) ─────
+static void cfgSave();   // fwd
+static lv_obj_t* g_vol_ov=nullptr;
+static lv_obj_t* g_vol_mtx=nullptr;    // (v221) matrice → surlignage par la molette
+static uint8_t   g_vol_sel=2;          // (v221) niveau sélectionné à la molette (poussoir = valider)
+static void volApply(uint8_t lvl){
+    g_cfg.alert_snd = lvl>3?3:lvl; cfgSave();
+    if(g_vol_ov){lv_obj_del(g_vol_ov);g_vol_ov=nullptr;g_vol_mtx=nullptr;}
+}
+static void volSelUpdate(){
+    if(!g_vol_mtx)return;
+    for(uint16_t k=0;k<4;k++) lv_btnmatrix_clear_btn_ctrl(g_vol_mtx,k,LV_BTNMATRIX_CTRL_CHECKED);
+    lv_btnmatrix_set_btn_ctrl(g_vol_mtx,g_vol_sel,LV_BTNMATRIX_CTRL_CHECKED);
+}
 static void encStep(int dir){
     // (v221) popup VOLUME ouvert → la molette sélectionne le niveau (poussoir = valider)
     if(g_vol_ov){
@@ -7436,18 +7450,7 @@ static void pinShow(){
     lv_obj_add_event_cb(g_pin_ov,[](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_LONG_PRESSED) pinClose(); },LV_EVENT_LONG_PRESSED,NULL);
 }
 // ── (v215 club) Popup VOLUME des alertes : MUTE / 1 / 2 / 3 (g_cfg.alert_snd) ──
-static lv_obj_t* g_vol_ov=nullptr;
-static lv_obj_t* g_vol_mtx=nullptr;    // (v221) matrice → surlignage par la molette
-static uint8_t   g_vol_sel=2;          // (v221) niveau sélectionné à la molette (poussoir = valider)
-static void volApply(uint8_t lvl){
-    g_cfg.alert_snd = lvl>3?3:lvl; cfgSave();
-    if(g_vol_ov){lv_obj_del(g_vol_ov);g_vol_ov=nullptr;g_vol_mtx=nullptr;}
-}
-static void volSelUpdate(){
-    if(!g_vol_mtx)return;
-    for(uint16_t k=0;k<4;k++) lv_btnmatrix_clear_btn_ctrl(g_vol_mtx,k,LV_BTNMATRIX_CTRL_CHECKED);
-    lv_btnmatrix_set_btn_ctrl(g_vol_mtx,g_vol_sel,LV_BTNMATRIX_CTRL_CHECKED);
-}
+// (v221) globals/helpers du popup volume DÉPLACÉS avant encStep (ordre de compilation)
 static const char* kVolMap[]={LV_SYMBOL_MUTE " OFF","1","2","3",""};   // (v220) niveaux explicites
 static void volPopShow(){
     if(g_vol_ov){lv_obj_del(g_vol_ov);g_vol_ov=nullptr;g_vol_mtx=nullptr;return;}   // re-tap = ferme
