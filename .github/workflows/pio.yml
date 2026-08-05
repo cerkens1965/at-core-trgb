@@ -27,7 +27,9 @@ jobs:
       - name: Install PlatformIO
         run: pip install --upgrade platformio
 
+      # (2026-08-05) Périmètre écran = WS-241 UNIQUEMENT (décision Christophe 03/08) —
+      # T-RGB/T4-S3/WS-216 sont GELÉS et ne compilent plus : le CI ne builde que la cible réelle.
       - name: Build at_core_debug
-        run: pio run -e T-RGB
+        run: pio run -e WS-241
         env:
           PLATFORMIO_SRC_DIR: ${{ github.workspace }}/examples/at_core_debug
