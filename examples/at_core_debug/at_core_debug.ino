@@ -7171,12 +7171,8 @@ void buildDebugPage(){
     r_p5mode=mkDbgL(p,y,"MODE",  "---",TGREY());r_pend =mkDbgR(p,y,"PEND",  "---",TGREY());y+=dy;
     r_flarmtx=mkDbgL(p,y,"FLARM","T0 R0",TGREY());r_adsbr=mkDbgR(p,y,"ADSB","0",TGREY());y+=dy;
     // (v252) SD locale de l'écran : info TECHNIQUE → page DEBUG (retirée du menu Setup).
-    // Re-probe à chaque build de la page : une carte insérée après le boot est détectée ici.
+    // (affichage seul : état du montage au BOOT — le re-probe live exigerait l'alias SD du shim, hors périmètre)
     {
-#if defined(BOARD_WS241)
-        if(!g_sd_ok){ SD_MMC.setPins(39,40,38); g_sd_ok=SD_MMC.begin("/sdcard",true,false,20000);   /* 20 MHz = SDMMC_FREQ_DEFAULT (symbole hors scope ici) */
-                      if(g_sd_ok) g_sd_gb=(uint32_t)(SD_MMC.totalBytes()/(1024ULL*1024*1024)); }
-#endif
         char sd[16]; if(g_sd_ok)snprintf(sd,sizeof(sd),"%u GB",g_sd_gb);else strlcpy(sd,"NO CARD",sizeof(sd));
         mkDbgL(p,y,"SD ATV",sd,g_sd_ok?C_GREEN:TGREY()); y+=dy;
     }
