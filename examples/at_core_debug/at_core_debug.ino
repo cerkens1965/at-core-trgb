@@ -1056,7 +1056,7 @@ static void radarZoom(int dir){   // (v112) ENCODEUR : paliers préréglés 1-2-
     g_cfg.scale_nm=kScaleOpts[si]; cfgSave(); updSetPage();
 }
 // ── (v221) Popup volume : état + helpers (AVANT encStep qui les consomme) ─────
-static void cfgSave();   // fwd
+void cfgSave();   // fwd (auto-prototype extern)
 static lv_obj_t* g_vol_ov=nullptr;
 static lv_obj_t* g_vol_mtx=nullptr;    // (v221) matrice → surlignage par la molette
 static uint8_t   g_vol_sel=2;          // (v221) niveau sélectionné à la molette (poussoir = valider)
