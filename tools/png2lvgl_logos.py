@@ -12,6 +12,7 @@ LOGOS = [
     ("img_logo_aerotrace", "AerotrAce_AeroTrace.png",   240),
     ("img_logo_atview",    "AerotrAce_AT-VIEW.png",     110),  # ≈ moitie d'AEROTRACE (maquette)
     ("img_logo_a",         "AerotrAce_A-AeroTrace.png",  56),  # A seul bleu, pages #02/#03
+    ("img_airki_mark",     "AirKi_mark_duo_white.png",   96),  # (v272) monogramme AirKi deux couleurs, blanc + ambre #F5A623, accueil
 ]
 
 IN_DIR  = "public/logo"

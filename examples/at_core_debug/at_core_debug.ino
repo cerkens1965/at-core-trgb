@@ -165,7 +165,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
 //         ouvre le portail boîtier ({"cmd":"portal"}) PUIS rejoint son AP en STA + garde son
 //         updater web (/update) + s'annonce (GET /atv) → la page portail du boîtier pointe
 //         vers cet updater. Un seul téléphone/réseau flashe ATC+ATV. Machine d'état relayTick().
-#define VIEW_VERSION  "264"  /* BUILD monotone — v264 (04/09) : radar — cibles AT-1 (src=1, radio) en VERT (C_GREEN), SafeSky (src=0) en NOIR ; menace rouge/ambre + vieillissement gris restent prioritaires (retour partiel sur v231, demande Christophe). v263 (banc 31/08) : page WiFi — choisir un SSID du scan VIDE le champ pass s il change de réseau (le champ gardait le pass du réseau précédent → « Save » aurait poussé le MAUVAIS pass, wifiAddNet dédup SSID l aurait écrasé ; vu par Christophe sur MyIOTWiFi/17promax). Avec ATC v190, laisser le champ vide sur un réseau CONNU du boîtier = promotion avec le pass stocké. v262 : toggles GDL90/NMEA fiables (post-vol 16/08 « les interrupteurs ne faisaient rien ») — émission SYSTÉMATIQUE de la commande (même état affiché identique : désync écran/boîtier possible) + fin du reflet optimiste (la ligne suit STATUS = un write BLE perdu se voit). v261 : v261 (post-vol 16/08) : fenêtre DR des cibles 30→60 s (cap extrapolation + expiry + filet affichage) — les trous SafeSky réels font 60-100 s, la cible reste anticipée cap/vitesse (grise) au lieu de geler puis disparaître ; se recale en douceur au retour du signal (base_ms par avion, mécanique inchangée). Complète la compensation d âge à la source (ATC v187). v260 : v260 : diag routage son (log [SND] lvl/aud/conn). v259 : v259 : ROUTAGE AUDIO vers le DAC du BOÎTIER (ATC v180, demande Didier/EBBY écran compact) — STATUS "aud"=1 → chaque bip (alerte, Sound test) est délégué par BLE {"cmd":"snd","l","v"} ; sinon lecture locale inchangée ; le carillon de boot écran reste LOCAL (confirmation câblage écran). v258 : v258 : jingle de boot = BEETHOVEN 5e (sol·sol·sol·MIb, ta-ta-ta-taaammmm) — la fanfare v257 n a pas plu. v256 (design timbres Christophe) : ORANGE = bip GRAVE lent (660 Hz/180 ms, période 2 s) · ROUGE = bip AIGU rapide SIMPLE (1760 Hz/100 ms, période 450 ms — rafale ×3 abandonnée) ; constantes ALERT_* réglables ; Sound test en miroir (carillon → 3 orange → 6 rouge). v255 : « Sound test » = SÉQUENCE des timbres RÉELS d alerte (carillon → OFF 1 s → ORANGE ×2 → OFF 1 s → ROUGE ×2 rafales), volume ALERT SOUND — juge le rendu exact du DAC (demande Christophe, test PCM5100A). v254 : « NO CARD » (SD écran) RETIRÉ de Diagnostic ; ligne « AT-CORE SD » LIVE (STATUS sd_ok, vert/rouge) dans la section Debug/versions — la seule SD qui compte est celle du boîtier. v253 : page Debug — ligne « SD ATC » (état LIVE de la SD du BOÎTIER via STATUS sd_ok, vert/rouge) ; la SD locale écran n est plus affichée (« on s en fout » — Christophe). v252 (règles nav Christophe) : (1) JAMAIS de boucle molette — butées haut/bas dans les sections ET les overlays (wrap OFF) ; (2) ligne SD écran déplacée Setup → DEBUG + re-probe au build de la page (carte insérée après boot détectée). v251 : nav sections — scroll_to_view UNIQUEMENT sur la ligne focalisée (le scroll vers la ligne quittée créait l aller-retour, Flight) + retour EN TÊTE aussi dans les sections (règle v249), focus initial 1re ligne de contenu. v250 : identité aéronef sur UNE ligne, format compact REG/TYP/HEX, alignée à DROITE (Settings + tous les affichages — le width 232 repliait la 3e valeur). v249 : nav molette UNIFORME sur toutes les sous-pages — RETOUR EN TÊTE du groupe (rows bufferisées dans ovAdd, versées par ovReady), focus initial = 1re ligne (Diagnostic plaçait le retour après le dernier item). v248 (LATENCE TACTILE, blocant gel) : invalidation AIP CONDITIONNELLE (own >2 m/cap/échelle/trace/menace) au lieu de l aveugle 5 Hz qui redessinait la trame scanline en boucle → PIN et icônes réactifs ; bloc DR aussi gelé sous popup (échappait au gate v246). v247 : poussoir popup volume — appui court ET long = VALIDER (le long fermait sans appliquer → validation « 1 fois sur 2 » selon la durée d appui). v246 : UI sous-jacente FIGÉE pendant les popups volume/PIN (updateAllPages sauté) — le redraw radar 1 Hz sous le popup causait la latence et les taps « à répéter ». v245 : icônes son + engrenage NUES (fond transparent), engrenage 88 px glyphe 40 noir = même taille que le son. v244 : trame+filet AIP SUSPENDUS pendant un popup (volume/PIN) — le scanline par frame écroulait la réactivité du menu (latence forte, retour Christophe). v243 : FILET indigo continu 1 px autour des zones AIP par-dessus la trame (retour Christophe) — mêmes points projetés que le fill, clip grossier + garde int16. v242 : PIN admin par défaut 2712 → 1470 (code postal Houtain-le-Val). v241 (retours Christophe) : (1) déverrouillage club SIMPLIFIÉ — poussoir rotatif MAINTENU 6 s → clavier PIN (geste tactile 8 s gardé en secours) ; (2) bouton son disponible AUSSI en mode complet, au-dessus de l engrenage. v240 : contour traitillé AIP RETIRÉ (la trame suffit — retour Christophe) ; helper aipDashLine supprimé. v239 : trame AIP enfin VISIBLE — projection SANS culling pour le fill (un sommet lointain annulait le remplissage de presque toutes les zones) ; trace gris-NOIR 0x4b5563. v238 : (1) TRACE ligne fine 2 px, fondu par ÂGE réel, purges v234 retirées (continuité au retour de cible) ; (2) TRAME AIP 20 % re-livrée en SCANLINE MAISON (pair-impair, spans 2 px, clip écran) — sûre pour polygones concaves, contrairement à lv_draw_sw_polygon (crash v233). v236 URGENT : trame AIP v233 RETIRÉE — lv_draw_sw_polygon crashait (InstrFetchProhibited) sur les polygones clampés/concaves → BOOT-LOOP écran (DA4592, backtrace décodée). Contour traitillé conservé. v235 : accueil — plus de fantôme d immat avant connexion (seul g_box_reg, poussé par le boîtier, s affiche ; le cache NVS écran « TBD01 » ne fuit plus). v234 (photo 05/08) : (1) fusion écran par CLÉ HEX du boîtier ("k" BLE, ATC v171 — fallback cs) → fin du double quand le callsign réel apparaît (3FFC8C) — cohérent règle hex-only ; (2) traces PURGÉES à l expiration/éviction d une cible (fin des moignons orphelins 90 s) + trace indexée par clé. v233 (TEST) : trame de remplissage 20 % INDIGO dans les zones AIP (ATZ indigo clair) en plus du contour traitillé — coordonnées clampées (anti-overflow int16 au zoom serré), zones >256 sommets = contour seul. v232 : traitillé AIP MAISON en pixels écran, phase continue par contour → signature graphique CONSTANTE à toutes les échelles (le dash LVGL redémarrait par segment et ignorait les diagonales). v231 : avions du radar en NOIR (fin des couleurs par source ; menace/vieillissement conservés) + contours AIP en GRIS TRAITILLÉ 2 px (dash 6/5, opa 150). v230 : radar décalé +75 px à droite (centré dans un carré 450×450 côté droit — capsule cap HDG_DX et label échelle RB_DX suivent) + LTE 62→54, GPS 110→100. v229 : boutons zoom +/- SUPPRIMÉS sur WS-241 (la molette fait le zoom, boutons inutiles — retour Christophe) ; conservés sur T4-S3 pur (pas de molette). v228 : GPS/LTE remontés DANS LE BON BLOC (le ré-ancrage WS241 ~l.4007 écrasait les positions de création — v226/227 étaient du code mort, d où « rien ne change ») : LTE 70→62, GPS 120→110. v227 : GPS 88→78, LTE 124→114 (bloc remonté 10 px vers SafeSky). v226 : bouton son descendu (centré dans l angle) ; GPS 96→88, LTE 140→124 — SafeSky/GPS/LTE équidistants. v225 (retours Christophe) : bouton son 88 px glyphe 40, plus bas ; pastilles GPS (108→96) et LTE (156→140) remontées pour aligner les entredistances avec SafeSky. v224 : témoin REC SUPPRIMÉ (redondant avec les indicateurs d état vol existants). v223 (retour Christophe) : glyphe HP plus GRAND (32) et OFF = glyphe GRISÉ (barre supprimée). v222 (retour Christophe) : bouton son fond BLANC + icône/arcs NOIRS ; OFF = même HP barré d une ligne NOIRE (même couleur que l icône) sur la zone du glyphe. v221 : popup volume pilotable à la MOLETTE — tap sur l icône ouvre, ROTATION surligne le niveau (OFF/1/2/3), POUSSOIR valide, appui long ferme sans changer ; le tap tactile direct reste choisir+valider. v220 (spec icône son Christophe) : icône HP COMPOSÉE — HP nu + 1/2/3 arcs concentriques dessinés selon le niveau, barre ROUGE en travers si coupé ; popup relabellé OFF/1/2/3. v219 : icône du tag haut-parleur alignée sur le popup (0=MUTE·1=MID·2=MAX·3=MAX — le niveau 2 affichait MID). v218 : témoin REC façon MAGNÉTOPHONE — ● rouge plein 44 px = enregistre · anneau gris creux = prêt (la pilule RDY/REC v217 était illisible, retour Christophe). v217 (retours Christophe) : colonne club bas-gauche refaite — haut-parleur cercle 72 px glyphe 32 (plein cercle) descendu près du bord + pilule RDY/REC (fond gris/ROUGE, texte centré) juste au-dessus, même axe. v216 : FIX v215 invisible — le bloc club (REC/haut-parleur/engrenage) était dans la branche #else de BOARD_T4S3, jamais compilée sur WS-241 (BOARD_WS241 ⇒ BOARD_T4S3), et après le early-return status invalide → extrait en updClubUi() appelée inconditionnellement. v215 (retours test club Christophe) : témoin REC PERMANENT en club (gris RDY sol / rouge REC en vol, non interactif) + bouton HAUT-PARLEUR à la place de l engrenage (masqué en club — bouton mort) → popup volume alertes MUTE/1/2/3 (g_cfg.alert_snd). v214 : page Diagnostic SCROLLABLE (la ligne « Club mode » v213 à y=444 était sous la zone visible ~450 px → inatteignable). v213 (T32 MODE CLUB, décision Christophe 05/08 — 5 boîtiers EBBY longue durée, pilote ≈ zéro interaction) : flag NVS ui_club (défaut OFF) → surface pilote = radar+zoom+pastilles+alertes + témoin REC non interactif ; Settings inaccessible (verrou nav), prompt MAJ masqué (admin pousse), Start/Stop + chips + unpair désactivés. Accès admin : maintenir ~8 s « ATC vN » (accueil) → PIN (NVS adm_pin déf. 1470) → UI complète 10 min (ou reboot). Interrupteur « Club mode » dans Diagnostic. UN seul firmware, pas de fork. v212 (SAPIN DE NOËL — fix DÉFINITIF, le v207 avait déplacé le problème) : 16 cibles en rotation boîtier × 8 slots écran + éviction « moins fraîche » = musical chairs permanent (icônes qui clignotent). Table STABLE = les 8 plus proches connus (victime = périmée >10 s sinon plus lointaine que l arrivante, sinon pas d entrée) + gris/cible 10→15 s. v211 : (1) palier zoom 0,5 NM (T25 — sentinelle scale_nm=0, helpers kScaleNmF/kScaleLbl, popup 8 choix) ; (2) sens de rotation du zoom encodeur INVERSÉ (demande 04/08, inverse de v113). v210 (T21-bis, mesure banc : 2 écrans côte à côte, OTA 10× plus lente sur l un) : ASSOCIATION AU MEILLEUR NŒUD MESH — scan préalable + begin(ssid,pass,canal,bssid) vers le BSSID au meilleur RSSI (le begin naïf prenait parfois le nœud lointain -84 dBm → download 10× lent/stalls). Même logique que le boîtier v91. v209 (T21) : OTA écran FIABILISÉ — client TLS NEUF par tentative (le client réutilisé du check version échouait par intermittence = « bloqué à 0% » + reboot muet), 3 essais, logs série [ATVOTA] dl try/rssi/stall, message final explicite « move screen NEAR the WiFi router ». v208 (T24-bis, vol patrouille : avion suivi disparu SEC alors que SkyDemon (NMEA du MÊME boîtier, même filtre source) l'affichait → masque individuel écran) : (1) RÈGLE DE SÉCURITÉ : cible <2 km horizontal JAMAIS masquée par vfilt ni filtre sol (l'alt/vitesse d'une source téléphone ne justifie pas de cacher un avion proche) ; (2) DIAG : log série [TRF] MASK/SHOW au changement d'état par cible avec raison (grnd/vfilt/range/dead) + données → le prochain vol s'auto-diagnostique. v207 (T24) : TABLE TRAFIC PERSISTANTE PAR AVION — parseTraffic FUSIONNE par callsign (MAX_TRF 5→8, rx_ms par cible) au lieu d'écraser avec le dernier paquet ; gris PAR CIBLE >10 s sans nouvelle, effacée >30 s, DR continue entre-temps. Couplé boîtier v158 (top-3 garantis + 2 slots tournants) → « l'avion suivi » ne disparaît plus quand il sort du top-5 (avant : il ne restait que la trace alors que le signal arrivait toujours). v206 : FIX ROUE INFINIE page FlightLogs (retour Christophe 02/08 « la roue tourne fou, ça induit en erreur ») : volsShowStatus prend un flag spin — la roue n'apparaît que pour un travail EN COURS (sending/deleting) et est SUPPRIMÉE à chaque état terminal (No unsent / Tap to select / Transfer OK / failed / timeout). v205 : N° DU BOÎTIER (box-id STATUS) dans les titres des pages UPDATES et DIAGNOSTIC (T19, demande Christophe ×2 : savoir QUEL boîtier on manipule). v204 : CHASSE AUX BUGS (miroir ATC v142, audits 2026-07-31). (1) Panneau scan WiFi : auto-refresh 4 s → 15 s + PLAFOND 3 (le wscan @4 s en continu déclenchait un scan radio boîtier qui TUAIT ses associations STA → TLS -1, cycles kill-BLE, « Box OFFLINE ») ; timeout → g_scan_t0 ré-armé (sinon re-tir immédiat au tick suivant) ; (2) GDL90 coupé à l/ouverture du panneau SEULEMENT s/il est ON (avant : OFF persisté en NVS à l/insu du pilote) + RESTAURÉ à la fermeture ; (3) auto-devreport v188 : ONE-SHOT par session + DIFFÉRÉ 10 s après reconnexion stable (ne plus le tirer dans la rafale atv/vfilt/wscan) ; (4) grâce reboot 40 → 90 s (cycle kill-BLE+reboot WROVER ~60 s) + grâce armée LOCALEMENT à l/envoi de devreport (auto + bouton) sans attendre le notify rbt. v203 : TRAIN « X.1 » BANC (miroir ATC v141) — -DATV_OTA_DEV (env WS-241-dev, tag ws241dev) affiche X.1.<build>-dev, la flotte reste 1.2.x. Affichage seul, BUILD monotone et OTA inchangés. v202 : SETUP AT-1 SUR L'ÉCRAN. Nouvelle ligne « AT-1 traffic setup » dans Settings→Flight → réutilise l'overlay WiFi (g_maint_mode=1) : Scan SSID via le boîtier (wscan), pass usine AT1-00565 pré-rempli, « Save & connect » → {"cmd":"at1wifi"}+{"cmd":"at1","on":1}, « Disable AT-1 » → {"cmd":"at1","on":0}. Helpers sendAt1/sendAt1Creds. Page Flight scrollable sur toutes les cartes. v201 : page Settings→Flight (WS-241, 7 lignes avec ALERT SOUND) rendue SCROLLABLE verticalement → ALERT SOUND / TRAFFIC SRC atteignables (retour Christophe : « pas accès au menu tout en bas »). Le swipe horizontal reste pour la nav entre sections. v200 : SÉPARATION ÉCRAN DE TEST / FLOTTE. -DATV_OTA_DEV (env WS-241-dev) → tag OTA « ws241dev » → l'écran de test (celui de CE276D) lit/publie firmware/atv/ws241dev/ ; les écrans flotte gardent firmware/atv/ws241/ (stable v198). À flasher UNE fois en USB. Aucun changement fonctionnel vs v199 hormis le tag. v199 : AT-1 CÔTÉ ÉCRAN (à blanc, boîtier ATC v138). (1) COULEUR DU TRAFIC PAR ORIGINE sur le radar : SafeSky (réseau) = BLEU, AT-1 (radio) = VERT → le pilote distingue les deux flux ; la MENACE (rouge/ambre) reste prioritaire, le vieillissement (gris) l'emporte. TrafficEntry.src parsé du champ « src » du trafic BLE. (2) SÉLECTEUR SOURCE dans Settings→Flight (« TRAFFIC SRC » : SafeSky / AT-1 / Both) → {"cmd":"trafsrc"} au boîtier (filtre affichage + EFB), reflète STATUS « tsel ». DY Flight 72→64 pour loger la ligne sur WS-241. STATUS at1/tsel parsés. ⏳ RESTE : picker WiFi AT-1 sur l'écran (scanner le SSID + saisir le pass, ex AT1-00565) → {"cmd":"at1wifi"} ; toggle AT-1 on/off écran. v198 : INVITE DE MAJ SUR L'ACCUEIL (retour Christophe). Label ambre centré en bas de l'accueil « AT-CORE update available (vN) » quand le boîtier a vu une MAJ (STATUS oav>fwv — check boot FIABLE côté ATC v137 : fenêtre heap-libre + coupe GDL90). N'affiche JAMAIS « à jour » (le check WROVER n'est pas fiable en continu sans reboot) — seulement l'invite POSITIVE. Structure g_atv_remote prête pour l'invite MAJ écran (check ATV au boot à ajouter proprement, sans perturber le BLE). v197 : SIMPLIFICATION page Updates (retour Christophe) — bouton « Check now » RETIRÉ (le check passif 1-TLS mentait « up to date » sur WROVER écran connecté, heap fragmenté). Le tap sur la ligne AT-CORE ou AT-VIEW fait DÉJÀ le vrai check+install robuste (côté boîtier : kill-BLE si besoin ; côté écran : atvCloudOta). Remplacé par une invite « Tap AT-CORE or AT-VIEW to check & install ». v196 : bump de VALIDATION OTA (v195→v196) — vérifie le fix corps-vide côté écran (plus de « Already up to date » à tort). Aucun changement fonctionnel vs v195. v195 : FIX OTA "checking = up to date" à tort (retour Christophe). atvCloudOta faisait http.getString().toInt() SANS valider le corps : un GET code=200 mais corps VIDE/tronqué (lecture TLS partielle, heap Bluedroid serré) donnait "".toInt()=0 → 0<=local → "Already up to date" alors qu'une MAJ écran était dispo. Corrigé : corps validé (non vide, len<=8, numérique, >0), sinon remote reste -1 → "Version check failed - retry" (au lieu de conclure à jour). Même bug/fix que le boîtier ATC v133. Timeout version 15→20 s. v194 : TOGGLE NMEA/BLE (sortie EFB SkyDemon) dans Settings → Flight, à côté de GDL90. mkSegRow "NMEA" (OFF/ON) → sendNmea() envoie {"cmd":"nmea","on":0|1} au boîtier (carac FFE1 HM-10, flux GPRMC/PFLAU/PFLAA en talker $GN). Reflète STATUS "nme" (miroir g_nmea_ui, optimiste + confirmé au tick, comme GDL90). NMEA = BLE (coexiste cloud/OTA) ≠ GDL90 = AP WiFi (exclusif STA). Le pilote choisit la sortie EFB selon sa tablette (SkyDemon iOS = NMEA/BLE ; ForeFlight = GDL90/WiFi). ALERT SOUND décalé en position 5 sur WS241. Boîtier = ATC v132 (cause racine talker $GN validée SkyDemon). v193 : (1) ROTATIF SANS BOUCLE (général) — lv_group_set_wrap(false) sur le groupe menu (g_encGroup) ET les overlays (g_ovGroup) : arrivé au dernier item on ne reboucle PLUS au 1er, on remonte la liste en tournant dans l'autre sens (retour Christophe). (2) Actions Flight Logs en 2 COLONNES compactes sélectionnables au rotatif, labels courts : Last · Selected · Unsent · Del · Del all (helper volActBtn = volBtn + contour blanc au focus + ovAdd ; label=child0 → confirmations _vols_del/_vols_delall lisent child0). v192 : GESTION VOLS (Flight Logs). Lignes de vol CLIQUABLES = coche/décoche (surlignage brand + texte blanc) → nouveau bouton « Send selected » qui envoie {"cmd":"uploadlist","f":[fids cochés]} (≤8). Nouveau bouton « Delete all » (rouge, double-tap de confirmation) → {"cmd":"delall"} = efface TOUS les vols (envoyés + non-envoyés) pour la gestion SD en dev (⚠️ perte assumée ; le boîtier v111 exclut les traces LTE/TRF/SS + le vol en cours). Helper sendCtlRaw() pour les trames CTRL à paramètres. Actions Flight Logs : Send last · Send selected · Send all unsent · Delete sent · Delete all. La liste affiche déjà jusqu'à 16 vols (scrollable). v191 : overlay OTA PLEIN ECRAN (fin de la marche arriere du menu vers Setup visible autour de l ancien overlay 400x210, retour Christophe).  — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v190 : FEEDBACK immédiat au lancement Update AT-CORE (retour Christophe : tap AT-CORE → retour Setup muet → on croyait à un plantage). Overlay « Starting update… » dès le tap (g_ota_pending) jusqu'à ce que le boîtier pousse son état OTA ; si rien après 25 s → « Box not responding » (le boîtier n'a pas démarré = diagnostic clair). v189 : FIX page Updates figée sur « AT-CORE OFFLINE » alors que le boîtier est connecté (retour Christophe). La page ne se rebuildait QUE sur changement de oav (ligne loop) → si ouverte pendant un reboot boîtier (OTA/devreport) puis reconnexion, elle restait sur l'état offline. Fix : rebuild aussi sur changement de g_status.valid / g_status.fwv (s_updShownValid/Fwv). v188 : AUTO-REFRESH FLEET après OTA ATC — retour Christophe : « la nouvelle version ATC ne remonte pas auto, toujours obligé de faire un Report to fleet après un Update ATC ». Fix CÔTÉ ÉCRAN (marche sans bootstrap boîtier, ≠ le flag ATC v101 qui exige le boîtier déjà en v101) : dans loop(), si g_status.fwv AUGMENTE (OTA détecté à la reconnexion post-reboot), l'écran envoie auto sendCtl("devreport") → le boîtier (v97+) reporte la nouvelle version dans /devices → dashboard à jour tout seul. Gaté hausse stricte + pas la 1re connexion (s_lastFwv!=0). v187 : RETOUR VISUEL sur les actions boîtier « muettes » (retour Christophe : quand un process s'exécute, l'indiquer/informer). Helper sendCtlToast(cmd,msg) = sendCtl + toast (vert si connecté / ambre « Box offline » sinon, 2,2 s, lv_layer_top). Appliqué à : Report to fleet (« Reporting to fleet… »), Reboot box, WiFi test, Start/Stop/Continue flight (page Test). Avant : tap → rien à l'écran, on ne savait pas si la commande était partie. v186 : FIX OTA écran « WiFi connect failed » alors que les creds sont bons. atvCloudOta faisait WiFi.begin AVEC le BLE (Bluedroid) encore actif → la coexistence WiFi+BLE sur S3 faisait échouer la connexion WiFi (contention radio/heap) — le boîtier se connectait mais pas l'écran. Fix : BLEDevice::deinit(true) AVANT WiFi.begin → le WiFi a la radio + le heap → connexion fiable (+ heap libre pour le TLS ensuite). BLE mort après → l'échec WiFi reboote maintenant (restaure le BLE). v185 : bouton « AT-CORE » de la page Updates TOUJOURS actionnable (comme AT-VIEW) → tap = sendCtl("otaupdate") = le boîtier fait un check+download OTA robuste (kill-BLE si besoin, fiable WROVER, cf ATC v99). Avant : bouton affiché SEULEMENT si oav>fwv, or « Check now » (check passif 1-TLS) rate souvent sur WROVER écran connecté → oav=0 → pas de bouton → OTA WROVER impossible sans USB. Maintenant on peut lancer l'update WROVER en 1 tap (no-op affiché si déjà à jour). v184 : bouton "Report to fleet" (Settings → Diagnostic) → sendCtl("devreport") → le boîtier (ATC v97) écrit son état dans /devices (tableau FLEET dashboard) via WiFi, KILL-BLE, SANS reboot ni USB. Utile après un flash / changement WiFi pour rafraîchir FLEET immédiatement (le report best-effort au boot échoue souvent sur WROVER écran connecté = heap). v183 : VERSION ÉCRAN via CHR_CONTROL (canal FIABLE). Le push CHR_IMU (v182) ne remontait pas : côté écran g_chrImu était null (CHR_IMU pas trouvé à la découverte GATT) → jamais de push → colonne ATV restait 0. L'écran annonce désormais {"cmd":"atv","v":VIEW_VERSION} sur CHR_CONTROL (sendCtl/write, canal éprouvé bind/wifi/cloud) à CHAQUE (re)connexion (fin de découverte, après subscribe) → le boîtier (ATC v96) le parse dans g_atv_ver → /devices → colonne ATV du dashboard. Le champ "v" du push CHR_IMU (v182) est conservé (inoffensif). v182 : VERSION ÉCRAN remontée au tableau FLEET du dashboard. Le push CHR_IMU (4 Hz, mouchard G/assiette) gagne un champ "v":VIEW_VERSION → le boîtier (ATC v95) le parse dans g_atv_ver et l'inclut dans /devices → la colonne ATV du dashboard affiche la version de l'écran (avant : 0, jamais transmise en BLE normal). Coût nul (champ constant ajouté à un push existant). v181 : AMÉLIORATION MOTEUR D'ALERTE (post-vol 21/07, inspiré Garrecht AT-1). P1 — le PLANCHER co-altitude (RED à <150 m) exige désormais la CONVERGENCE (closeRate>0.1) : 2 avions en FORMATION/tour de piste (parallèles, séparation stable, rapprochement radial ~0) ne déclenchent plus RED en continu. Validé sur la trace formation réelle FJFVB×FJVUD du 21/07 : ROUGE 207→98 échantillons (−53%), les 98 restants tous convergents/imminents. P3-lite — champ AC_Out.imminent (RED + tau≤tImm 12 s OU plancher convergent) → le SECTEUR pulse 2× plus vite (110 ms vs 220) = urgence graduée sans 3e niveau. P2 — la pilule d'alerte affiche l'ANNONCE VERTICALE (LEVEL/ABOVE/BELOW/HIGH/LOW sur Δalt, façon AT-1) en 2ᵉ ligne sous « N O'CLOCK ». alert_core.h + miroir alert_core.js modifiés à l'identique, conformance JS↔C++ régénérée (5000/5000 OK). v180 : GDL90 déplacé dans Settings → FLIGHT. GDL90 DÉPLACÉ dans Settings → FLIGHT (c'est une fonction de vol — SkyDemon/EFB). Était enterré en 6ᵉ ligne de l'overlay Diagnostic → tombait sous la zone visible ~450px WS-241 = « disparu ». Devient une bascule segmentée OFF/ON (mkSegRow) liée au miroir local g_gdl_ui : tap → sendGdl() ({"cmd":"gdl90"}) + reflet optimiste g_status.gdl (effet de bord cbSeg), sync live sur STATUS "gdl" quand la section Flight est ouverte. Retiré de Diagnostic (diagGdlBtn/_diag_gdl_cb/g_diag_gdl inutilisés). Ordre Flight : GROUNDED · ICONS · AIP · GDL90 · ALERT SOUND(WS241). v179 : ALERTE DIRECTIONNELLE — le cadre périphérique plein (v154) est REMPLACÉ par un SECTEUR de cadran illuminé pointant vers la menace (« où regarder dehors »), validé d'abord dans le simulateur (drawAlertOverlay). Impl LVGL : alertSectorDraw() = bande d'arc épaisse (lv_draw_arc, ±45° autour du relèvement, angle clock C→C*30-90, rouge pulsé/ambre) dessinée dans aipDrawCb AVANT la garde valid ; alertRingsDraw() = anneau rouge pulsé autour de chaque cible RED (g_trf_scr/g_trf_threat). alertFrameUpdate() masque désormais le cadre en permanence. Invalidation radar étendue à g_threat!=NONE (pulse). v178 : trf_tri FORCÉ false (mode triangle retiré, ignore vieux NVS → trafic toujours en icônes avion). v177 : THEME se comporte enfin COMME ALT DIFFERENCE (retour Christophe). Avant (≤v176) le toggle THEME déclenchait un rebuildAllPages IMMÉDIAT → flash plein écran + focus qui saute, alors qu'Alt Difference bascule juste le segment en place. Or la page Settings est TOUJOURS sombre (UI_BG, indép. du thème depuis v156) → rebuilder pendant qu'on est dans Settings est un flash INUTILE ; seul le radar/accueil dépend du thème. Fix : le toggle THEME (cbSeg segmenté + cbSetBtn tactile) bascule EN PLACE (segApplyStyle+updSetPage, comme Alt Difference) et pose g_theme_dirty ; le rebuild global est DIFFÉRÉ à la SORTIE de Settings (switchPage : g_page==2 && np!=2 && dirty → rebuildAllPages une seule fois, au moment où on rejoint une page qui dépend du thème). Suppression de la mécanique v176 (s_reopen_sec/ré-ouverture de section) devenue inutile. v176 : NAV BOUTON ROTATIF EC11 — 2 correctifs (retour Christophe). (1) RADAR SCALE + VERTICAL FILTER (lignes ER_POP) : en édition molette, erEditApply appelait s.apply(k) SANS cfgSave() ni updSetPage() → la valeur changeait en interne mais le label ne bougeait pas ET rien n'était persisté = « pas de choix de scale/vfilt au bouton ». Fix : applique + cfgSave + updSetPage (comme le chemin tactile _pick_sel_cb). (2) THEME (ligne ER_SEG, Display) : le toggle déclenche g_rebuildPages → rebuildAllPages → settingsShowMenu te renvoyait au MENU (section + focus perdus). Fix : s_reopen_sec mémorise s_cur_sec avant le rebuild (cbSeg dark + cbSetBtn 12/13) ; rebuildAllPages ré-ouvre la section (settingsOpenSection) si g_page==2 → on reste dans Display, focus encodeur restauré. AIP (ER_SEG, Flight) : câblage OK, toggle via cbSeg quand g_aip_loaded (AIP embarquée flash = vrai au boot) → à re-tester à l'écran (v175 a rendu l'AIP très pâle : un toggle ON peut se voir peu). v175 : AIP « ROUGE TRÈS LÉGER ET FIN » (retour Christophe) — le tracé CTR/ATZ passe de width=2/opa=150 (v153) à width=1/opa=80 (~31%). Teintes inchangées (CTR 0xFF3B30, ATZ 0xFF9E96) : à faible opacité sur fond sombre le rouge vif rend un contour discret. But : contour AIP présent mais qui n'écrase NI le trafic NI les cercles de portée du radar, et qui se distingue mieux de l'alerte anticollision (aplat rouge clignotant). Pur rendu LVGL (aipDrawCb), aucun changement fonctionnel/BLE. v156 : REFONTE SETTINGS incr.2b — SECTIONS EN NOIR. La page Settings passe en NOIR AMOLED (UI_BG, indépendant du thème radar), titre de section BLANC. Les builders de lignes T4 (mkSegRow/mkSegRowN/mkPopRow/mkBigStepRow/mkBigBrightRow/mkBigBtnRow) foncés : labels blancs (UI_INK), pistes/sliders/steppers sombres (UI_TRACK 0x2a3138), segment inactif gris clair (UI_INK2), valeurs/glyphes blancs. Focus encodeur : titre neutre 0x4b5563→UI_INK2 (lisible sur noir). Labels PILOT/SD/ABOUT foncés + agrandis (ABOUT pitch 40→52). SHAPE (avion/triangle) + HELIPORT RETIRÉS (options de niche, décision Christophe). ⚠️ Contrôles segmentés CONSERVÉS (juste foncés) ; interrupteurs verts + regroupement Declutter + réorg contenu Flight/Debug = incr.2c. Colorimétrie ciblée builders Settings uniquement (auth/radar/rond intacts). v155 : REFONTE SETTINGS incr.2a — MENU watchOS. Le menu (T4/WS-241) devient une LISTE PLEIN ÉCRAN sur fond NOIR AMOLED : 4 sections (Display/Flight/Setup/Debug) en lignes hautes = pastille icône colorée (bleu/vert/orange/gris, LVGL symbols) + nom + sous-titre + chevron ›, focus molette = surface claire + anneau turquoise. s_menu couvre l'en-tête clair partagé (foreground) → titre "Settings" + Active Aircraft propres. Les 4 lignes tiennent dans 450px SANS être coupées par le bas (MENU_ROWH=76, RY0=104, pas 88). Mapping vers sections existantes (Display→[0] · Flight→[1] traffic · Setup→[3] system · Debug→[4] about) — CONTENU inchangé (réorg = incr.2b) : les SECTIONS gardent le look clair actuel, on juge le MENU d'abord. Ronds (T-RGB/WS216) : grille 2×3 conservée (une liste pleine largeur clipperait dans le cercle). Nav molette : gord vertical {0,1,3,4}. v154 : REFONTE SETTINGS incr.1 — ÉCHELLE DE TAILLES (lisibilité tableau de bord). Écran physiquement minuscule (WS-241 ~3.7×5cm) lu de loin : toutes les polices Settings étaient codées en dur (libellés 20, légendes 14) → trop petites. Introduction d'un système CENTRAL board-aware FS_TITLE/FS_TILE/FS_ROW/FS_VALUE/FS_CAP (T4/WS-241 : 34/30/28/26/20 ; ronds : 28/24/24/22/18), plancher absolu FS_CAP. Appliqué aux builders partagés (mkSegRow/mkSegRowN/mkPopRow/mkBigStepRow/mkBigBrightRow/mkBigBtnRow/mkNavTile/mkMenuBtn) + titre section + bloc Active Aircraft → CONFIG, TRAFFIC et les tuiles passent en gros d'un coup. Segments multi-options gardés en FS_CAP (piste 224px fixe, anti-débordement). En-tête T4 réancré (titre 24→34 : soulignement 70→80, CY 94→96). Réf ergo = watchOS (Digital Crown = rotatif). AUCUN changement de structure (DISPLAY/FLIGHT/SETUP/DEBUG = incr.2) ni de sous-pages. Reste : ABOUT (pitch 40 serré) + popups options au prochain pass. v153 : AIP EN ROUGE (choix Christophe après essai visuel du turquoise v151 sur WS-241). Tracé CTR 0x1FE6D6 -> 0xFF3B30, ATZ 0x8FF3EA -> 0xFF9E96 ; width=2 et opa=150 inchangés. Historique de la teinte : bleu AeroTrace (se confondait avec les cercles de portée du radar) -> turquoise v151 -> rouge v153. ⚠️ À SURVEILLER : le rouge est aussi la couleur de r_alert_overlay (C_RED 0xef4444) quand le moteur anticollision lève un THREAT_RED — teintes proches. Distinguable en pratique (alerte = aplat/bordure clignotante ; AIP = trait 2px à 59% d'opa), mais si ça accroche en vol, décaler l'AIP vers un rouge brique (ex 0xC0392B) pour réserver le rouge vif à l'alerte. v152 : CALLSIGN encore réduit (retour Christophe : « l'immat peut être proportionnellement toujours un peu plus petite que la différence d'altitude »). kCsFont 16/22/26 → 14/18/22 face à kAltFont 26/32/38 → ratio ~0.56 CONSTANT sur les 3 réglages ICONS S/M/L (avant : 0.62/0.69/0.68, irrégulier). La hiérarchie visuelle Δalt > immat est donc tenue à l'identique quelle que soit la taille d'icône choisie. v151 : 3 CORRECTIFS UI (retour Christophe, vol test 2026-07-16). (1) APPAIRAGE plein écran : pairOverlayShow faisait set_size(480,480)@UI_OX → 2 bandes blanches de ~60px sur les écrans 600px (WS-241/T4-S3) ; passe à SCR_W×SCR_H@(0,0) board-aware (contenu en TOP_MID reste centré). (2) CALLSIGN plus petit : kCsFont 22/28/32 → 16/22/26 (< kAltFont = la diff d'altitude reste prioritaire, elle est OK). (3) AIP TURQUOISE : le tracé CTR/ATZ en bleu AeroTrace (C_BRAND) se confondait avec les cercles de portée du radar → passe en turquoise vif 0x1FE6D6 opa 150 (flash mais léger) ; ATZ 0x8FF3EA. Tunable (couleur/opa) ou rouge si préféré — « à essayer ». ⏳ Chantier de fond à venir : revoir l'UI page par page pour le bouton rotatif (EC11 WS-241). v150 : FENÊTRE D'ATTERRISSAGE — bouton « STOP NOW » (retour Christophe). L'overlay « Landing detected — Stopping flight in Ns » n'avait qu'UN bouton « Cancel - keep flying » (on ne pouvait qu'ANNULER l'arrêt, jamais le forcer). Il passe à DEUX boutons : « Stop now » (rouge, → sendCtl("stop_flight") = FLT_ENDED immédiat côté boîtier, skip le décompte 5 s FLT_STOP_GRACE_MS) + « Keep flying » (vert, → continue_flight, comportement historique). ⚠️ Clarification timers : la fin de vol attend FLT_STOP_GRACE_MS = 5 s (PAS 3 min) ; les « 3 min » sont SS_STOP_GRACE_MS = coupure éco SafeSky/data (v87 boîtier), sans rapport avec la clôture du CSV. Purement côté écran (le boîtier gère déjà stop_flight via _endflight_cb). ⏳ Suite possible (plus tard) : 3ᵉ bouton « Stop & offload » = stop_flight + upload direct si hotspot joignable. v149 : OFFLOAD — 2 correctifs UX (retour terrain) : (1) AUTO-REFRESH du picker : tant que le panneau scan est ouvert, l'écran re-scanne le boîtier toutes les 4 s → un hotspot allumé APRÈS l'ouverture (ex iPad qu'on vient de passer en "Maximiser la compatibilité") apparaît SEUL, sans fermer/rouvrir. Anti-flicker/mis-tap : _maint_buildScanFromBox ne REDESSINE la liste QUE si l'ensemble des SSID a changé. (2) Bouton SHOW/HIDE sur le champ mot de passe (clavier écran petit → fautes de frappe invisibles) : voir la saisie en clair puis re-masquer (lv_textarea_password_mode). Champ pass rétréci 540→410 pour loger le bouton. v148 : OFFLOAD CSV SANS PORTAIL (côté écran, avec boîtier v88) — la page HOTSPOT SETUP (SYSTEM→WIFI) gagne un bouton « Scan » : le BOÎTIER scanne les réseaux (BLE {"cmd":"wscan"} → GDL90 OFF + radio STA) et renvoie [{s,r}] dans CHR_WSCAN 6E40000E ; l'écran lit ça (handshake STATUS « wsr », comme flt_rdy dans le hook périodique) → PICKER de hotspots triés par signal → tap = remplit le SSID (fini le SSID à l'aveugle / le portail instable). L'écran ne scanne PLUS lui-même (WiFi+BLE = hang, cf v131). Puis « Save & send » (creds) + nouveau bouton « Offload now » = {"cmd":"uploadall"} → upload DIRECT boîtier→Firebase des vols non envoyés. _maint_scan_cb recâblé synchrone→async ; _maint_buildScanFromBox lit la char ; g_chrWscan/g_scan_pending/g_scan_title. Boutons ajoutés sur la branche 600px (WS-241/T4-S3) ; branche ronde inchangée pour l'instant. v147 : LABELS CIBLES ENCORE PLUS GRANDS + PROPORTIONNELS au réglage ICONS S/M/L (retour vol test : "texte peut être plus grand, pourquoi pas proportionnel aux icônes"). Arrays kCsFont/kAltFont indexés par g_cfg.icon_sz (immat 22/28/32, Δalt 26/32/38 ; défaut L=2 → 32/38, > v146). Police appliquée à la création + RÉ-APPLIQUÉE quand ICONS change (boutons case 16/17 + segment kind==1, comme lv_img_set_zoom). v146 : LISIBILITÉ RADAR EN VOL (retour vol test EBBY, 3 réglages écran) — (1) LABELS CIBLES AGRANDIS : immat/callsign montserrat_16→24, Δalt (ex "+07") 20→28 ("texte trop petit, pas lisible en vol"). (2) TRAÎNÉE trafic PLUS VISIBLE (elle "ne se voyait pas") : dots rayon tête 2→4 px / queue 1→2 px, plancher opacité 0.08→0.22, gris 0x9ca3af→0xB8C0CC (plus clair sur fond sombre) ; couleurs menace rouge/ambre inchangées. (3) CONTOURS AIP CTR/TMA SEMI-TRANSPARENTS : ajout opa=140 (~55%) sur ctr_d (hérité par atz_d) — avant 100% opaque → "les lignes se confondaient avec les cercles du radar". Aucun changement fonctionnel/BLE, pur rendu LVGL. v145 : FIX BRIGHTNESS WS-241 — VRAIE CAUSE = FORMAT DE COMMANDE QSPI. Le driver SH8601 (esp_lcd_sh8601_ws241.c, tx_param) transforme CHAQUE commande en QSPI : (cmd<<8)|(0x02<<24) quand use_qspi_interface. Les commandes d'init passent par là (donc l'affichage marche). MAIS WS241_Panel::setBrightness appelait esp_lcd_panel_io_tx_param avec le cmd BRUT 0x51 → mauvais format → la dalle IGNORAIT l'écriture (SPI OK, tx=0x0, mais AUCUN effet). D'où « brightness figée au max, slider sans effet » depuis que l'esp_lcd est défaut (v96). Fix : setBrightness envoie 0x51 dans le format transformé ((0x51<<8)|(0x02<<24)) + ajout de {0x53,0x20} (BCTRL) à l'init (comme vendor_specific_init_default du driver). Les faux pistes v143 (double ×17) / v144 (BCTRL brut) échouaient car TOUS mes appels directs avaient le mauvais format. Diagnostic : instrumentation [SLIDER]/[BRIGHT] → slider OK + setBrightness appelé + tx=0x0 mais dalle muette → lecture du driver tx_param. v143 : FIX BRIGHTNESS WS-241 (esp_lcd SH8601) — double mapping ×17. panelBright() (l.187 PANEL_WS241) fait déjà 0-16→(v>=16?255:v*17)=0-255, MAIS WS241_Panel::setBrightness (ws241_esplcd.h) re-mappait (v>=16?255:v*17) → toute valeur ≥17 retombait sur ≥16 → 255 → brightness TOUJOURS au max, slider sans effet. Fix : setBrightness esp_lcd envoie v directement à la commande 0x51 (déjà 0-255). Le chemin Arduino_GFX (ws_gfx->setBrightness) et les autres cartes sont inchangés. v142 : MIGRATION NimBLE Phase 2 COMPLÈTE — T-RGB + WS-216 rejoignent WS-241/T4-S3 → LES 4 ÉCRANS EN NimBLE. T-RGB = core 2.x → NimBLE 1.4.x (réutilise le chemin T4-S3, guards NIMBLE_1X) ; WS-216 = core 3.x → NimBLE 2.x (réutilise le chemin WS-241, guards NIMBLE_2X). Juste flag -DUSE_NIMBLE + lib par env dans platformio.ini (aucun code neuf : les guards 3-voies de v141 couvrent tout). Plus AUCUN écran en Bluedroid. ⚠️ Validation hardware par carte à faire (USB, pas de rollback écran). v141 : MIGRATION NimBLE Phase 2 — T4-S3 (core 2.x → NimBLE-Arduino 1.4.x, -DUSE_NIMBLE ajouté à [env:T4-S3] + h2zero/NimBLE-Arduino@^1.4.3). L'API scan 1.4.x ≈ Bluedroid (start(sec,cb) + setAdvertisedDeviceCallbacks + onResult par POINTEUR, pas d'onScanEnd) et diffère de la 2.x (start(ms) + setScanCallbacks + onResult const* + onScanEnd). Les guards #ifdef USE_NIMBLE passent en 3 voies via macro NIMBLE_2X/NIMBLE_1X (dérivé de ESP_ARDUINO_VERSION_MAJOR, défini dans le bloc includes) : ATCAdv (3 classes : NimBLEScanCallbacks 2.x / NimBLEAdvertisedDeviceCallbacks 1.4.x / BLEAdvertisedDeviceCallbacks Bluedroid), scanDoneCb (Bluedroid+1.4.x, #ifndef NIMBLE_2X), startScan (2.x setScanCallbacks/start(ms) vs Bluedroid+1.4.x setAdvertisedDeviceCallbacks/start(sec,cb)), ATC_ONDISCONNECT (reason en 2.x seulement). Le reste du chemin USE_NIMBLE vaut pour les 2 versions (subscribe(true,cb), deleteClient, setMTU global, getRSSI, bleStr(NimBLEAttValue), alias using). Alias BLEScanResults ajouté (scanDoneCb 1.4.x). Les 4 envs compilent : T4-S3 NimBLE 1.4.x (RAM 26,2% vs 30,7% Bluedroid, Flash 31,5% vs 37,2%), WS-241 NimBLE 2.x (27,0%), T-RGB/WS-216 restent Bluedroid (31,4/31,2%) intacts. Reste Phase 2 : T-RGB (core 2.x, réutilise le chemin 1.4.x tel quel) + WS-216 (core 3.x, réutilise le chemin 2.x). v140 : MIGRATION NimBLE Phase 1 (WS-241 SEUL) — le client BLE écran passe de Bluedroid à NimBLE-Arduino 2.x, gardé par -DUSE_NIMBLE (ajouté au seul env WS-241 dans platformio.ini). Motif : Bluedroid EXIGE de la RAM interne (pas de PSRAM) → sur le WS-241 (buffers LVGL DMA en RAM interne) le contrôleur BT était affamé (`BLE_INIT: Malloc failed`, crashs connectBLE, écran boot-loop à la connexion quand l'AP GDL90 du boîtier est levée — cf ATC gdl90 Phase 2). NimBLE a une empreinte RAM bien plus petite → heap libéré. Approche : alias `using BLEClient=NimBLEClient` etc. → 95% du code client BLE inchangé ; SEULS les points divergents NimBLE 2.x sont gardés #ifdef USE_NIMBLE : includes (NimBLEDevice.h), bleStr(NimBLEAttValue) (readValue → NimBLEAttValue, sinon ambigu car operator std::string ET String), REG_NOTIFY (subscribe(true,cb) vs registerForNotify), ATCAdv (NimBLEScanCallbacks : onResult(const*) + onScanEnd, corps factorisé dans atcAdvOnDevice), onDisconnect(client,int reason), setClientCallbacks(cb,false), setMTU global (NimBLEDevice::setMTU à l'init, pas par client), scan start() en MS + setScanCallbacks, deleteClient (~NimBLEClient privé), getRSSI (pas de haveRSSI en 2.x). Les 3 autres envs (T-RGB/T4-S3 core 2.x, WS-216 core 3.x) restent Bluedroid (#else) → 4 envs compilent. Phase 2 (à venir) = étendre NimBLE aux 3 autres (guards 1.4.x/2.x pour le core 2.x). v139 : TOGGLE GDL90 ON/OFF à l'écran (Settings → SYSTEM → DIAGNOSTIC, à côté de Cloud). sendGdl() → {"cmd":"gdl90","on":0|1} sur CHR_CONTROL (marche depuis le fix heap v138) ; reflète l'état réel STATUS "gdl" (vert=ON mode VOL/SkyDemon, gris=OFF mode SOL/OTA). Le pilote bascule GDL90 au doigt avant/après vol, sans console. Calqué sur le toggle Cloud v119. Le boîtier persiste en NVS (gdl90 reste ON après reboot). v138 : ROOT FIX HEAP BLE WS-241 — les buffers de dessin LVGL (ws241_esplcd.h) étaient en DOUBLE buffer 1/10 d'écran en RAM INTERNE DMA = ~108 Ko, affamant le contrôleur Bluetooth (Bluedroid EXIGE de la RAM interne, pas de PSRAM) → `BLE_INIT: Malloc failed` en boucle → TOUTES les writes écran→boîtier échouaient (« Portal requested » mais AP jamais levée, immat inchangée, cloud/upload), + crashs de reconnexion (connectBLE) + figes. C'ÉTAIT LA RACINE de tous les soucis écran (pas true/false, pas coexistence GDL90). Fix : buffer SIMPLE 1/20 (~26 Ko) → libère ~82 Ko de RAM interne pour Bluedroid → BLE fiable. Rendu imperceptiblement + lent. v137 : REVERT du true v136 → writes CHR_CONTROL de nouveau en `response=false`. Le true (write-AVEC-réponse) FIGEAIT l'écran : le Bluedroid bloque la boucle LVGL en attendant la réponse ATT du boîtier (jamais reçue à temps) → écran figé, même pas le stade « Portal requested ». Donc NI false (ignoré côté boîtier) NI true (fige côté écran) ne marchent pour déclencher le portail par BLE depuis l'écran = dilemme Bluedroid de fond (comme l'abandon v128). CONCLUSION : le bouton écran « Open portal » n'est PAS fiable ; le portail se lève par GESTE 3× RST du boîtier (pairCycleGuard, sans BLE) ou console USB `portal`. v136 : (annulé). v135 : RETRAIT du PIÈGE éditeur immat écran TOUTES les writes CHR_CONTROL (sendCtl portal/upload/reboot/start/stop · sendWifiCreds · sendVfilt · sendCloud · acPushReg) passaient en `response=false` (SANS réponse). Or CHR_CONTROL boîtier = NIMBLE_PROPERTY::WRITE (AVEC réponse) → sur ce NimBLE une write SANS réponse est SILENCIEUSEMENT IGNORÉE (symptôme : « Portal requested » vert à l'écran mais AP jamais levée ; immat inchangée). Fix : `writeValue(..., true)` (AVEC réponse) partout → le boîtier ACQUITTE, onWrite tourne, la commande passe. (Le WRITE_NR ATC v81 était un mauvais remède ; le vrai fix = write avec réponse côté écran, exactement comme v125 l'avait fait pour CHR_CONFIG.) v135 : RETRAIT du PIÈGE éditeur immat écran (v134 showImmatEntry FIGEAIT — la write BLE Bluedroid bloque la boucle LVGL, même mur que l'abandon v128 ; le WRITE_NR ATC v81 fiabilise la RÉCEPTION mais l'ÉMISSION Bluedroid fige quand même). La tuile Settings AIRCRAFT (i==2) + le tap « Active Aircraft » re-pointent sur showWifiSetupInfo = PORTAIL WEB du boîtier (change l'immat au navigateur, FIABLE cf ATC v82-v85). showImmatEntry/_immat_save_cb/sendSetreg restent dans le source mais NE SONT PLUS appelés (inertes). → changer l'immat = PORTAIL, point. v134 : ÉDITEUR IMMAT À L'ÉCRAN (fini le portail) — showImmatEntry() : champs Registration + Type (ICAO) au clavier MAJUSCULES → « Save & send » écrit DIRECT sur le boîtier en BLE {"cmd":"setreg","r","t"} (helper sendSetreg, canal CHR_CONTROL éprouvé) → le boîtier v68+ applique en direct (saveAircraftNVS + ré-inscription SafeSky) + ré-émet reg/typ en STATUS → bloc Active Aircraft se rafraîchit = confirmation. MÊME pattern robuste que la page hotspot (Save = bouton SÉPARÉ, clavier lv_obj_align BOTTOM_MID + styles forcés WS-241) → PLUS le freeze use-after-free de l'ancien éditeur v120-127 (qui faisait lv_obj_del dans le callback clavier). Câblé sur la tuile Settings AIRCRAFT (i==2) + tap « Active Aircraft » (remplacent showWifiSetupInfo/portail v128). Réutilise g_maint_ov + g_maint_ssid_ta (immat) / g_maint_pass_ta (type) + g_maint_kb. v133 : FIX clavier invisible WS-241 = LA BÊTISE — la branche BOARD_T4S3 posait le clavier avec lv_obj_set_pos(0,258), or lv_keyboard_create s'AUTO-ALIGNE BOTTOM_MID en interne → set_pos ne vide PAS cet align → à la passe layout l'align interne gagnait = clavier mal placé/hors zone visible. Fix : lv_obj_align(BOTTOM_MID) (comme la branche ronde #else qui, elle, marchait) + overlay hauteur SCR_H (450) au lieu de 480 (30 px sous l'écran). Les styles forcés v132 restent (inoffensifs). v132 : PAGE HOTSPOT — clavier invisible sur WS-241 → FORÇAGE style : bg + police explicites sur LV_PART_MAIN et LV_PART_ITEMS (le lv_conf WS-241 ne donnait pas de police/fond par défaut au clavier → touches/objet non rendus) + move_foreground + clear HIDDEN. Champs/boutons se rendaient déjà (donc géométrie overlay OK) ; seul le clavier manquait. v131 : PAGE HOTSPOT — 2 fixes après test hardware WS-241 : (1) bouton SCAN RETIRÉ (WiFi.scanNetworks allume le WiFi STA sur un écran déjà connecté en BLE Bluedroid → coexistence WiFi+BLE fragile → HANG ; on saisit le SSID au clavier) ; (2) clavier TOUJOURS VISIBLE sur la page (plus de dépendance au tap/focus pour l'afficher, qui ne marchait pas) — _maint_ta_cb bascule juste la cible SSID↔password. ✅ « Save & send » (push BLE {"cmd":"wifi"}) VALIDÉ hardware = « Sent ». ⚠️ Découvert au passage : GDL90 ON (AP WiFi boîtier) déstabilise le BLE → l'écran boot-loop à la connexion (crash heap Bluedroid dans connectBLE) ; OK GDL90 OFF (= contexte provisioning/OTA au sol). v130 : PAGE SAISIE HOTSPOT à l'écran (Settings → SYSTEM → WIFI) — showHotspotEntry() : clavier SSID + password + Scan (2.4GHz) → « Save & send » pousse les creds au boîtier en BLE {"cmd":"wifi"} (via _maint_save_cb → sendWifiCreds), + repli « Web portal ». But : que N'IMPORTE QUEL opérateur provisionne SON hotspot téléphone pour l'OTA cloud SANS portail (AP instable si écran BLE connecté, cf ATC v70-v76) ni USB. Réutilise 100% des widgets/callbacks partagés du (feu) Maintenance (g_maint_ov + _maint_save_cb/_maint_ta_cb/_maint_scan_cb/_maint_kb_cb, restés présents). Le Save est un bouton SÉPARÉ (ne détruit pas le clavier dans son propre event) → PAS le freeze use-after-free de l'éditeur immat clavier (v120-127, abandonné). La tuile SYSTEM→WIFI (_open_wifisetup_cb) ouvre désormais cette page ; la tuile AIRCRAFT garde showWifiSetupInfo (portail immat). Miroir boîtier = FW v78 (console `wifi`). v129 : FIX HEX PAS EFFACÉ — quand on VIDE le hex au portail web (avion sans transpondeur), le boîtier envoie hex="" dans STATUS mais l'écran gardait l'ANCIEN hex (garde if(h[0]) qui ignorait la valeur vide). Fix : le hex est désormais MIRRORÉ EXACT depuis le boîtier (vide = effacé) dès qu'un reg est présent → le bloc Active Aircraft / accueil affiche « ------ » (hex omis). Le boîtier reste la source de vérité. v128 : CALLSIGN PAR PORTAIL WEB (décision Christophe — « WebAccess sécurisé c'était bien mieux »). L'édition immat par CLAVIER BLE (v120-127) est ABANDONNÉE : elle figeait l'écran (write Bluedroid bloquante) et n'aboutissait pas de façon fiable (writes écran→boîtier fragiles/dépendantes du binding). La tuile Settings « AIRCRAFT » (et le tap sur « Active Aircraft ») ouvrent désormais le PORTAIL WEB du boîtier (showWifiSetupInfo : SSID ATCORE-SETUP-<box>, pass ebby-atc, http://192.168.4.1 → champ Callsign) = écriture DIRECTE dans la NVS boîtier au navigateur, robuste, aligné archi (boîtier = source de vérité). Ouvrir la tuile n'envoie AUCUNE write BLE (juste les instructions) → plus de fige ; le bouton « Open portal » (1 seul {"cmd":"portal"}) reste optionnel. Le clavier BLE (acEditShow/acPushReg) n'est plus appelé (code laissé inerte). v127 : ÉDITEUR IMMAT — ANTI-FREEZE + AUTO-VÉRIF. (1) acEditProcess FERME LE CLAVIER D'ABORD puis écrit au boîtier → l'UI ne reste JAMAIS figée sur le clavier même si la write BLE Bluedroid bloque la boucle 1-2 s (cause du « bloqué sur la page clavier »). (2) AUTO-VÉRIFICATION écho boîtier : après setreg on attend que le boîtier RÉ-ÉMETTE l'immat dans STATUS (g_box_reg, distinct du cache local) → bandeau « BOX CONFIRMED: XXX » (vert) si appliqué, « BOX DID NOT APPLY » (ambre) après 6 s → l'écran DIT si le boîtier a vraiment pris le changement (diagnostic sans série). v126 : IMMAT PAR CHR_CONTROL (canal éprouvé) — le push CHR_CONFIG {"r":...} écran→boîtier N'ABOUTISSAIT PAS (l'immat « revenait » à l'ancienne malgré bandeau vert ; cf mémoire : identité écran→boîtier historiquement retirée du chemin CHR_CONFIG). acPushReg envoie désormais {"cmd":"setreg","r":"XXX"} sur CHR_CONTROL = MÊME canal que cloud/upload/wifi/reboot (qui marchent). Requiert boîtier FW v68+ (traite setreg → saveAircraftNVS immat seule + ré-émet reg en STATUS). Le refresh immédiat + bandeau (v124) restent. ⚠️ Le boîtier connecté DOIT être en v68 (OTA) sinon la commande est ignorée. v125 : FIX IMMAT NON APPLIQUÉE — l'écran écrivait CHR_CONFIG en write-SANS-réponse (response=false), or CHR_CONFIG est déclaré NIMBLE_PROPERTY::WRITE (AVEC réponse) côté boîtier → le write-command était silencieusement IGNORÉ (le boîtier ré-émettait l'ancienne immat = « ancienne immat revient » malgré bandeau vert). Fix : acPushReg passe en write AVEC réponse (response=true) → le boîtier ACQUITTE, onWrite/saveAircraftNVS tourne, l'immat est appliquée + ré-émise en STATUS. Le bandeau vert reflète désormais l'ACK réel du boîtier (writeValue renvoie le succès). v124 : ÉDITEUR IMMAT — FEEDBACK ÉCRAN + REFRESH IMMÉDIAT. À la validation : (1) rafraîchit TOUT DE SUITE le bloc « Active Aircraft » (Settings) + l'accueil sans attendre le STATUS du boîtier ; (2) acPushReg renvoie s'il a VRAIMENT écrit sur CHR_CONFIG (gate g_connected) → bandeau 2,2 s « REG SENT -> XXX » (vert, boîtier connecté, écrit) ou « NOT CONNECTED (XXX local) » (ambre) → on VOIT si l'écran a pu pousser au boîtier (diagnostic sans série USB, muette sur S3). Rappel chaîne : l'immat affichée vient du STATUS BLE du boîtier (il ré-émet reg/typ/hex) ; boîtier v67 = applique l'immat seule → l'écran doit repasser à la nouvelle valeur en ~1 s. Si bandeau vert mais pas de changement = souci côté boîtier ; si ambre = écran non connecté au boîtier. v123 : ÉDITEUR IMMAT — TRAITEMENT 100% DIFFÉRÉ (le del_async v122 ne suffisait pas : 1re validation ignorée, 2e = figée). Le callback clavier ne fait plus que POSER UN FLAG (g_acedit_req) + copier le texte ; TOUT le reste (filtrage immat, save NVS, push BLE {"r":...}, suppression overlay) est fait dans acEditProcess() appelée par loop() = HORS event clavier → plus de ré-entrance/use-after-free. + ENCODEUR NEUTRALISÉ tant que l'overlay est ouvert (avant : rotation/clic/appui-long pilotaient la grille Settings CACHÉE derrière → sortie radar accidentelle = « retour figé »). v122 : FIX FREEZE À LA CONFIRMATION IMMAT — acEditClose() faisait lv_obj_del() SYNCHRONE depuis le callback du clavier (LV_EVENT_READY/CANCEL) → destruction du clavier PENDANT le traitement de son propre événement = use-after-free → freeze/reboot dès qu'on validait la nouvelle immat (✓). Fix : lv_obj_del_ASYNC (suppression différée après l'event). Aussi : CLAVIER AZERTY (map custom MAJUSCULES+chiffres+tiret+⌫/✗/✓, adaptée immat). v121 : ÉDITION IMMAT ACCESSIBLE + PLEIN ÉCRAN — (1) l'éditeur immat est maintenant une TUILE dédiée « AIRCRAFT » dans la grille Settings (ex-« PILOT », index 2) → atteignable au TACTILE ET à la MOLETTE (grille encodeur g_encGroup → clic tuile → acEditShow), fini le petit bloc « Active Aircraft » en coin haut-droit difficile à trouver. (2) FIX overlay clavier DÉCALÉ À DROITE : l'overlay était posé à pos(UI_OX=60,0) avec size SCR_W=600 → il débordait 60..660 sur l'écran 0..600 (canvas 480 centré = héritage rond) ; repositionné à (0,0) = PLEIN ÉCRAN physique + clavier explicitement plein largeur (SCR_W) et ~64% hauteur en bas. Le bloc « Active Aircraft » header reste comme raccourci tactile. v120 : ÉDITION IMMATRICULATION DEPUIS L'ÉCRAN (fini le portail web) — Settings → bloc « Active Aircraft » (tap ✎) ouvre un clavier LVGL (lettres+chiffres) ; OK écrit {"r":"<immat>"} sur CHR_CONFIG BLE → le boîtier v67 sauve l'immat SEULE (hex FACULTATIF : plus de hex fabriqué qui pouvait collisionner l'ICAO d'un vrai avion → mauvaise image SafeSky) + conserve le type + ré-inscrit SafeSky. Accueil : identité affichée avec l'immat seule (hex omis OK) ; hint « SET IN SETTINGS » au lieu de « SET VIA WIFI SETUP ». Miroir boîtier = FW v67. v119 : TOGGLE UPLOAD CLOUD — bouton « Cloud: ON/OFF » dans Settings → SYSTEM → DIAGNOSTIC (vert=ON, gris=OFF) qui pilote l'upload Firebase des CSV du boîtier via BLE {"cmd":"cloud","on":0|1} (miroir ATC v66, état lu en STATUS « cup »). OFF = le boîtier ne monte plus le WiFi STA pour uploader → plus de blocage tant que l'antenne WiFi n'est pas active (défaut boîtier OFF). Le label reflète l'état réel « cup » (refresh 1 Hz + optimiste au tap). v118 : traînée plus FINE (rayon point tête 3→2 px). v117 : TRAÎNÉE COHÉRENTE EN VOL RÉEL — stockée en MÈTRES ABSOLUS (repère déplacement-own intégré spd/hdg) au lieu de coords écran, et RE-PROJETÉE chaque frame relativement à own MAINTENANT (corrige la translation own) + cap courant (corrige la rotation en virage). Avant (v112-116, coords écran) : les vieux points décrochaient de l'avion dès qu'own bougeait/tournait — visible même au banc, et pire en vol. Échantillonnage par distance SOL équivalente à 6 px écran (longueur ~constante au zoom, plus besoin de vider au changement d'échelle : re-projection). Traînée allongée 24→36 pts (~1,5×). v116 : TRAÎNÉE — échantillonnage par DISTANCE écran (1 pt tous les 6 px parcourus) au lieu du temps → longueur visuelle CONSTANTE derrière l'avion quel que soit le zoom/vitesse (24 pts ≈ 140 px). Fondu par récence (index). Remplace le modèle temps ∝ zoom de v115 (trop court à 4 NM). v115 : (1) TOGGLE « trafic en TRIANGLE » — Settings → TRAFFIC → SHAPE (PLANE/TRIANGLE, NVS trf_tri, défaut PLANE=avions). En mode triangle l'image d'avion est cachée et un triangle rotaté selon le cap (couleur = niveau menace, taille = réglage ICONS) est dessiné dans aipDrawCb via lv_draw_polygon (g_trf_scr[] posé par updateRadarDR). (2) DURÉE TRAÎNÉE ∝ ZOOM — la cadence d'échantillonnage (trailStepMs) et la fenêtre de fondu suivent l'échelle (250 ms/NM, bornées 0,5-4 s → durée 12-96 s) : à 10-40 NM la traînée n'est plus trop courte. v114 : traînée trafic VIDÉE au changement d'échelle (stockée en coords écran → sinon vieux points restés à l'ancien zoom = incohérent ; détecté dans updateRadarDR, couvre encodeur/tactile/popup). v113 : encodeur radar zoom — SENS DE ROTATION INVERSÉ (dir>0 = portée augmente). v112 : TRAÎNÉE TRAFIC — chaque avion laisse une traînée « comète » de ~30 s derrière lui sur le radar, qui s'estompe (opacité + rayon décroissants avec l'âge) et disparaît. Historique per-callsign (ring 24 pts, 1/s), dessiné dans aipDrawCb (couche radar, sous les icônes), coloré par niveau de menace (gris/ambre/rouge). Toutes cartes. Échantillonné dans updateRadarDR quand l'icône est visible ; la couche radar est désormais invalidée en continu (pas seulement si AIP activée). Aussi : ENCODEUR revient aux PALIERS préréglés 1-2-4-8-12-20-40 (radarZoom snappe kScaleOpts au lieu du ±1 NM de v101) ; palier 10→12 NM (kScaleOpts + popup Settings). v111 : FIX GÉOMÉTRIE WS-241 — bande noire de 16 px en bas + radar remonté de 16 px. Cause : la dalle a un offset de +16 COLONNES (CASET 0x0010→0x01D1 = colonnes 16..465, natif portrait 450 large décalé +16) qui, en paysage (swap_xy), tombe sur l'axe VERTICAL. La v97 avait mis WS241_LCD_YGAP=0 (croyant l'offset +16 lié à une hauteur 480 erronée) → on dessinait en y=0..449 alors que le verre visible est en 16..465 → 16 px hidden en haut + bande noire de 16 px en bas + tout remonté. Fix : WS241_LCD_YGAP=16 (valeur EXACTE lue dans CASET) → contenu recentré, bande éliminée. RAD_CY reste 225 (centre logique 450). v110 : FIX bip RED muet — audioBeep appelait i2s_zero_dma_buffer() JUSTE après i2s_write, or un bip COURT (RED = 80 ms) tient entier dans le tampon DMA (~96 ms) → i2s_write revient avant le playout et le zero EFFAÇAIT le bip avant sa sortie (ORANGE 150 ms dépassait le DMA → survivait, d'où « orange OK, rouge rien »). Fix : DRAINAGE = pousser ~128 ms de silence (i2s_write bloque jusqu'à écoulement du DMA) avant de couper → tous les bips, même courts, sont joués. v109 : MOTEUR D'ALERTE — TAU + HYSTÉRÉSIS embarqués (alert_core.h/js). (1) acEvalThreats passe du converging géométrique (tcpa>0) au TAU = rapprochement RADIAL signé (tau=dist/rapprochement) : un trafic ABEAM ou qui s'éloigne (rapprochement radial ~0 → tau ∞) ne déclenche PLUS → supprime les fausses alertes de passage/circuit (constaté au sim 250-270 s). La bulle-œuf respecte aussi le temps (T≤tOrg). dcpa reste géométrique. (2) acHysteresis() : post-filtre temporel du niveau (monte direct, tient ROUGE 4 s/ORANGE 3 s) → l'alerte + l'audio ne clignotent plus au ras d'un seuil ; appliqué dans alertEngineTick (AC_Hyst statique). Conformance golden RÉGÉNÉRÉE (5000/5000 JS↔C++ identiques). Le sim par défaut (useTau=false→base Tau, useHyst) matche désormais l'écran. v108 : PONT WEBSERIAL — le simulateur altsim/alertsim.html pilote l'écran physique par USB. Nouveau lecteur série simSerialTick() dans loop() : "SIMON"/"SIMOFF" (arme/désarme le mode sim) ; "S{json}" → parseStatus ; "T{json}" → parseTraffic (MÊME schéma que le BLE du boîtier). En mode sim : BLE + pairing coupés, radar forcé → radar + trafic + moteur d'alerte + AUDIO ORANGE/RED joués au bench sans boîtier ni trafic réel. Côté navigateur : bouton "Connect screen" (WebSerial) qui sérialise own+intrus (buildEngineInput) et pousse ~10 Hz. Aucun impact hors bench (g_sim_mode=false par défaut). v107 : ÉCART VOLUME ALERT SOUND élargi — la sonie est logarithmique, les paliers v105/v106 (35/60/90 %) s'entendaient quasi identiques (~8 dB total). Réétalés à 10/32/100 % ≈ −20/−10/0 dB → ~10 dB/cran = ×2 perçu entre LOW/MED/HIGH. OFF (test) → MED. v106 : FIX volume du « Sound test » — le bouton rejouait le carillon à 60 % FIGÉ (audioTestChime), ignorant le réglage ALERT SOUND → au bench « le volume ne marche pas ». Refactor audioChime(vol) : le Sound test joue désormais au volume RÉGLÉ (LOW/MED/HIGH = 35/60/90 %), OFF → joué à MED (le bouton reste un TEST HW toujours audible ; OFF ne mute que les vraies alertes). Le carillon de BOOT garde 60 % (confirmation câblage, indép. du réglage). Les bips d'alerte réels (TaskAudioAlert) utilisaient DÉJÀ le bon volume. v105 : AUDIO SUR LE MOTEUR D'ALERTE (WS-241) — le bip est enfin piloté par acEvalThreats. alertEngineTick publie le niveau (0/1/2) dans g_aud_alert_level ; nouvelle TaskAudioAlert (core 0, prio basse, SEUL producteur I2S post-boot → pas de course sur le buffer statique d'audioBeep) joue un motif TCAS : ORANGE = 1 bip doux 880 Hz/150 ms toutes les ~3 s ; RED = rafale 3 bips aigus 1568 Hz/80 ms toutes les ~1 s ; bip immédiat sur montée de niveau. Gate identique au visuel (au sol/flt_st==0 ou sans fix = silence). Nouveau réglage Settings → TRAFFIC → « ALERT SOUND » (OFF/LOW/MED/HIGH, persisté NVS alert_snd, défaut MED) = volume, OFF coupe. La ligne morte « ALERT MODE » (circuit_ovr inerte depuis v98) est retirée à cette occasion. Le bouton « Sound test » passe par g_aud_test_req (même producteur I2S unique). WS-241 only (seule carte avec DAC câblé). v104 : bouton « Sound test » dédié dans Settings → SYSTEM → Test (rejoue audioTestChime = 3 bips à la demande, pour débuguer le câblage DAC PCM5102A ; no-op hors WS-241). Retiré le carillon auto à l'ouverture de la page (redondant). Boutons Test compactés (52→46px, DY 62→54) pour loger le 6e sur la dalle 450. v103 : MIGRATION ÉCO DATA — vfMigrateOnce() au boot bascule l'ancien défaut VF 2000 → 1000 ft UNE fois (flag NVS atview/vfmig), pour que la flotte EXISTANTE gagne la data par OTA sans réglage écran par écran (un écran provisionné gardait vfilt=2000 et le poussait au boîtier). Respecte un réglage ultérieur. Boîtier miroir = FW v64. v102 : VF (filtre vertical SafeSky) DÉFAUT 2000 → 1000 ft = ÉCO DATA (~−40% du trafic IN reçu = poste data n°1, cf PDF budget EBBY). L'écran pousse g_cfg.vfilt_ft au boîtier à la connexion → VF=1000 dans le beacon → moitié moins de download LTE. Réglable à l'écran (Settings, 500-2000). ⚠️ N'affecte que les écrans à NVS vierge/reset ; un écran déjà provisionné garde sa valeur NVS (vfilt) → régler 1000 une fois via Settings pour la flotte existante. Boîtier miroir = FW v63. v101 : ZOOM ENCODEUR = ±1 NM par cran (radarZoom) — avant : saut entre échelles préréglées kScaleOpts {1,2,4,8,10,20,40}. Maintenant chaque cran de l'encodeur rotatif change la portée radar de 1 NM, bornée 1..40 NM (scale_nm uint8). Les boutons zoom TACTILES (cbSetBtn id 0/1) gardent les paliers préréglés. updSetPage rafraîchit le label radar + le radar lit scale_nm en direct au redraw. v100 : AUDIO I2S RÉPARÉ (WS-241) — passage au driver LEGACY driver/i2s.h (i2s_driver_install/i2s_set_pin/i2s_write). La nouvelle API i2s_std échouait au boot depuis toujours (v69-v85 muets) : le handle du canal était alloué en PSRAM alors que CONFIG_GDMA_ISR_IRAM_SAFE=1 exige la RAM interne → i2s_channel_init_std_mode KO. Le legacy installe son I2S + ISR sans ce check GDMA (intr_alloc_flags=0, pas IRAM) → démarre. Marche pour DAC PCM5102A (jack → casque/AUX Funke) ET ampli MAX98357A (HP), même chaîne BCK5/WS6/DIN7 (PCM5102A : SCK→GND). Bip validé au boot + bouton SYSTEM>Test. tx_desc_auto_clear + i2s_zero_dma_buffer = silence franc (pas de porteuse résiduelle). v99 : FIX accueil WS-241 — le label « ATC V… » tombait à moitié SOUS l'écran (cluster versions bas calé pour 480 via VBOT=+15 depuis v74, jamais remonté au passage 480→450 de v97). Panneau raccourci de 30 px → cluster remonté de 30 px (VBOT +15→-15, PANEL_WS241 only) → ~27 px de marge sous l'ATC sur la dalle 450. T4-S3 (aussi 450, VBOT=0) intact. v98 : ALERTE TRAFIC refondue (WS-241 + T4-S3) — mode circuit RETIRÉ, modèle UNIVERSEL : convergence (CPA tcpa/dcpa) + bulle-œuf décalée VERS L'AVANT dont le lobe avant varie avec la vitesse sol (×30 s, borné 400-2000 m ; arrière 20 %/min 150 m) → un avion qui SUIT (même cap/vitesse, pas de convergence) ne déclenche plus (avant : bulle proximité SYMÉTRIQUE alertait un suiveur co-altitude à <0,5 nm). PLANCHER absolu 150 m co-alt = ROUGE. Gate GND : AUCUNE alerte au sol (flt_st==0). Overlay ROUGE = FLASH FRANC ~2,3 Hz (rouge↔blanc) + agrandi 1,5× (300×44→450×66) et recentré. Chip radar AUTO/CIRC/RTE MASQUÉ (dead). auto-détection AIP (aipNearestAdNm) + g_field_elev_m retirés. ⚠️ g_cfg.circuit_ovr désormais inerte (entrée Settings TRAFFIC + nav encodeur case 26 à nettoyer). v97 : CORRECTION GÉOMÉTRIE — la dalle WS-241 2.41 est bien 600×450 (spec Waveshare, natif SH8601 450×600), PAS 480. Le "600×480" des v71/v94-96 était une erreur (j'avais gonflé la hauteur pour compenser l'offset +16 de la démo ; le vrai fix = offset 0). Passé partout à 450 : ws241_esplcd.h WS241_LCD_H 480→450 (ver_res LVGL), SCR_H WS-241 480→450, RAD_CY 240→225 / RAD_R 198→193 (centre radar), commentaires. Rendu esp_lcd = plein 600×450, offset Y 0. v96 : le chemin esp_lcd SH8601 devient le DÉFAUT de l'env WS-241 (flag -DPANEL_WS241_SH8601_ESPLCD ajouté dans platformio.ini) → `pio run -e WS-241` + OTA/CI buildent l'esp_lcd sans flag manuel. Toutes les WS-241 récentes = SH8601 (v1.0.0 Rev1 + v2.0.1 Rev2, les deux OK). Détection auto contrôleur écartée : la lecture registre 0xDA renvoie 0xFF en QSPI (pas exploitable), et pas de dalle RM690B0 sous la main pour caler un discriminant I2C. ⚠️ Une VRAIE dalle RM690B0 (vieux stock) serait NOIRE avec ce défaut → retirer le flag de l'env pour repasser Arduino_GFX/RM690B0. v95 : chemin esp_lcd WS-241 UNIVERSEL SH8601 (Rev1 v1.0.0 + Rev2 v2.0.1) — le reset dalle diffère selon la révision (v1.0.0 = GPIO21 ; v2.0.1 = TCA9554 @0x20) → on fait les DEUX (reset_gpio_num=WS241_LCD_RST + tcaReset()). Validé hardware sur une dalle v1.0.0 (Rev1) le 2026-07-07 : AT-VIEW rendu propre, mêmes octets/geo 600×480 que la v2.0.1. Le driver RM690B0 pilotait la v1.0.0 en GARBLED (mauvais driver) ; l'esp_lcd_sh8601 la rend nette. ⚠️ Flag opt-in -DPANEL_WS241_SH8601_ESPLCD (pas encore défaut env WS-241 : ne PAS l'activer sur une vraie dalle RM690B0 vieux stock = noir). v94 : WS-241 Rev2.0 (SH8601 v2.0.1) ENFIN RENDU — 2 pièces manquantes trouvées le 2026-07-07 (scan I2C + driver esp_lcd pur en isolation, cf mémoire [[ws241_sh8601_port_reference]]). (1) RESET DALLE VIA TCA9554 : la Rev2.0 pilote le reset AMOLED par l'I/O expander I2C @0x20 (broches 47/48), PAS la GPIO21 de la démo Rev1 → au POR l'expandeur est en entrée, dalle bloquée en reset = NOIR ; fix = config toutes sorties + pulse reset (tcaReset()) AVANT l'init, reset_gpio_num=-1. (2) ORDRE OCTETS RGB565 : le SH8601 attend big-endian, LVGL (LV_COLOR_16_SWAP=0) sort little-endian → bleu 0x001F devient 0x1F00 = VERT ; fix = échange d'octets dans le flush (comme Arduino_GFX en interne). Chemin activé par -DPANEL_WS241_SH8601_ESPLCD (ws241_esplcd.h : vrai driver esp_lcd_sh8601 + LVGL, réplique EXACTE de la démo Waveshare 09_LVGL_Test : double buffer DMA, drv_update_cb mirror, offset +16 Y manuel). Le RTC PCF85063 @0x51 sur le même bus = l'horloge du firmware usine. Diagnostic clé qui a débloqué : test brut examples/ws241_raw (driver SEUL, sans LVGL) + scan I2C → a révélé le TCA9554. v93 : SUPPORT dalles SH8601 WS-241 (stock récent) — le rendu RM690B0 (géométrie 480×600 rot3) pilote les dalles SH8601 (v1.0.0 ET v2.0.1) À CONDITION de leur envoyer l'AMORÇAGE VENDEUR SH8601 dans ws241_shim.h begin() : page CMD2 (0xFE 0x20 / 0x26 0x0A / 0x24 0x80) + pixfmt 0x3A/0xC2 + re-SLPOUT(0x11)/DISPON(0x29) + brightness, à chaque boot (amorçage volatil). Init extraite du dump usine v2.0.1, SANS MADCTL 0x30 ni CASET/PASET (le driver RM690B0 gère la géométrie). Désactivable -DWS241_NO_PRIME pour A/B. v92 : FIX ÉCRAN NOIR (rétroéclairage 0) — la nav encodeur permettait de descendre BRIGHTNESS jusqu'à 0 → panelBright(0) → AMOLED éteint, valeur sauvée NVS → écran noir persistant même après reflash (CPU vivant, IMU OK). Plancher brightness à 1 PARTOUT (edit encodeur, sliders touch mkBigBrightRow/mkSetSliderRow, cbBrightSlider) + AUTO-RÉCUP au boot (bright_lv==0 en NVS → remis à 16). Rallume les écrans éteints dès le reflash. v91 : FIX focus invisible en sous-section — le contour/titre de focus n'existait que sur le cercle retour ; encFocusOutline appliqué à CHAQUE ligne (erReg) + TITRE recoloré (gris/BLEU focus/VERT édition) = sélection lisible ; reset couleurs à l'entrée de section. v90 : NAV ENCODEUR Settings PHASE 2 REVUE (WS-241) — modèle à 2 niveaux DANS une section. Registre EncRow (1 ligne/réglage, rempli par erReg dans les mk*), pas les sous-cellules. TOURNER = passe d'un TITRE à l'autre (contour BLEU). CLIC : sur toggle 2 états = bascule direct ; sur réglage multi-valeurs (radar scale/vertical filter/icons/alert mode/brightness) = ENTRE EN ÉDITION (contour VERT, tourner change la valeur EN DIRECT), re-clic VALIDE et remonte au titre ; sur tuile SYSTEM = ouvre la sous-page ; sur cercle « retour » (dernière ligne) = revient à la grille. APPUI LONG (n'importe où sur Settings) = SORT vers le radar. Le focus suit le scroll (CONFIG 6 lignes). v89 : (remplacé) nav sous-items générique. v88 : NAV ENCODEUR grille Settings (WS-241, phase 1) — sur la page Settings, TOURNER = déplace le focus entre les 5 tuiles (surlignage bordure+fond, groupe LVGL g_encGroup, ordre visuel grille) au lieu de changer de page (fini le retour radar accidentel) ; CLIC = ouvre la section focus ; en section, CLIC = retour à la grille. Radar inchangé (tourner=zoom, appui long=Start/Stop). Phase 2 à venir : focus des sous-items dans chaque section. v87 : OTA écran PAR CARTE — ATV_OTA_TAG distingue enfin ws241/ws216/t4s3/trgb (avant : WS241→t4s3 et WS216→trgb à cause du #define BOARD_T4S3 de WS241 → OTA du mauvais binaire = risque brick). Test WS241/WS216 AVANT T4S3. Chaque carte lit firmware/atv/<tag>/ = SON binaire. ⚠️ Migration : les écrans en v68 (ancienne logique) doivent passer v87 par USB avant de pouvoir OTA proprement (WS-216/WS-241 surtout). v86 : UX upload WROVER — quand le boîtier envoie STATUS rbt=1 (il va tuer le BLE + rebooter pour finir l'upload cloud), l'écran garde un overlay "SAVING FLIGHT — Box rebooting, reconnecting..." pendant une fenêtre de grâce ~40 s AU LIEU de passer toutes les icônes en rouge (déconnexion prise pour une panne). Effacé au retour d'un status normal. Parse le champ STATUS rbt + g_rbt_ms. v85 : durcissement init audio WS-241 (PAS un fix — l'audio reste muet). L'init I2S échoue car gdma (CONFIG_GDMA_ISR_IRAM_SAFE=1) exige un user-context en RAM interne, or le driver I2S alloue le handle du canal en MALLOC_CAP_DEFAULT → PSRAM sur ce build. NON corrigeable au niveau sketch : les flags GDMA/I2S_ISR_IRAM_SAFE sont dans les libs précompilées pioarduino. La tentative heap_caps_malloc_extmem_enable() n'agit QUE sur les allocs malloc()/heap_caps_malloc_default, PAS sur le heap_caps_malloc(DEFAULT) direct du driver → sans effet (gardée, inoffensive). Reste utile : i2s_del_channel sur échec (pas de fuite de handle) + log d'erreur propre au lieu d'un plantage silencieux. VRAI fix à faire quand le DAC sera câblé : driver i2s legacy (driver/i2s.h) ou framework recompilé avec CONFIG_I2S_ISR_IRAM_SAFE=y. v84 : AIP EMBARQUÉE flash sur TOUS les écrans (avant : WS-241 seul, les autres lisaient la SD → pas d'AIP sans carte) → AIP visible sur tous les radars. v83 : WS-216 capsule cap descendue (TOP_MID +28→+58) → sous le N (cardinal extérieur), plus d'interférence. v82 : WS-216 cardinaux N/E/S/W plus gros (montserrat_24) + À L'EXTÉRIEUR de l'anneau (RAD_CARD_OFF +12) ; échelle remontée (−52) pour loger le S dessous. v81 : cardinaux N/E/S/W initialisés à leur vraie position (north-up) au lieu d'empilés en haut → visibles même sans STATUS BLE (avant : « disparus » quand le boîtier n'est pas connecté). v80 : WS-216 label échelle radar agrandi (montserrat_14 gris → 28 TFG). v79 : GS retirée du radar sur TOUTES les cartes (r_radar_gs=nullptr partout ; T4-S3 l'était déjà). v78 : WS-216 glyphes zoom poussés DANS L'ANGLE (décalage vers le coin bas-ext, zone tactile inchangée). v77 : WS-216 zoom = 2 GRANDES zones tactiles de coin (bas-gauche −, bas-droite +), juste le glyphe barres (style T4) centré, EVENT_BUBBLE (swipe préservé) → taps fiables au 1/4 inférieur hors radar. v76 : WS-216 (carré) — boutons zoom +/- dans les coins bas (+ bas-droite, − bas-gauche), agrandis 34→56 px + cible tactile élargie (taps fiables) ; radar RAD_R 175→192 (le carré n'a pas de verre qui clippe). WS-216 only, T-RGB rond inchangé. v75 : WS-241 fine-tuning radar (deltas WS241-only, T4 inchangé) — cluster SafeSky/LTE/GNSS descendu (R_TOP_EXTRA), engrenage+chip remontés (R_GEAR_UP), boutons +/- rapprochés du centre (R_ZOOM_IN). v74 : WS-241 accueil — cluster versions descendu de +15 (au lieu de +30) → ~27 px de marge sous l'ATC (ne colle plus en bas). v73 : WS-241 marges de respiration — RAD_R 208→198 (~20 px de blanc haut/bas, cardinaux N/S ne touchent plus) + bouton zoom "−" réancré SCR_H (ne flotte plus). v72 : WS-241 layout 600×480 — radar recentré (RAD_CY 240/RAD_R 208), pages+overlays+AIP+gear+accueil réancrés via SCR_W/SCR_H board-aware (T4 reste 450). v71 : FIX bande noire bas WS-241 — dalle 2.41 = 600×480 (pas 450), WS241_NATIVE_W/LCD_H 450→480 + UI_OY 0 → canvas 480 remplit pile la hauteur. v70 : ENCODEUR ROTATIF + poussoir (EC11) WS-241 — tourner=zoom radar (page suiv/préc ailleurs), clic=page suivante, appui long=action sheet Start/Stop. A=GPIO38/B=39/SW=40, décodeur quadrature sur ISR. Gated BOARD_WS241, no-op ailleurs. v69 : AUDIO I2S (DAC PCM5102A) TEST sur WS-241 — bip de validation au boot + bouton TEST (BCK=5/LCK=6/DIN=7, SCK→GND ; API i2s_std core 3.x). Gated BOARD_WS241, no-op ailleurs. v68 : SYSTEM = tuiles en grille 2 colonnes (même style que la grille SETTINGS, contour bleu), plus de barres pleine largeur ; SD card en libellé d'état. v67 : SYSTEM = un gros bouton plein large par page (le nom EST sur le bouton, plus de couple label+OPEN). v66 : MENU Settings — fusion CONFIG+DISPLAY en 1 section "CONFIG" scrollable (swipe down ; brightness/theme/scale/vfilt/altdiff/callsign), grille passe à 5 tuiles (6e libre dev futur), SYSTEM = boutons WIFI/FlightLogs/Updates/Diagnostic/Test. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
+#define VIEW_VERSION  "295"  /* BUILD monotone — v295 (20/09) : bouton RETOUR plus visible — 52 px, bord blanc 1 px, chevron recentré ; sélection molette / appui = disque AMBRE plein avec chevron ENCRE (comme STOP). v294 (20/09) : SOUS-SOUS-PAGES (overlays Setup : Updates, Flight Logs, Diagnostic, WiFi Setup, AT-1, popups de choix) dans l'esprit Settings — en-tête titre sans 28 + retour rond 1 px, lignes d'action 48 px bord 1 px radius 6, lignes info sans pastille, interrupteurs pilule, valeurs mono, popup de choix = liste bordée (sélection blanc/encre), Flight Logs = liste mono + boutons bordés, molette : focus bord ambre partout. AirKi Core / AirKi View partout (plus d'AT-CORE/AT-VIEW). v293 (20/09) : page 1 Settings = RETOUR à la liste v290 (Display / Flight / Setup / Debug + AIRCRAFT en-tête) — Christophe préfère ; DEBUG, DIAGNOSTIC et TEST visibles UNIQUEMENT sur le canal DEV (g_box_dev==1 ou build -DATV_OTA_DEV). v292 (20/09) : SOUS-MENUS Settings (Display / Flight / Setup / Debug) dans l'esprit de la page 1 — lignes 48 px bord 1 px radius 6, libellé sans 20 blanc, toggles OFF/ON = pilule, segments 2/N cellules (actif = blanc/encre), valeurs mono 18 gris + chevron, slider fin blanc, en-tête titre sans 28 + retour rond 1 px, focus molette = bord ambre / édition = bord vert, plus de titres ambre ; Debug = AirKi View / AirKi Core. v291 (20/09) : SETTINGS page 1 = maquette « 5 · Réglages » (liste plate) : Aircraft › (immat · type · hex mono), Display ›, Flight ›, Setup ›, Level IMU › (2 taps), Club mode (interrupteur pilule blanc), Diagnostic › (AKV · AKC · SD), pied « AirKi View · AKV n · date ». Lignes 42 px bord 1 px rule-dark radius 6, focus = surface + bord ambre. v290 (20/09) : SETTINGS page 1 (menu) en style AirKi — titre « Settings » Instrument Sans 28, AIRCRAFT en Geist Mono blanc (plus d'ambre en texte), liste pleine largeur sans pastilles colorées : nom sans 24 + sous-titre 16 muted + chevron etch, filets 1 px rule-dark, focus molette = surface #2C2C2C + repère ambre 3 px à gauche, marges 20 px. v289 (20/09) : accueil — désignateur boîtier « AKC » (AirKi Core), pas « AKT » (coquille, Christophe). v288 (20/09) : ssm 2 (parking) traité comme éco (trafic gris) + libellé accueil « parking ». v287 (20/09) : CANAL OTA suivi du boîtier — trame FLIGHT « dev » 0/1 (ATC ≥210) → NVS atview/otadev → l'écran lit firmware/atv/ws241dev (dev) ou ws241 (flotte) quel que soit le binaire compilé. v286 (20/09) : SIGNE AirKi — cible src=3 (autre boîtier AirKi, ATC ≥209) = bleu SafeSky + HALO (anneau 2 px r 20 autour du symbole, couleur de la cible). v285 (20/09) : couleur des cibles par ORIGINE (Christophe) : SafeSky relais = blanc sur encre / encre sur papier (TFG), AT-1 radio = vert #22C55E, SafeSky NATIF (src=2, ATC ≥208 : address ADS-L via LTE) = bleu SafeSky #1E90FF ; périmé gris, menace ambre. Cercle radar r 180 (l'anneau extérieur = RANGE affiché, l'intérieur = moitié). v284 (20/09) : Δalt en CENTAINES de pieds (« +9 », règle d'affichage AT-VIEW, pas « +900 »), Geist Mono 22 ; immat 14 posée sous le symbole avec 4 px d'air (plus de chevauchement). v283 (20/09) : libellés trafic — Δalt en Geist Mono 20 (plus lisible), IMMAT/callsign sous le symbole (Geist Mono 14 gris) à la place de la distance NM (retour test Christophe). v282 (20/09) : FIX CRASH (LoadProhibited / realloc outside heap) au retour radar après changement de THÈME : rebuildAllPages() nettoyait la page radar mais r_spk_btn/r_spk_arc[] (haut-parleur créé à la volée dans updClubUi) gardaient un pointeur mort → lv_obj_set_pos sur objet détruit. Pointeurs remis à zéro avant le nettoyage. v281 (20/09) : immat + GND/FLT bas-droite en Geist Mono 18 (Christophe : « un peu plus grand »). v280 (20/09) : RADAR = spec « AirKi View Radar » (design_handoff_airki 20/09) — centre 300/228, anneaux r174/87 blanc 34 %, repères de quart 2 px + trait NORD 3 px, blocs de coin Geist Mono 13/40 (GS KT · ALT FT / HDG · RANGE + NM 22), icônes GPS/LTE/SafeSky DESSINÉES (réticule, 4 barres, losange) 26 px gap 18 bas-gauche, immat + GND/FLT encadré bas-droite, chevron ambre échancré, cibles vert plein / contour périmé, Δalt ft au-dessus + distance NM dessous (13 px, côté extérieur, masqués < 40 px), triangle plat 26 px, AIP bleu info 14 %/55 % (advisory 8 % tireté), plus d'ambre hors avion propre. v279 (20/09) : engrenage Settings radar VRAIMENT supprimé sur WS241 (updateAllPages le ré-affichait à chaque rafraîchissement hors mode club → glyphe noir fantôme au-dessus de SafeSky). v278 (20/09) : radar épuré — cercles seuls (plus de quadrants ni de graduations), plus de lettres N/S/E/W : un TRAIT plus marqué au NORD (tourne avec le cap), position propre = FLÈCHE ambre pleine (chevron) ; GND/FLT en bas à DROITE ; icônes SafeSky/LTE/GPS plus petites et resserrées (centres 36/88/140, axe 414), symbole GPS abaissé. v277 (20/09) : radar épuré — plus de bouton thème, plus d'heure, plus de haut-parleur (tout dans Settings) ; SafeSky/LTE/GPS alignés (centres à 70 px, même axe vertical). v276 (20/09) : radar — engrenage Settings retiré (accès = appui LONG 2 s sur la molette depuis le radar), bouton thème = disque de la couleur cible (plus de lettre), SafeSky/LTE/GPS EN LIGNE en bas à gauche, haut-parleur déplacé à droite sous RANGE. v275 (20/09) : RADAR AirKi étape 1 — radar RECENTRÉ (RAD_CX 300), GS/ALT en haut à gauche et HDG/RANGE en haut à droite (Geist Mono 28 + unités 13), SafeSky/LTE/GPS en bas à gauche (pilules existantes, SafeSky rouge/vert/gris), UTC en bas à droite, cibles SafeSky blanches / AT-1 #22C55E / menace ambre / périmées #8D9096, avion propre ambre, STOP ambre. CTR/AIP inchangés. v274 (20/09) : PILOTE PAR DÉFAUT sur l'accueil = propriétaire de l'avion (fiche dashboard → boîtier v207, trame FLIGHT « own ») tant qu'aucun pilote ne s'est authentifié. v273 (20/09) : accueil PLEIN PANNEAU 600×450, tailles relevées, heure UTC reçue du boîtier (trame FLIGHT « utc », ATC v206). v272 (20/09) : DESIGN SYSTEM AirKi étape 3 — PAGE D'ACCUEIL « AirKi View » (maquette validée) : monogramme deux couleurs (img_airki_mark), titre Instrument Sans Bold 40, baseline, points d'état GPS/LTE/TRAFFIC (#22C55E ok · #F5A623 attente · #8D9096 off), colonne PILOT / BOX / HEX / FIRMWARE (AKV·AKT), UTC bas-gauche, immat bas-droite (Geist Mono). Couleurs = jetons DS exacts. v271 (20/09) : DESIGN SYSTEM AirKi étape 2 — (1) cibles radar TRIANGLE ou ICÔNE avion : réglage Traffic → TARGETS (le mode triangle v115 était figé sur icônes depuis juillet) ; (2) bouton NOIR/BLANC directement sur le radar (coin haut-gauche) = bascule du thème encre/papier, pages reconstruites en différé. v270 (20/09) : DESIGN SYSTEM AirKi étape 1 — polices Instrument Sans (UI) + Geist Mono (chiffres) converties pour LVGL (examples/at_core_debug/fonts/, tools/fonts/), Montserrat redirigée par macros ; jetons de couleur AirKi (encre #141414, rule #2C2C2C, muted #9A9A94, ambre accent) ; désignateur AKV. v269 (19/09) : CALIBRATION IMU « Level IMU » (Diagnostic, 2 taps) — repère repos capturé avion À PLAT au sol, moyenne 0,5 s, PERSISTÉ en NVS (atview/imu_*) et prioritaire sur l'auto-zéro continu (qui figeait le repère au dernier instant stable : pente, écran en main → ADI décalé au replay). v268 (19/09) : identifiants de vol longs « ATC-<BOX>-YYMMDD-HHMM » (boîtier v204) — VolItem.fid 20→28, trame uploadlist 240→360 o. v267 (19/09) : FIX « No flights on SD » — bug NimBLE-Arduino 2.x onReadCB (copie du 1er mbuf seulement → valeur lue > 275 o corrompue, CHR_FLIGHTS 453 o) patché au build par tools/patch_nimble_readcb.py ; libellé « List error - retry » si le JSON ne parse pas ; log [VOLS] compact. v266 (19/09, diag) : dump intégral (hexa pour non imprimables) de la valeur lue + MTU client. v265 (19/09, diag) : traces Serial [VOLS] dans volsBuildList (longueur lue, erreur parse, nb éléments) + libellé « List error - retry » si le JSON ne parse pas (avant : retour silencieux). v264 (04/09) : radar — cibles AT-1 (src=1, radio) en VERT (C_GREEN), SafeSky (src=0) en NOIR ; menace rouge/ambre + vieillissement gris restent prioritaires (retour partiel sur v231, demande Christophe). v263 (banc 31/08) : page WiFi — choisir un SSID du scan VIDE le champ pass s il change de réseau (le champ gardait le pass du réseau précédent → « Save » aurait poussé le MAUVAIS pass, wifiAddNet dédup SSID l aurait écrasé ; vu par Christophe sur MyIOTWiFi/17promax). Avec ATC v190, laisser le champ vide sur un réseau CONNU du boîtier = promotion avec le pass stocké. v262 : toggles GDL90/NMEA fiables (post-vol 16/08 « les interrupteurs ne faisaient rien ») — émission SYSTÉMATIQUE de la commande (même état affiché identique : désync écran/boîtier possible) + fin du reflet optimiste (la ligne suit STATUS = un write BLE perdu se voit). v261 : v261 (post-vol 16/08) : fenêtre DR des cibles 30→60 s (cap extrapolation + expiry + filet affichage) — les trous SafeSky réels font 60-100 s, la cible reste anticipée cap/vitesse (grise) au lieu de geler puis disparaître ; se recale en douceur au retour du signal (base_ms par avion, mécanique inchangée). Complète la compensation d âge à la source (ATC v187). v260 : v260 : diag routage son (log [SND] lvl/aud/conn). v259 : v259 : ROUTAGE AUDIO vers le DAC du BOÎTIER (ATC v180, demande Didier/EBBY écran compact) — STATUS "aud"=1 → chaque bip (alerte, Sound test) est délégué par BLE {"cmd":"snd","l","v"} ; sinon lecture locale inchangée ; le carillon de boot écran reste LOCAL (confirmation câblage écran). v258 : v258 : jingle de boot = BEETHOVEN 5e (sol·sol·sol·MIb, ta-ta-ta-taaammmm) — la fanfare v257 n a pas plu. v256 (design timbres Christophe) : ORANGE = bip GRAVE lent (660 Hz/180 ms, période 2 s) · ROUGE = bip AIGU rapide SIMPLE (1760 Hz/100 ms, période 450 ms — rafale ×3 abandonnée) ; constantes ALERT_* réglables ; Sound test en miroir (carillon → 3 orange → 6 rouge). v255 : « Sound test » = SÉQUENCE des timbres RÉELS d alerte (carillon → OFF 1 s → ORANGE ×2 → OFF 1 s → ROUGE ×2 rafales), volume ALERT SOUND — juge le rendu exact du DAC (demande Christophe, test PCM5100A). v254 : « NO CARD » (SD écran) RETIRÉ de Diagnostic ; ligne « AT-CORE SD » LIVE (STATUS sd_ok, vert/rouge) dans la section Debug/versions — la seule SD qui compte est celle du boîtier. v253 : page Debug — ligne « SD ATC » (état LIVE de la SD du BOÎTIER via STATUS sd_ok, vert/rouge) ; la SD locale écran n est plus affichée (« on s en fout » — Christophe). v252 (règles nav Christophe) : (1) JAMAIS de boucle molette — butées haut/bas dans les sections ET les overlays (wrap OFF) ; (2) ligne SD écran déplacée Setup → DEBUG + re-probe au build de la page (carte insérée après boot détectée). v251 : nav sections — scroll_to_view UNIQUEMENT sur la ligne focalisée (le scroll vers la ligne quittée créait l aller-retour, Flight) + retour EN TÊTE aussi dans les sections (règle v249), focus initial 1re ligne de contenu. v250 : identité aéronef sur UNE ligne, format compact REG/TYP/HEX, alignée à DROITE (Settings + tous les affichages — le width 232 repliait la 3e valeur). v249 : nav molette UNIFORME sur toutes les sous-pages — RETOUR EN TÊTE du groupe (rows bufferisées dans ovAdd, versées par ovReady), focus initial = 1re ligne (Diagnostic plaçait le retour après le dernier item). v248 (LATENCE TACTILE, blocant gel) : invalidation AIP CONDITIONNELLE (own >2 m/cap/échelle/trace/menace) au lieu de l aveugle 5 Hz qui redessinait la trame scanline en boucle → PIN et icônes réactifs ; bloc DR aussi gelé sous popup (échappait au gate v246). v247 : poussoir popup volume — appui court ET long = VALIDER (le long fermait sans appliquer → validation « 1 fois sur 2 » selon la durée d appui). v246 : UI sous-jacente FIGÉE pendant les popups volume/PIN (updateAllPages sauté) — le redraw radar 1 Hz sous le popup causait la latence et les taps « à répéter ». v245 : icônes son + engrenage NUES (fond transparent), engrenage 88 px glyphe 40 noir = même taille que le son. v244 : trame+filet AIP SUSPENDUS pendant un popup (volume/PIN) — le scanline par frame écroulait la réactivité du menu (latence forte, retour Christophe). v243 : FILET indigo continu 1 px autour des zones AIP par-dessus la trame (retour Christophe) — mêmes points projetés que le fill, clip grossier + garde int16. v242 : PIN admin par défaut 2712 → 1470 (code postal Houtain-le-Val). v241 (retours Christophe) : (1) déverrouillage club SIMPLIFIÉ — poussoir rotatif MAINTENU 6 s → clavier PIN (geste tactile 8 s gardé en secours) ; (2) bouton son disponible AUSSI en mode complet, au-dessus de l engrenage. v240 : contour traitillé AIP RETIRÉ (la trame suffit — retour Christophe) ; helper aipDashLine supprimé. v239 : trame AIP enfin VISIBLE — projection SANS culling pour le fill (un sommet lointain annulait le remplissage de presque toutes les zones) ; trace gris-NOIR 0x4b5563. v238 : (1) TRACE ligne fine 2 px, fondu par ÂGE réel, purges v234 retirées (continuité au retour de cible) ; (2) TRAME AIP 20 % re-livrée en SCANLINE MAISON (pair-impair, spans 2 px, clip écran) — sûre pour polygones concaves, contrairement à lv_draw_sw_polygon (crash v233). v236 URGENT : trame AIP v233 RETIRÉE — lv_draw_sw_polygon crashait (InstrFetchProhibited) sur les polygones clampés/concaves → BOOT-LOOP écran (DA4592, backtrace décodée). Contour traitillé conservé. v235 : accueil — plus de fantôme d immat avant connexion (seul g_box_reg, poussé par le boîtier, s affiche ; le cache NVS écran « TBD01 » ne fuit plus). v234 (photo 05/08) : (1) fusion écran par CLÉ HEX du boîtier ("k" BLE, ATC v171 — fallback cs) → fin du double quand le callsign réel apparaît (3FFC8C) — cohérent règle hex-only ; (2) traces PURGÉES à l expiration/éviction d une cible (fin des moignons orphelins 90 s) + trace indexée par clé. v233 (TEST) : trame de remplissage 20 % INDIGO dans les zones AIP (ATZ indigo clair) en plus du contour traitillé — coordonnées clampées (anti-overflow int16 au zoom serré), zones >256 sommets = contour seul. v232 : traitillé AIP MAISON en pixels écran, phase continue par contour → signature graphique CONSTANTE à toutes les échelles (le dash LVGL redémarrait par segment et ignorait les diagonales). v231 : avions du radar en NOIR (fin des couleurs par source ; menace/vieillissement conservés) + contours AIP en GRIS TRAITILLÉ 2 px (dash 6/5, opa 150). v230 : radar décalé +75 px à droite (centré dans un carré 450×450 côté droit — capsule cap HDG_DX et label échelle RB_DX suivent) + LTE 62→54, GPS 110→100. v229 : boutons zoom +/- SUPPRIMÉS sur WS-241 (la molette fait le zoom, boutons inutiles — retour Christophe) ; conservés sur T4-S3 pur (pas de molette). v228 : GPS/LTE remontés DANS LE BON BLOC (le ré-ancrage WS241 ~l.4007 écrasait les positions de création — v226/227 étaient du code mort, d où « rien ne change ») : LTE 70→62, GPS 120→110. v227 : GPS 88→78, LTE 124→114 (bloc remonté 10 px vers SafeSky). v226 : bouton son descendu (centré dans l angle) ; GPS 96→88, LTE 140→124 — SafeSky/GPS/LTE équidistants. v225 (retours Christophe) : bouton son 88 px glyphe 40, plus bas ; pastilles GPS (108→96) et LTE (156→140) remontées pour aligner les entredistances avec SafeSky. v224 : témoin REC SUPPRIMÉ (redondant avec les indicateurs d état vol existants). v223 (retour Christophe) : glyphe HP plus GRAND (32) et OFF = glyphe GRISÉ (barre supprimée). v222 (retour Christophe) : bouton son fond BLANC + icône/arcs NOIRS ; OFF = même HP barré d une ligne NOIRE (même couleur que l icône) sur la zone du glyphe. v221 : popup volume pilotable à la MOLETTE — tap sur l icône ouvre, ROTATION surligne le niveau (OFF/1/2/3), POUSSOIR valide, appui long ferme sans changer ; le tap tactile direct reste choisir+valider. v220 (spec icône son Christophe) : icône HP COMPOSÉE — HP nu + 1/2/3 arcs concentriques dessinés selon le niveau, barre ROUGE en travers si coupé ; popup relabellé OFF/1/2/3. v219 : icône du tag haut-parleur alignée sur le popup (0=MUTE·1=MID·2=MAX·3=MAX — le niveau 2 affichait MID). v218 : témoin REC façon MAGNÉTOPHONE — ● rouge plein 44 px = enregistre · anneau gris creux = prêt (la pilule RDY/REC v217 était illisible, retour Christophe). v217 (retours Christophe) : colonne club bas-gauche refaite — haut-parleur cercle 72 px glyphe 32 (plein cercle) descendu près du bord + pilule RDY/REC (fond gris/ROUGE, texte centré) juste au-dessus, même axe. v216 : FIX v215 invisible — le bloc club (REC/haut-parleur/engrenage) était dans la branche #else de BOARD_T4S3, jamais compilée sur WS-241 (BOARD_WS241 ⇒ BOARD_T4S3), et après le early-return status invalide → extrait en updClubUi() appelée inconditionnellement. v215 (retours test club Christophe) : témoin REC PERMANENT en club (gris RDY sol / rouge REC en vol, non interactif) + bouton HAUT-PARLEUR à la place de l engrenage (masqué en club — bouton mort) → popup volume alertes MUTE/1/2/3 (g_cfg.alert_snd). v214 : page Diagnostic SCROLLABLE (la ligne « Club mode » v213 à y=444 était sous la zone visible ~450 px → inatteignable). v213 (T32 MODE CLUB, décision Christophe 05/08 — 5 boîtiers EBBY longue durée, pilote ≈ zéro interaction) : flag NVS ui_club (défaut OFF) → surface pilote = radar+zoom+pastilles+alertes + témoin REC non interactif ; Settings inaccessible (verrou nav), prompt MAJ masqué (admin pousse), Start/Stop + chips + unpair désactivés. Accès admin : maintenir ~8 s « ATC vN » (accueil) → PIN (NVS adm_pin déf. 1470) → UI complète 10 min (ou reboot). Interrupteur « Club mode » dans Diagnostic. UN seul firmware, pas de fork. v212 (SAPIN DE NOËL — fix DÉFINITIF, le v207 avait déplacé le problème) : 16 cibles en rotation boîtier × 8 slots écran + éviction « moins fraîche » = musical chairs permanent (icônes qui clignotent). Table STABLE = les 8 plus proches connus (victime = périmée >10 s sinon plus lointaine que l arrivante, sinon pas d entrée) + gris/cible 10→15 s. v211 : (1) palier zoom 0,5 NM (T25 — sentinelle scale_nm=0, helpers kScaleNmF/kScaleLbl, popup 8 choix) ; (2) sens de rotation du zoom encodeur INVERSÉ (demande 04/08, inverse de v113). v210 (T21-bis, mesure banc : 2 écrans côte à côte, OTA 10× plus lente sur l un) : ASSOCIATION AU MEILLEUR NŒUD MESH — scan préalable + begin(ssid,pass,canal,bssid) vers le BSSID au meilleur RSSI (le begin naïf prenait parfois le nœud lointain -84 dBm → download 10× lent/stalls). Même logique que le boîtier v91. v209 (T21) : OTA écran FIABILISÉ — client TLS NEUF par tentative (le client réutilisé du check version échouait par intermittence = « bloqué à 0% » + reboot muet), 3 essais, logs série [ATVOTA] dl try/rssi/stall, message final explicite « move screen NEAR the WiFi router ». v208 (T24-bis, vol patrouille : avion suivi disparu SEC alors que SkyDemon (NMEA du MÊME boîtier, même filtre source) l'affichait → masque individuel écran) : (1) RÈGLE DE SÉCURITÉ : cible <2 km horizontal JAMAIS masquée par vfilt ni filtre sol (l'alt/vitesse d'une source téléphone ne justifie pas de cacher un avion proche) ; (2) DIAG : log série [TRF] MASK/SHOW au changement d'état par cible avec raison (grnd/vfilt/range/dead) + données → le prochain vol s'auto-diagnostique. v207 (T24) : TABLE TRAFIC PERSISTANTE PAR AVION — parseTraffic FUSIONNE par callsign (MAX_TRF 5→8, rx_ms par cible) au lieu d'écraser avec le dernier paquet ; gris PAR CIBLE >10 s sans nouvelle, effacée >30 s, DR continue entre-temps. Couplé boîtier v158 (top-3 garantis + 2 slots tournants) → « l'avion suivi » ne disparaît plus quand il sort du top-5 (avant : il ne restait que la trace alors que le signal arrivait toujours). v206 : FIX ROUE INFINIE page FlightLogs (retour Christophe 02/08 « la roue tourne fou, ça induit en erreur ») : volsShowStatus prend un flag spin — la roue n'apparaît que pour un travail EN COURS (sending/deleting) et est SUPPRIMÉE à chaque état terminal (No unsent / Tap to select / Transfer OK / failed / timeout). v205 : N° DU BOÎTIER (box-id STATUS) dans les titres des pages UPDATES et DIAGNOSTIC (T19, demande Christophe ×2 : savoir QUEL boîtier on manipule). v204 : CHASSE AUX BUGS (miroir ATC v142, audits 2026-07-31). (1) Panneau scan WiFi : auto-refresh 4 s → 15 s + PLAFOND 3 (le wscan @4 s en continu déclenchait un scan radio boîtier qui TUAIT ses associations STA → TLS -1, cycles kill-BLE, « Box OFFLINE ») ; timeout → g_scan_t0 ré-armé (sinon re-tir immédiat au tick suivant) ; (2) GDL90 coupé à l/ouverture du panneau SEULEMENT s/il est ON (avant : OFF persisté en NVS à l/insu du pilote) + RESTAURÉ à la fermeture ; (3) auto-devreport v188 : ONE-SHOT par session + DIFFÉRÉ 10 s après reconnexion stable (ne plus le tirer dans la rafale atv/vfilt/wscan) ; (4) grâce reboot 40 → 90 s (cycle kill-BLE+reboot WROVER ~60 s) + grâce armée LOCALEMENT à l/envoi de devreport (auto + bouton) sans attendre le notify rbt. v203 : TRAIN « X.1 » BANC (miroir ATC v141) — -DATV_OTA_DEV (env WS-241-dev, tag ws241dev) affiche X.1.<build>-dev, la flotte reste 1.2.x. Affichage seul, BUILD monotone et OTA inchangés. v202 : SETUP AT-1 SUR L'ÉCRAN. Nouvelle ligne « AT-1 traffic setup » dans Settings→Flight → réutilise l'overlay WiFi (g_maint_mode=1) : Scan SSID via le boîtier (wscan), pass usine AT1-00565 pré-rempli, « Save & connect » → {"cmd":"at1wifi"}+{"cmd":"at1","on":1}, « Disable AT-1 » → {"cmd":"at1","on":0}. Helpers sendAt1/sendAt1Creds. Page Flight scrollable sur toutes les cartes. v201 : page Settings→Flight (WS-241, 7 lignes avec ALERT SOUND) rendue SCROLLABLE verticalement → ALERT SOUND / TRAFFIC SRC atteignables (retour Christophe : « pas accès au menu tout en bas »). Le swipe horizontal reste pour la nav entre sections. v200 : SÉPARATION ÉCRAN DE TEST / FLOTTE. -DATV_OTA_DEV (env WS-241-dev) → tag OTA « ws241dev » → l'écran de test (celui de CE276D) lit/publie firmware/atv/ws241dev/ ; les écrans flotte gardent firmware/atv/ws241/ (stable v198). À flasher UNE fois en USB. Aucun changement fonctionnel vs v199 hormis le tag. v199 : AT-1 CÔTÉ ÉCRAN (à blanc, boîtier ATC v138). (1) COULEUR DU TRAFIC PAR ORIGINE sur le radar : SafeSky (réseau) = BLEU, AT-1 (radio) = VERT → le pilote distingue les deux flux ; la MENACE (rouge/ambre) reste prioritaire, le vieillissement (gris) l'emporte. TrafficEntry.src parsé du champ « src » du trafic BLE. (2) SÉLECTEUR SOURCE dans Settings→Flight (« TRAFFIC SRC » : SafeSky / AT-1 / Both) → {"cmd":"trafsrc"} au boîtier (filtre affichage + EFB), reflète STATUS « tsel ». DY Flight 72→64 pour loger la ligne sur WS-241. STATUS at1/tsel parsés. ⏳ RESTE : picker WiFi AT-1 sur l'écran (scanner le SSID + saisir le pass, ex AT1-00565) → {"cmd":"at1wifi"} ; toggle AT-1 on/off écran. v198 : INVITE DE MAJ SUR L'ACCUEIL (retour Christophe). Label ambre centré en bas de l'accueil « AT-CORE update available (vN) » quand le boîtier a vu une MAJ (STATUS oav>fwv — check boot FIABLE côté ATC v137 : fenêtre heap-libre + coupe GDL90). N'affiche JAMAIS « à jour » (le check WROVER n'est pas fiable en continu sans reboot) — seulement l'invite POSITIVE. Structure g_atv_remote prête pour l'invite MAJ écran (check ATV au boot à ajouter proprement, sans perturber le BLE). v197 : SIMPLIFICATION page Updates (retour Christophe) — bouton « Check now » RETIRÉ (le check passif 1-TLS mentait « up to date » sur WROVER écran connecté, heap fragmenté). Le tap sur la ligne AT-CORE ou AT-VIEW fait DÉJÀ le vrai check+install robuste (côté boîtier : kill-BLE si besoin ; côté écran : atvCloudOta). Remplacé par une invite « Tap AT-CORE or AT-VIEW to check & install ». v196 : bump de VALIDATION OTA (v195→v196) — vérifie le fix corps-vide côté écran (plus de « Already up to date » à tort). Aucun changement fonctionnel vs v195. v195 : FIX OTA "checking = up to date" à tort (retour Christophe). atvCloudOta faisait http.getString().toInt() SANS valider le corps : un GET code=200 mais corps VIDE/tronqué (lecture TLS partielle, heap Bluedroid serré) donnait "".toInt()=0 → 0<=local → "Already up to date" alors qu'une MAJ écran était dispo. Corrigé : corps validé (non vide, len<=8, numérique, >0), sinon remote reste -1 → "Version check failed - retry" (au lieu de conclure à jour). Même bug/fix que le boîtier ATC v133. Timeout version 15→20 s. v194 : TOGGLE NMEA/BLE (sortie EFB SkyDemon) dans Settings → Flight, à côté de GDL90. mkSegRow "NMEA" (OFF/ON) → sendNmea() envoie {"cmd":"nmea","on":0|1} au boîtier (carac FFE1 HM-10, flux GPRMC/PFLAU/PFLAA en talker $GN). Reflète STATUS "nme" (miroir g_nmea_ui, optimiste + confirmé au tick, comme GDL90). NMEA = BLE (coexiste cloud/OTA) ≠ GDL90 = AP WiFi (exclusif STA). Le pilote choisit la sortie EFB selon sa tablette (SkyDemon iOS = NMEA/BLE ; ForeFlight = GDL90/WiFi). ALERT SOUND décalé en position 5 sur WS241. Boîtier = ATC v132 (cause racine talker $GN validée SkyDemon). v193 : (1) ROTATIF SANS BOUCLE (général) — lv_group_set_wrap(false) sur le groupe menu (g_encGroup) ET les overlays (g_ovGroup) : arrivé au dernier item on ne reboucle PLUS au 1er, on remonte la liste en tournant dans l'autre sens (retour Christophe). (2) Actions Flight Logs en 2 COLONNES compactes sélectionnables au rotatif, labels courts : Last · Selected · Unsent · Del · Del all (helper volActBtn = volBtn + contour blanc au focus + ovAdd ; label=child0 → confirmations _vols_del/_vols_delall lisent child0). v192 : GESTION VOLS (Flight Logs). Lignes de vol CLIQUABLES = coche/décoche (surlignage brand + texte blanc) → nouveau bouton « Send selected » qui envoie {"cmd":"uploadlist","f":[fids cochés]} (≤8). Nouveau bouton « Delete all » (rouge, double-tap de confirmation) → {"cmd":"delall"} = efface TOUS les vols (envoyés + non-envoyés) pour la gestion SD en dev (⚠️ perte assumée ; le boîtier v111 exclut les traces LTE/TRF/SS + le vol en cours). Helper sendCtlRaw() pour les trames CTRL à paramètres. Actions Flight Logs : Send last · Send selected · Send all unsent · Delete sent · Delete all. La liste affiche déjà jusqu'à 16 vols (scrollable). v191 : overlay OTA PLEIN ECRAN (fin de la marche arriere du menu vers Setup visible autour de l ancien overlay 400x210, retour Christophe).  — bump à CHAQUE flash. = version.txt OTA écran (atoi). NE PAS remettre à zéro. v190 : FEEDBACK immédiat au lancement Update AT-CORE (retour Christophe : tap AT-CORE → retour Setup muet → on croyait à un plantage). Overlay « Starting update… » dès le tap (g_ota_pending) jusqu'à ce que le boîtier pousse son état OTA ; si rien après 25 s → « Box not responding » (le boîtier n'a pas démarré = diagnostic clair). v189 : FIX page Updates figée sur « AT-CORE OFFLINE » alors que le boîtier est connecté (retour Christophe). La page ne se rebuildait QUE sur changement de oav (ligne loop) → si ouverte pendant un reboot boîtier (OTA/devreport) puis reconnexion, elle restait sur l'état offline. Fix : rebuild aussi sur changement de g_status.valid / g_status.fwv (s_updShownValid/Fwv). v188 : AUTO-REFRESH FLEET après OTA ATC — retour Christophe : « la nouvelle version ATC ne remonte pas auto, toujours obligé de faire un Report to fleet après un Update ATC ». Fix CÔTÉ ÉCRAN (marche sans bootstrap boîtier, ≠ le flag ATC v101 qui exige le boîtier déjà en v101) : dans loop(), si g_status.fwv AUGMENTE (OTA détecté à la reconnexion post-reboot), l'écran envoie auto sendCtl("devreport") → le boîtier (v97+) reporte la nouvelle version dans /devices → dashboard à jour tout seul. Gaté hausse stricte + pas la 1re connexion (s_lastFwv!=0). v187 : RETOUR VISUEL sur les actions boîtier « muettes » (retour Christophe : quand un process s'exécute, l'indiquer/informer). Helper sendCtlToast(cmd,msg) = sendCtl + toast (vert si connecté / ambre « Box offline » sinon, 2,2 s, lv_layer_top). Appliqué à : Report to fleet (« Reporting to fleet… »), Reboot box, WiFi test, Start/Stop/Continue flight (page Test). Avant : tap → rien à l'écran, on ne savait pas si la commande était partie. v186 : FIX OTA écran « WiFi connect failed » alors que les creds sont bons. atvCloudOta faisait WiFi.begin AVEC le BLE (Bluedroid) encore actif → la coexistence WiFi+BLE sur S3 faisait échouer la connexion WiFi (contention radio/heap) — le boîtier se connectait mais pas l'écran. Fix : BLEDevice::deinit(true) AVANT WiFi.begin → le WiFi a la radio + le heap → connexion fiable (+ heap libre pour le TLS ensuite). BLE mort après → l'échec WiFi reboote maintenant (restaure le BLE). v185 : bouton « AT-CORE » de la page Updates TOUJOURS actionnable (comme AT-VIEW) → tap = sendCtl("otaupdate") = le boîtier fait un check+download OTA robuste (kill-BLE si besoin, fiable WROVER, cf ATC v99). Avant : bouton affiché SEULEMENT si oav>fwv, or « Check now » (check passif 1-TLS) rate souvent sur WROVER écran connecté → oav=0 → pas de bouton → OTA WROVER impossible sans USB. Maintenant on peut lancer l'update WROVER en 1 tap (no-op affiché si déjà à jour). v184 : bouton "Report to fleet" (Settings → Diagnostic) → sendCtl("devreport") → le boîtier (ATC v97) écrit son état dans /devices (tableau FLEET dashboard) via WiFi, KILL-BLE, SANS reboot ni USB. Utile après un flash / changement WiFi pour rafraîchir FLEET immédiatement (le report best-effort au boot échoue souvent sur WROVER écran connecté = heap). v183 : VERSION ÉCRAN via CHR_CONTROL (canal FIABLE). Le push CHR_IMU (v182) ne remontait pas : côté écran g_chrImu était null (CHR_IMU pas trouvé à la découverte GATT) → jamais de push → colonne ATV restait 0. L'écran annonce désormais {"cmd":"atv","v":VIEW_VERSION} sur CHR_CONTROL (sendCtl/write, canal éprouvé bind/wifi/cloud) à CHAQUE (re)connexion (fin de découverte, après subscribe) → le boîtier (ATC v96) le parse dans g_atv_ver → /devices → colonne ATV du dashboard. Le champ "v" du push CHR_IMU (v182) est conservé (inoffensif). v182 : VERSION ÉCRAN remontée au tableau FLEET du dashboard. Le push CHR_IMU (4 Hz, mouchard G/assiette) gagne un champ "v":VIEW_VERSION → le boîtier (ATC v95) le parse dans g_atv_ver et l'inclut dans /devices → la colonne ATV du dashboard affiche la version de l'écran (avant : 0, jamais transmise en BLE normal). Coût nul (champ constant ajouté à un push existant). v181 : AMÉLIORATION MOTEUR D'ALERTE (post-vol 21/07, inspiré Garrecht AT-1). P1 — le PLANCHER co-altitude (RED à <150 m) exige désormais la CONVERGENCE (closeRate>0.1) : 2 avions en FORMATION/tour de piste (parallèles, séparation stable, rapprochement radial ~0) ne déclenchent plus RED en continu. Validé sur la trace formation réelle FJFVB×FJVUD du 21/07 : ROUGE 207→98 échantillons (−53%), les 98 restants tous convergents/imminents. P3-lite — champ AC_Out.imminent (RED + tau≤tImm 12 s OU plancher convergent) → le SECTEUR pulse 2× plus vite (110 ms vs 220) = urgence graduée sans 3e niveau. P2 — la pilule d'alerte affiche l'ANNONCE VERTICALE (LEVEL/ABOVE/BELOW/HIGH/LOW sur Δalt, façon AT-1) en 2ᵉ ligne sous « N O'CLOCK ». alert_core.h + miroir alert_core.js modifiés à l'identique, conformance JS↔C++ régénérée (5000/5000 OK). v180 : GDL90 déplacé dans Settings → FLIGHT. GDL90 DÉPLACÉ dans Settings → FLIGHT (c'est une fonction de vol — SkyDemon/EFB). Était enterré en 6ᵉ ligne de l'overlay Diagnostic → tombait sous la zone visible ~450px WS-241 = « disparu ». Devient une bascule segmentée OFF/ON (mkSegRow) liée au miroir local g_gdl_ui : tap → sendGdl() ({"cmd":"gdl90"}) + reflet optimiste g_status.gdl (effet de bord cbSeg), sync live sur STATUS "gdl" quand la section Flight est ouverte. Retiré de Diagnostic (diagGdlBtn/_diag_gdl_cb/g_diag_gdl inutilisés). Ordre Flight : GROUNDED · ICONS · AIP · GDL90 · ALERT SOUND(WS241). v179 : ALERTE DIRECTIONNELLE — le cadre périphérique plein (v154) est REMPLACÉ par un SECTEUR de cadran illuminé pointant vers la menace (« où regarder dehors »), validé d'abord dans le simulateur (drawAlertOverlay). Impl LVGL : alertSectorDraw() = bande d'arc épaisse (lv_draw_arc, ±45° autour du relèvement, angle clock C→C*30-90, rouge pulsé/ambre) dessinée dans aipDrawCb AVANT la garde valid ; alertRingsDraw() = anneau rouge pulsé autour de chaque cible RED (g_trf_scr/g_trf_threat). alertFrameUpdate() masque désormais le cadre en permanence. Invalidation radar étendue à g_threat!=NONE (pulse). v178 : trf_tri FORCÉ false (mode triangle retiré, ignore vieux NVS → trafic toujours en icônes avion). v177 : THEME se comporte enfin COMME ALT DIFFERENCE (retour Christophe). Avant (≤v176) le toggle THEME déclenchait un rebuildAllPages IMMÉDIAT → flash plein écran + focus qui saute, alors qu'Alt Difference bascule juste le segment en place. Or la page Settings est TOUJOURS sombre (UI_BG, indép. du thème depuis v156) → rebuilder pendant qu'on est dans Settings est un flash INUTILE ; seul le radar/accueil dépend du thème. Fix : le toggle THEME (cbSeg segmenté + cbSetBtn tactile) bascule EN PLACE (segApplyStyle+updSetPage, comme Alt Difference) et pose g_theme_dirty ; le rebuild global est DIFFÉRÉ à la SORTIE de Settings (switchPage : g_page==2 && np!=2 && dirty → rebuildAllPages une seule fois, au moment où on rejoint une page qui dépend du thème). Suppression de la mécanique v176 (s_reopen_sec/ré-ouverture de section) devenue inutile. v176 : NAV BOUTON ROTATIF EC11 — 2 correctifs (retour Christophe). (1) RADAR SCALE + VERTICAL FILTER (lignes ER_POP) : en édition molette, erEditApply appelait s.apply(k) SANS cfgSave() ni updSetPage() → la valeur changeait en interne mais le label ne bougeait pas ET rien n'était persisté = « pas de choix de scale/vfilt au bouton ». Fix : applique + cfgSave + updSetPage (comme le chemin tactile _pick_sel_cb). (2) THEME (ligne ER_SEG, Display) : le toggle déclenche g_rebuildPages → rebuildAllPages → settingsShowMenu te renvoyait au MENU (section + focus perdus). Fix : s_reopen_sec mémorise s_cur_sec avant le rebuild (cbSeg dark + cbSetBtn 12/13) ; rebuildAllPages ré-ouvre la section (settingsOpenSection) si g_page==2 → on reste dans Display, focus encodeur restauré. AIP (ER_SEG, Flight) : câblage OK, toggle via cbSeg quand g_aip_loaded (AIP embarquée flash = vrai au boot) → à re-tester à l'écran (v175 a rendu l'AIP très pâle : un toggle ON peut se voir peu). v175 : AIP « ROUGE TRÈS LÉGER ET FIN » (retour Christophe) — le tracé CTR/ATZ passe de width=2/opa=150 (v153) à width=1/opa=80 (~31%). Teintes inchangées (CTR 0xFF3B30, ATZ 0xFF9E96) : à faible opacité sur fond sombre le rouge vif rend un contour discret. But : contour AIP présent mais qui n'écrase NI le trafic NI les cercles de portée du radar, et qui se distingue mieux de l'alerte anticollision (aplat rouge clignotant). Pur rendu LVGL (aipDrawCb), aucun changement fonctionnel/BLE. v156 : REFONTE SETTINGS incr.2b — SECTIONS EN NOIR. La page Settings passe en NOIR AMOLED (UI_BG, indépendant du thème radar), titre de section BLANC. Les builders de lignes T4 (mkSegRow/mkSegRowN/mkPopRow/mkBigStepRow/mkBigBrightRow/mkBigBtnRow) foncés : labels blancs (UI_INK), pistes/sliders/steppers sombres (UI_TRACK 0x2a3138), segment inactif gris clair (UI_INK2), valeurs/glyphes blancs. Focus encodeur : titre neutre 0x4b5563→UI_INK2 (lisible sur noir). Labels PILOT/SD/ABOUT foncés + agrandis (ABOUT pitch 40→52). SHAPE (avion/triangle) + HELIPORT RETIRÉS (options de niche, décision Christophe). ⚠️ Contrôles segmentés CONSERVÉS (juste foncés) ; interrupteurs verts + regroupement Declutter + réorg contenu Flight/Debug = incr.2c. Colorimétrie ciblée builders Settings uniquement (auth/radar/rond intacts). v155 : REFONTE SETTINGS incr.2a — MENU watchOS. Le menu (T4/WS-241) devient une LISTE PLEIN ÉCRAN sur fond NOIR AMOLED : 4 sections (Display/Flight/Setup/Debug) en lignes hautes = pastille icône colorée (bleu/vert/orange/gris, LVGL symbols) + nom + sous-titre + chevron ›, focus molette = surface claire + anneau turquoise. s_menu couvre l'en-tête clair partagé (foreground) → titre "Settings" + Active Aircraft propres. Les 4 lignes tiennent dans 450px SANS être coupées par le bas (MENU_ROWH=76, RY0=104, pas 88). Mapping vers sections existantes (Display→[0] · Flight→[1] traffic · Setup→[3] system · Debug→[4] about) — CONTENU inchangé (réorg = incr.2b) : les SECTIONS gardent le look clair actuel, on juge le MENU d'abord. Ronds (T-RGB/WS216) : grille 2×3 conservée (une liste pleine largeur clipperait dans le cercle). Nav molette : gord vertical {0,1,3,4}. v154 : REFONTE SETTINGS incr.1 — ÉCHELLE DE TAILLES (lisibilité tableau de bord). Écran physiquement minuscule (WS-241 ~3.7×5cm) lu de loin : toutes les polices Settings étaient codées en dur (libellés 20, légendes 14) → trop petites. Introduction d'un système CENTRAL board-aware FS_TITLE/FS_TILE/FS_ROW/FS_VALUE/FS_CAP (T4/WS-241 : 34/30/28/26/20 ; ronds : 28/24/24/22/18), plancher absolu FS_CAP. Appliqué aux builders partagés (mkSegRow/mkSegRowN/mkPopRow/mkBigStepRow/mkBigBrightRow/mkBigBtnRow/mkNavTile/mkMenuBtn) + titre section + bloc Active Aircraft → CONFIG, TRAFFIC et les tuiles passent en gros d'un coup. Segments multi-options gardés en FS_CAP (piste 224px fixe, anti-débordement). En-tête T4 réancré (titre 24→34 : soulignement 70→80, CY 94→96). Réf ergo = watchOS (Digital Crown = rotatif). AUCUN changement de structure (DISPLAY/FLIGHT/SETUP/DEBUG = incr.2) ni de sous-pages. Reste : ABOUT (pitch 40 serré) + popups options au prochain pass. v153 : AIP EN ROUGE (choix Christophe après essai visuel du turquoise v151 sur WS-241). Tracé CTR 0x1FE6D6 -> 0xFF3B30, ATZ 0x8FF3EA -> 0xFF9E96 ; width=2 et opa=150 inchangés. Historique de la teinte : bleu AeroTrace (se confondait avec les cercles de portée du radar) -> turquoise v151 -> rouge v153. ⚠️ À SURVEILLER : le rouge est aussi la couleur de r_alert_overlay (C_RED 0xef4444) quand le moteur anticollision lève un THREAT_RED — teintes proches. Distinguable en pratique (alerte = aplat/bordure clignotante ; AIP = trait 2px à 59% d'opa), mais si ça accroche en vol, décaler l'AIP vers un rouge brique (ex 0xC0392B) pour réserver le rouge vif à l'alerte. v152 : CALLSIGN encore réduit (retour Christophe : « l'immat peut être proportionnellement toujours un peu plus petite que la différence d'altitude »). kCsFont 16/22/26 → 14/18/22 face à kAltFont 26/32/38 → ratio ~0.56 CONSTANT sur les 3 réglages ICONS S/M/L (avant : 0.62/0.69/0.68, irrégulier). La hiérarchie visuelle Δalt > immat est donc tenue à l'identique quelle que soit la taille d'icône choisie. v151 : 3 CORRECTIFS UI (retour Christophe, vol test 2026-07-16). (1) APPAIRAGE plein écran : pairOverlayShow faisait set_size(480,480)@UI_OX → 2 bandes blanches de ~60px sur les écrans 600px (WS-241/T4-S3) ; passe à SCR_W×SCR_H@(0,0) board-aware (contenu en TOP_MID reste centré). (2) CALLSIGN plus petit : kCsFont 22/28/32 → 16/22/26 (< kAltFont = la diff d'altitude reste prioritaire, elle est OK). (3) AIP TURQUOISE : le tracé CTR/ATZ en bleu AeroTrace (C_BRAND) se confondait avec les cercles de portée du radar → passe en turquoise vif 0x1FE6D6 opa 150 (flash mais léger) ; ATZ 0x8FF3EA. Tunable (couleur/opa) ou rouge si préféré — « à essayer ». ⏳ Chantier de fond à venir : revoir l'UI page par page pour le bouton rotatif (EC11 WS-241). v150 : FENÊTRE D'ATTERRISSAGE — bouton « STOP NOW » (retour Christophe). L'overlay « Landing detected — Stopping flight in Ns » n'avait qu'UN bouton « Cancel - keep flying » (on ne pouvait qu'ANNULER l'arrêt, jamais le forcer). Il passe à DEUX boutons : « Stop now » (rouge, → sendCtl("stop_flight") = FLT_ENDED immédiat côté boîtier, skip le décompte 5 s FLT_STOP_GRACE_MS) + « Keep flying » (vert, → continue_flight, comportement historique). ⚠️ Clarification timers : la fin de vol attend FLT_STOP_GRACE_MS = 5 s (PAS 3 min) ; les « 3 min » sont SS_STOP_GRACE_MS = coupure éco SafeSky/data (v87 boîtier), sans rapport avec la clôture du CSV. Purement côté écran (le boîtier gère déjà stop_flight via _endflight_cb). ⏳ Suite possible (plus tard) : 3ᵉ bouton « Stop & offload » = stop_flight + upload direct si hotspot joignable. v149 : OFFLOAD — 2 correctifs UX (retour terrain) : (1) AUTO-REFRESH du picker : tant que le panneau scan est ouvert, l'écran re-scanne le boîtier toutes les 4 s → un hotspot allumé APRÈS l'ouverture (ex iPad qu'on vient de passer en "Maximiser la compatibilité") apparaît SEUL, sans fermer/rouvrir. Anti-flicker/mis-tap : _maint_buildScanFromBox ne REDESSINE la liste QUE si l'ensemble des SSID a changé. (2) Bouton SHOW/HIDE sur le champ mot de passe (clavier écran petit → fautes de frappe invisibles) : voir la saisie en clair puis re-masquer (lv_textarea_password_mode). Champ pass rétréci 540→410 pour loger le bouton. v148 : OFFLOAD CSV SANS PORTAIL (côté écran, avec boîtier v88) — la page HOTSPOT SETUP (SYSTEM→WIFI) gagne un bouton « Scan » : le BOÎTIER scanne les réseaux (BLE {"cmd":"wscan"} → GDL90 OFF + radio STA) et renvoie [{s,r}] dans CHR_WSCAN 6E40000E ; l'écran lit ça (handshake STATUS « wsr », comme flt_rdy dans le hook périodique) → PICKER de hotspots triés par signal → tap = remplit le SSID (fini le SSID à l'aveugle / le portail instable). L'écran ne scanne PLUS lui-même (WiFi+BLE = hang, cf v131). Puis « Save & send » (creds) + nouveau bouton « Offload now » = {"cmd":"uploadall"} → upload DIRECT boîtier→Firebase des vols non envoyés. _maint_scan_cb recâblé synchrone→async ; _maint_buildScanFromBox lit la char ; g_chrWscan/g_scan_pending/g_scan_title. Boutons ajoutés sur la branche 600px (WS-241/T4-S3) ; branche ronde inchangée pour l'instant. v147 : LABELS CIBLES ENCORE PLUS GRANDS + PROPORTIONNELS au réglage ICONS S/M/L (retour vol test : "texte peut être plus grand, pourquoi pas proportionnel aux icônes"). Arrays kCsFont/kAltFont indexés par g_cfg.icon_sz (immat 22/28/32, Δalt 26/32/38 ; défaut L=2 → 32/38, > v146). Police appliquée à la création + RÉ-APPLIQUÉE quand ICONS change (boutons case 16/17 + segment kind==1, comme lv_img_set_zoom). v146 : LISIBILITÉ RADAR EN VOL (retour vol test EBBY, 3 réglages écran) — (1) LABELS CIBLES AGRANDIS : immat/callsign montserrat_16→24, Δalt (ex "+07") 20→28 ("texte trop petit, pas lisible en vol"). (2) TRAÎNÉE trafic PLUS VISIBLE (elle "ne se voyait pas") : dots rayon tête 2→4 px / queue 1→2 px, plancher opacité 0.08→0.22, gris 0x9ca3af→0xB8C0CC (plus clair sur fond sombre) ; couleurs menace rouge/ambre inchangées. (3) CONTOURS AIP CTR/TMA SEMI-TRANSPARENTS : ajout opa=140 (~55%) sur ctr_d (hérité par atz_d) — avant 100% opaque → "les lignes se confondaient avec les cercles du radar". Aucun changement fonctionnel/BLE, pur rendu LVGL. v145 : FIX BRIGHTNESS WS-241 — VRAIE CAUSE = FORMAT DE COMMANDE QSPI. Le driver SH8601 (esp_lcd_sh8601_ws241.c, tx_param) transforme CHAQUE commande en QSPI : (cmd<<8)|(0x02<<24) quand use_qspi_interface. Les commandes d'init passent par là (donc l'affichage marche). MAIS WS241_Panel::setBrightness appelait esp_lcd_panel_io_tx_param avec le cmd BRUT 0x51 → mauvais format → la dalle IGNORAIT l'écriture (SPI OK, tx=0x0, mais AUCUN effet). D'où « brightness figée au max, slider sans effet » depuis que l'esp_lcd est défaut (v96). Fix : setBrightness envoie 0x51 dans le format transformé ((0x51<<8)|(0x02<<24)) + ajout de {0x53,0x20} (BCTRL) à l'init (comme vendor_specific_init_default du driver). Les faux pistes v143 (double ×17) / v144 (BCTRL brut) échouaient car TOUS mes appels directs avaient le mauvais format. Diagnostic : instrumentation [SLIDER]/[BRIGHT] → slider OK + setBrightness appelé + tx=0x0 mais dalle muette → lecture du driver tx_param. v143 : FIX BRIGHTNESS WS-241 (esp_lcd SH8601) — double mapping ×17. panelBright() (l.187 PANEL_WS241) fait déjà 0-16→(v>=16?255:v*17)=0-255, MAIS WS241_Panel::setBrightness (ws241_esplcd.h) re-mappait (v>=16?255:v*17) → toute valeur ≥17 retombait sur ≥16 → 255 → brightness TOUJOURS au max, slider sans effet. Fix : setBrightness esp_lcd envoie v directement à la commande 0x51 (déjà 0-255). Le chemin Arduino_GFX (ws_gfx->setBrightness) et les autres cartes sont inchangés. v142 : MIGRATION NimBLE Phase 2 COMPLÈTE — T-RGB + WS-216 rejoignent WS-241/T4-S3 → LES 4 ÉCRANS EN NimBLE. T-RGB = core 2.x → NimBLE 1.4.x (réutilise le chemin T4-S3, guards NIMBLE_1X) ; WS-216 = core 3.x → NimBLE 2.x (réutilise le chemin WS-241, guards NIMBLE_2X). Juste flag -DUSE_NIMBLE + lib par env dans platformio.ini (aucun code neuf : les guards 3-voies de v141 couvrent tout). Plus AUCUN écran en Bluedroid. ⚠️ Validation hardware par carte à faire (USB, pas de rollback écran). v141 : MIGRATION NimBLE Phase 2 — T4-S3 (core 2.x → NimBLE-Arduino 1.4.x, -DUSE_NIMBLE ajouté à [env:T4-S3] + h2zero/NimBLE-Arduino@^1.4.3). L'API scan 1.4.x ≈ Bluedroid (start(sec,cb) + setAdvertisedDeviceCallbacks + onResult par POINTEUR, pas d'onScanEnd) et diffère de la 2.x (start(ms) + setScanCallbacks + onResult const* + onScanEnd). Les guards #ifdef USE_NIMBLE passent en 3 voies via macro NIMBLE_2X/NIMBLE_1X (dérivé de ESP_ARDUINO_VERSION_MAJOR, défini dans le bloc includes) : ATCAdv (3 classes : NimBLEScanCallbacks 2.x / NimBLEAdvertisedDeviceCallbacks 1.4.x / BLEAdvertisedDeviceCallbacks Bluedroid), scanDoneCb (Bluedroid+1.4.x, #ifndef NIMBLE_2X), startScan (2.x setScanCallbacks/start(ms) vs Bluedroid+1.4.x setAdvertisedDeviceCallbacks/start(sec,cb)), ATC_ONDISCONNECT (reason en 2.x seulement). Le reste du chemin USE_NIMBLE vaut pour les 2 versions (subscribe(true,cb), deleteClient, setMTU global, getRSSI, bleStr(NimBLEAttValue), alias using). Alias BLEScanResults ajouté (scanDoneCb 1.4.x). Les 4 envs compilent : T4-S3 NimBLE 1.4.x (RAM 26,2% vs 30,7% Bluedroid, Flash 31,5% vs 37,2%), WS-241 NimBLE 2.x (27,0%), T-RGB/WS-216 restent Bluedroid (31,4/31,2%) intacts. Reste Phase 2 : T-RGB (core 2.x, réutilise le chemin 1.4.x tel quel) + WS-216 (core 3.x, réutilise le chemin 2.x). v140 : MIGRATION NimBLE Phase 1 (WS-241 SEUL) — le client BLE écran passe de Bluedroid à NimBLE-Arduino 2.x, gardé par -DUSE_NIMBLE (ajouté au seul env WS-241 dans platformio.ini). Motif : Bluedroid EXIGE de la RAM interne (pas de PSRAM) → sur le WS-241 (buffers LVGL DMA en RAM interne) le contrôleur BT était affamé (`BLE_INIT: Malloc failed`, crashs connectBLE, écran boot-loop à la connexion quand l'AP GDL90 du boîtier est levée — cf ATC gdl90 Phase 2). NimBLE a une empreinte RAM bien plus petite → heap libéré. Approche : alias `using BLEClient=NimBLEClient` etc. → 95% du code client BLE inchangé ; SEULS les points divergents NimBLE 2.x sont gardés #ifdef USE_NIMBLE : includes (NimBLEDevice.h), bleStr(NimBLEAttValue) (readValue → NimBLEAttValue, sinon ambigu car operator std::string ET String), REG_NOTIFY (subscribe(true,cb) vs registerForNotify), ATCAdv (NimBLEScanCallbacks : onResult(const*) + onScanEnd, corps factorisé dans atcAdvOnDevice), onDisconnect(client,int reason), setClientCallbacks(cb,false), setMTU global (NimBLEDevice::setMTU à l'init, pas par client), scan start() en MS + setScanCallbacks, deleteClient (~NimBLEClient privé), getRSSI (pas de haveRSSI en 2.x). Les 3 autres envs (T-RGB/T4-S3 core 2.x, WS-216 core 3.x) restent Bluedroid (#else) → 4 envs compilent. Phase 2 (à venir) = étendre NimBLE aux 3 autres (guards 1.4.x/2.x pour le core 2.x). v139 : TOGGLE GDL90 ON/OFF à l'écran (Settings → SYSTEM → DIAGNOSTIC, à côté de Cloud). sendGdl() → {"cmd":"gdl90","on":0|1} sur CHR_CONTROL (marche depuis le fix heap v138) ; reflète l'état réel STATUS "gdl" (vert=ON mode VOL/SkyDemon, gris=OFF mode SOL/OTA). Le pilote bascule GDL90 au doigt avant/après vol, sans console. Calqué sur le toggle Cloud v119. Le boîtier persiste en NVS (gdl90 reste ON après reboot). v138 : ROOT FIX HEAP BLE WS-241 — les buffers de dessin LVGL (ws241_esplcd.h) étaient en DOUBLE buffer 1/10 d'écran en RAM INTERNE DMA = ~108 Ko, affamant le contrôleur Bluetooth (Bluedroid EXIGE de la RAM interne, pas de PSRAM) → `BLE_INIT: Malloc failed` en boucle → TOUTES les writes écran→boîtier échouaient (« Portal requested » mais AP jamais levée, immat inchangée, cloud/upload), + crashs de reconnexion (connectBLE) + figes. C'ÉTAIT LA RACINE de tous les soucis écran (pas true/false, pas coexistence GDL90). Fix : buffer SIMPLE 1/20 (~26 Ko) → libère ~82 Ko de RAM interne pour Bluedroid → BLE fiable. Rendu imperceptiblement + lent. v137 : REVERT du true v136 → writes CHR_CONTROL de nouveau en `response=false`. Le true (write-AVEC-réponse) FIGEAIT l'écran : le Bluedroid bloque la boucle LVGL en attendant la réponse ATT du boîtier (jamais reçue à temps) → écran figé, même pas le stade « Portal requested ». Donc NI false (ignoré côté boîtier) NI true (fige côté écran) ne marchent pour déclencher le portail par BLE depuis l'écran = dilemme Bluedroid de fond (comme l'abandon v128). CONCLUSION : le bouton écran « Open portal » n'est PAS fiable ; le portail se lève par GESTE 3× RST du boîtier (pairCycleGuard, sans BLE) ou console USB `portal`. v136 : (annulé). v135 : RETRAIT du PIÈGE éditeur immat écran TOUTES les writes CHR_CONTROL (sendCtl portal/upload/reboot/start/stop · sendWifiCreds · sendVfilt · sendCloud · acPushReg) passaient en `response=false` (SANS réponse). Or CHR_CONTROL boîtier = NIMBLE_PROPERTY::WRITE (AVEC réponse) → sur ce NimBLE une write SANS réponse est SILENCIEUSEMENT IGNORÉE (symptôme : « Portal requested » vert à l'écran mais AP jamais levée ; immat inchangée). Fix : `writeValue(..., true)` (AVEC réponse) partout → le boîtier ACQUITTE, onWrite tourne, la commande passe. (Le WRITE_NR ATC v81 était un mauvais remède ; le vrai fix = write avec réponse côté écran, exactement comme v125 l'avait fait pour CHR_CONFIG.) v135 : RETRAIT du PIÈGE éditeur immat écran (v134 showImmatEntry FIGEAIT — la write BLE Bluedroid bloque la boucle LVGL, même mur que l'abandon v128 ; le WRITE_NR ATC v81 fiabilise la RÉCEPTION mais l'ÉMISSION Bluedroid fige quand même). La tuile Settings AIRCRAFT (i==2) + le tap « Active Aircraft » re-pointent sur showWifiSetupInfo = PORTAIL WEB du boîtier (change l'immat au navigateur, FIABLE cf ATC v82-v85). showImmatEntry/_immat_save_cb/sendSetreg restent dans le source mais NE SONT PLUS appelés (inertes). → changer l'immat = PORTAIL, point. v134 : ÉDITEUR IMMAT À L'ÉCRAN (fini le portail) — showImmatEntry() : champs Registration + Type (ICAO) au clavier MAJUSCULES → « Save & send » écrit DIRECT sur le boîtier en BLE {"cmd":"setreg","r","t"} (helper sendSetreg, canal CHR_CONTROL éprouvé) → le boîtier v68+ applique en direct (saveAircraftNVS + ré-inscription SafeSky) + ré-émet reg/typ en STATUS → bloc Active Aircraft se rafraîchit = confirmation. MÊME pattern robuste que la page hotspot (Save = bouton SÉPARÉ, clavier lv_obj_align BOTTOM_MID + styles forcés WS-241) → PLUS le freeze use-after-free de l'ancien éditeur v120-127 (qui faisait lv_obj_del dans le callback clavier). Câblé sur la tuile Settings AIRCRAFT (i==2) + tap « Active Aircraft » (remplacent showWifiSetupInfo/portail v128). Réutilise g_maint_ov + g_maint_ssid_ta (immat) / g_maint_pass_ta (type) + g_maint_kb. v133 : FIX clavier invisible WS-241 = LA BÊTISE — la branche BOARD_T4S3 posait le clavier avec lv_obj_set_pos(0,258), or lv_keyboard_create s'AUTO-ALIGNE BOTTOM_MID en interne → set_pos ne vide PAS cet align → à la passe layout l'align interne gagnait = clavier mal placé/hors zone visible. Fix : lv_obj_align(BOTTOM_MID) (comme la branche ronde #else qui, elle, marchait) + overlay hauteur SCR_H (450) au lieu de 480 (30 px sous l'écran). Les styles forcés v132 restent (inoffensifs). v132 : PAGE HOTSPOT — clavier invisible sur WS-241 → FORÇAGE style : bg + police explicites sur LV_PART_MAIN et LV_PART_ITEMS (le lv_conf WS-241 ne donnait pas de police/fond par défaut au clavier → touches/objet non rendus) + move_foreground + clear HIDDEN. Champs/boutons se rendaient déjà (donc géométrie overlay OK) ; seul le clavier manquait. v131 : PAGE HOTSPOT — 2 fixes après test hardware WS-241 : (1) bouton SCAN RETIRÉ (WiFi.scanNetworks allume le WiFi STA sur un écran déjà connecté en BLE Bluedroid → coexistence WiFi+BLE fragile → HANG ; on saisit le SSID au clavier) ; (2) clavier TOUJOURS VISIBLE sur la page (plus de dépendance au tap/focus pour l'afficher, qui ne marchait pas) — _maint_ta_cb bascule juste la cible SSID↔password. ✅ « Save & send » (push BLE {"cmd":"wifi"}) VALIDÉ hardware = « Sent ». ⚠️ Découvert au passage : GDL90 ON (AP WiFi boîtier) déstabilise le BLE → l'écran boot-loop à la connexion (crash heap Bluedroid dans connectBLE) ; OK GDL90 OFF (= contexte provisioning/OTA au sol). v130 : PAGE SAISIE HOTSPOT à l'écran (Settings → SYSTEM → WIFI) — showHotspotEntry() : clavier SSID + password + Scan (2.4GHz) → « Save & send » pousse les creds au boîtier en BLE {"cmd":"wifi"} (via _maint_save_cb → sendWifiCreds), + repli « Web portal ». But : que N'IMPORTE QUEL opérateur provisionne SON hotspot téléphone pour l'OTA cloud SANS portail (AP instable si écran BLE connecté, cf ATC v70-v76) ni USB. Réutilise 100% des widgets/callbacks partagés du (feu) Maintenance (g_maint_ov + _maint_save_cb/_maint_ta_cb/_maint_scan_cb/_maint_kb_cb, restés présents). Le Save est un bouton SÉPARÉ (ne détruit pas le clavier dans son propre event) → PAS le freeze use-after-free de l'éditeur immat clavier (v120-127, abandonné). La tuile SYSTEM→WIFI (_open_wifisetup_cb) ouvre désormais cette page ; la tuile AIRCRAFT garde showWifiSetupInfo (portail immat). Miroir boîtier = FW v78 (console `wifi`). v129 : FIX HEX PAS EFFACÉ — quand on VIDE le hex au portail web (avion sans transpondeur), le boîtier envoie hex="" dans STATUS mais l'écran gardait l'ANCIEN hex (garde if(h[0]) qui ignorait la valeur vide). Fix : le hex est désormais MIRRORÉ EXACT depuis le boîtier (vide = effacé) dès qu'un reg est présent → le bloc Active Aircraft / accueil affiche « ------ » (hex omis). Le boîtier reste la source de vérité. v128 : CALLSIGN PAR PORTAIL WEB (décision Christophe — « WebAccess sécurisé c'était bien mieux »). L'édition immat par CLAVIER BLE (v120-127) est ABANDONNÉE : elle figeait l'écran (write Bluedroid bloquante) et n'aboutissait pas de façon fiable (writes écran→boîtier fragiles/dépendantes du binding). La tuile Settings « AIRCRAFT » (et le tap sur « Active Aircraft ») ouvrent désormais le PORTAIL WEB du boîtier (showWifiSetupInfo : SSID ATCORE-SETUP-<box>, pass ebby-atc, http://192.168.4.1 → champ Callsign) = écriture DIRECTE dans la NVS boîtier au navigateur, robuste, aligné archi (boîtier = source de vérité). Ouvrir la tuile n'envoie AUCUNE write BLE (juste les instructions) → plus de fige ; le bouton « Open portal » (1 seul {"cmd":"portal"}) reste optionnel. Le clavier BLE (acEditShow/acPushReg) n'est plus appelé (code laissé inerte). v127 : ÉDITEUR IMMAT — ANTI-FREEZE + AUTO-VÉRIF. (1) acEditProcess FERME LE CLAVIER D'ABORD puis écrit au boîtier → l'UI ne reste JAMAIS figée sur le clavier même si la write BLE Bluedroid bloque la boucle 1-2 s (cause du « bloqué sur la page clavier »). (2) AUTO-VÉRIFICATION écho boîtier : après setreg on attend que le boîtier RÉ-ÉMETTE l'immat dans STATUS (g_box_reg, distinct du cache local) → bandeau « BOX CONFIRMED: XXX » (vert) si appliqué, « BOX DID NOT APPLY » (ambre) après 6 s → l'écran DIT si le boîtier a vraiment pris le changement (diagnostic sans série). v126 : IMMAT PAR CHR_CONTROL (canal éprouvé) — le push CHR_CONFIG {"r":...} écran→boîtier N'ABOUTISSAIT PAS (l'immat « revenait » à l'ancienne malgré bandeau vert ; cf mémoire : identité écran→boîtier historiquement retirée du chemin CHR_CONFIG). acPushReg envoie désormais {"cmd":"setreg","r":"XXX"} sur CHR_CONTROL = MÊME canal que cloud/upload/wifi/reboot (qui marchent). Requiert boîtier FW v68+ (traite setreg → saveAircraftNVS immat seule + ré-émet reg en STATUS). Le refresh immédiat + bandeau (v124) restent. ⚠️ Le boîtier connecté DOIT être en v68 (OTA) sinon la commande est ignorée. v125 : FIX IMMAT NON APPLIQUÉE — l'écran écrivait CHR_CONFIG en write-SANS-réponse (response=false), or CHR_CONFIG est déclaré NIMBLE_PROPERTY::WRITE (AVEC réponse) côté boîtier → le write-command était silencieusement IGNORÉ (le boîtier ré-émettait l'ancienne immat = « ancienne immat revient » malgré bandeau vert). Fix : acPushReg passe en write AVEC réponse (response=true) → le boîtier ACQUITTE, onWrite/saveAircraftNVS tourne, l'immat est appliquée + ré-émise en STATUS. Le bandeau vert reflète désormais l'ACK réel du boîtier (writeValue renvoie le succès). v124 : ÉDITEUR IMMAT — FEEDBACK ÉCRAN + REFRESH IMMÉDIAT. À la validation : (1) rafraîchit TOUT DE SUITE le bloc « Active Aircraft » (Settings) + l'accueil sans attendre le STATUS du boîtier ; (2) acPushReg renvoie s'il a VRAIMENT écrit sur CHR_CONFIG (gate g_connected) → bandeau 2,2 s « REG SENT -> XXX » (vert, boîtier connecté, écrit) ou « NOT CONNECTED (XXX local) » (ambre) → on VOIT si l'écran a pu pousser au boîtier (diagnostic sans série USB, muette sur S3). Rappel chaîne : l'immat affichée vient du STATUS BLE du boîtier (il ré-émet reg/typ/hex) ; boîtier v67 = applique l'immat seule → l'écran doit repasser à la nouvelle valeur en ~1 s. Si bandeau vert mais pas de changement = souci côté boîtier ; si ambre = écran non connecté au boîtier. v123 : ÉDITEUR IMMAT — TRAITEMENT 100% DIFFÉRÉ (le del_async v122 ne suffisait pas : 1re validation ignorée, 2e = figée). Le callback clavier ne fait plus que POSER UN FLAG (g_acedit_req) + copier le texte ; TOUT le reste (filtrage immat, save NVS, push BLE {"r":...}, suppression overlay) est fait dans acEditProcess() appelée par loop() = HORS event clavier → plus de ré-entrance/use-after-free. + ENCODEUR NEUTRALISÉ tant que l'overlay est ouvert (avant : rotation/clic/appui-long pilotaient la grille Settings CACHÉE derrière → sortie radar accidentelle = « retour figé »). v122 : FIX FREEZE À LA CONFIRMATION IMMAT — acEditClose() faisait lv_obj_del() SYNCHRONE depuis le callback du clavier (LV_EVENT_READY/CANCEL) → destruction du clavier PENDANT le traitement de son propre événement = use-after-free → freeze/reboot dès qu'on validait la nouvelle immat (✓). Fix : lv_obj_del_ASYNC (suppression différée après l'event). Aussi : CLAVIER AZERTY (map custom MAJUSCULES+chiffres+tiret+⌫/✗/✓, adaptée immat). v121 : ÉDITION IMMAT ACCESSIBLE + PLEIN ÉCRAN — (1) l'éditeur immat est maintenant une TUILE dédiée « AIRCRAFT » dans la grille Settings (ex-« PILOT », index 2) → atteignable au TACTILE ET à la MOLETTE (grille encodeur g_encGroup → clic tuile → acEditShow), fini le petit bloc « Active Aircraft » en coin haut-droit difficile à trouver. (2) FIX overlay clavier DÉCALÉ À DROITE : l'overlay était posé à pos(UI_OX=60,0) avec size SCR_W=600 → il débordait 60..660 sur l'écran 0..600 (canvas 480 centré = héritage rond) ; repositionné à (0,0) = PLEIN ÉCRAN physique + clavier explicitement plein largeur (SCR_W) et ~64% hauteur en bas. Le bloc « Active Aircraft » header reste comme raccourci tactile. v120 : ÉDITION IMMATRICULATION DEPUIS L'ÉCRAN (fini le portail web) — Settings → bloc « Active Aircraft » (tap ✎) ouvre un clavier LVGL (lettres+chiffres) ; OK écrit {"r":"<immat>"} sur CHR_CONFIG BLE → le boîtier v67 sauve l'immat SEULE (hex FACULTATIF : plus de hex fabriqué qui pouvait collisionner l'ICAO d'un vrai avion → mauvaise image SafeSky) + conserve le type + ré-inscrit SafeSky. Accueil : identité affichée avec l'immat seule (hex omis OK) ; hint « SET IN SETTINGS » au lieu de « SET VIA WIFI SETUP ». Miroir boîtier = FW v67. v119 : TOGGLE UPLOAD CLOUD — bouton « Cloud: ON/OFF » dans Settings → SYSTEM → DIAGNOSTIC (vert=ON, gris=OFF) qui pilote l'upload Firebase des CSV du boîtier via BLE {"cmd":"cloud","on":0|1} (miroir ATC v66, état lu en STATUS « cup »). OFF = le boîtier ne monte plus le WiFi STA pour uploader → plus de blocage tant que l'antenne WiFi n'est pas active (défaut boîtier OFF). Le label reflète l'état réel « cup » (refresh 1 Hz + optimiste au tap). v118 : traînée plus FINE (rayon point tête 3→2 px). v117 : TRAÎNÉE COHÉRENTE EN VOL RÉEL — stockée en MÈTRES ABSOLUS (repère déplacement-own intégré spd/hdg) au lieu de coords écran, et RE-PROJETÉE chaque frame relativement à own MAINTENANT (corrige la translation own) + cap courant (corrige la rotation en virage). Avant (v112-116, coords écran) : les vieux points décrochaient de l'avion dès qu'own bougeait/tournait — visible même au banc, et pire en vol. Échantillonnage par distance SOL équivalente à 6 px écran (longueur ~constante au zoom, plus besoin de vider au changement d'échelle : re-projection). Traînée allongée 24→36 pts (~1,5×). v116 : TRAÎNÉE — échantillonnage par DISTANCE écran (1 pt tous les 6 px parcourus) au lieu du temps → longueur visuelle CONSTANTE derrière l'avion quel que soit le zoom/vitesse (24 pts ≈ 140 px). Fondu par récence (index). Remplace le modèle temps ∝ zoom de v115 (trop court à 4 NM). v115 : (1) TOGGLE « trafic en TRIANGLE » — Settings → TRAFFIC → SHAPE (PLANE/TRIANGLE, NVS trf_tri, défaut PLANE=avions). En mode triangle l'image d'avion est cachée et un triangle rotaté selon le cap (couleur = niveau menace, taille = réglage ICONS) est dessiné dans aipDrawCb via lv_draw_polygon (g_trf_scr[] posé par updateRadarDR). (2) DURÉE TRAÎNÉE ∝ ZOOM — la cadence d'échantillonnage (trailStepMs) et la fenêtre de fondu suivent l'échelle (250 ms/NM, bornées 0,5-4 s → durée 12-96 s) : à 10-40 NM la traînée n'est plus trop courte. v114 : traînée trafic VIDÉE au changement d'échelle (stockée en coords écran → sinon vieux points restés à l'ancien zoom = incohérent ; détecté dans updateRadarDR, couvre encodeur/tactile/popup). v113 : encodeur radar zoom — SENS DE ROTATION INVERSÉ (dir>0 = portée augmente). v112 : TRAÎNÉE TRAFIC — chaque avion laisse une traînée « comète » de ~30 s derrière lui sur le radar, qui s'estompe (opacité + rayon décroissants avec l'âge) et disparaît. Historique per-callsign (ring 24 pts, 1/s), dessiné dans aipDrawCb (couche radar, sous les icônes), coloré par niveau de menace (gris/ambre/rouge). Toutes cartes. Échantillonné dans updateRadarDR quand l'icône est visible ; la couche radar est désormais invalidée en continu (pas seulement si AIP activée). Aussi : ENCODEUR revient aux PALIERS préréglés 1-2-4-8-12-20-40 (radarZoom snappe kScaleOpts au lieu du ±1 NM de v101) ; palier 10→12 NM (kScaleOpts + popup Settings). v111 : FIX GÉOMÉTRIE WS-241 — bande noire de 16 px en bas + radar remonté de 16 px. Cause : la dalle a un offset de +16 COLONNES (CASET 0x0010→0x01D1 = colonnes 16..465, natif portrait 450 large décalé +16) qui, en paysage (swap_xy), tombe sur l'axe VERTICAL. La v97 avait mis WS241_LCD_YGAP=0 (croyant l'offset +16 lié à une hauteur 480 erronée) → on dessinait en y=0..449 alors que le verre visible est en 16..465 → 16 px hidden en haut + bande noire de 16 px en bas + tout remonté. Fix : WS241_LCD_YGAP=16 (valeur EXACTE lue dans CASET) → contenu recentré, bande éliminée. RAD_CY reste 225 (centre logique 450). v110 : FIX bip RED muet — audioBeep appelait i2s_zero_dma_buffer() JUSTE après i2s_write, or un bip COURT (RED = 80 ms) tient entier dans le tampon DMA (~96 ms) → i2s_write revient avant le playout et le zero EFFAÇAIT le bip avant sa sortie (ORANGE 150 ms dépassait le DMA → survivait, d'où « orange OK, rouge rien »). Fix : DRAINAGE = pousser ~128 ms de silence (i2s_write bloque jusqu'à écoulement du DMA) avant de couper → tous les bips, même courts, sont joués. v109 : MOTEUR D'ALERTE — TAU + HYSTÉRÉSIS embarqués (alert_core.h/js). (1) acEvalThreats passe du converging géométrique (tcpa>0) au TAU = rapprochement RADIAL signé (tau=dist/rapprochement) : un trafic ABEAM ou qui s'éloigne (rapprochement radial ~0 → tau ∞) ne déclenche PLUS → supprime les fausses alertes de passage/circuit (constaté au sim 250-270 s). La bulle-œuf respecte aussi le temps (T≤tOrg). dcpa reste géométrique. (2) acHysteresis() : post-filtre temporel du niveau (monte direct, tient ROUGE 4 s/ORANGE 3 s) → l'alerte + l'audio ne clignotent plus au ras d'un seuil ; appliqué dans alertEngineTick (AC_Hyst statique). Conformance golden RÉGÉNÉRÉE (5000/5000 JS↔C++ identiques). Le sim par défaut (useTau=false→base Tau, useHyst) matche désormais l'écran. v108 : PONT WEBSERIAL — le simulateur altsim/alertsim.html pilote l'écran physique par USB. Nouveau lecteur série simSerialTick() dans loop() : "SIMON"/"SIMOFF" (arme/désarme le mode sim) ; "S{json}" → parseStatus ; "T{json}" → parseTraffic (MÊME schéma que le BLE du boîtier). En mode sim : BLE + pairing coupés, radar forcé → radar + trafic + moteur d'alerte + AUDIO ORANGE/RED joués au bench sans boîtier ni trafic réel. Côté navigateur : bouton "Connect screen" (WebSerial) qui sérialise own+intrus (buildEngineInput) et pousse ~10 Hz. Aucun impact hors bench (g_sim_mode=false par défaut). v107 : ÉCART VOLUME ALERT SOUND élargi — la sonie est logarithmique, les paliers v105/v106 (35/60/90 %) s'entendaient quasi identiques (~8 dB total). Réétalés à 10/32/100 % ≈ −20/−10/0 dB → ~10 dB/cran = ×2 perçu entre LOW/MED/HIGH. OFF (test) → MED. v106 : FIX volume du « Sound test » — le bouton rejouait le carillon à 60 % FIGÉ (audioTestChime), ignorant le réglage ALERT SOUND → au bench « le volume ne marche pas ». Refactor audioChime(vol) : le Sound test joue désormais au volume RÉGLÉ (LOW/MED/HIGH = 35/60/90 %), OFF → joué à MED (le bouton reste un TEST HW toujours audible ; OFF ne mute que les vraies alertes). Le carillon de BOOT garde 60 % (confirmation câblage, indép. du réglage). Les bips d'alerte réels (TaskAudioAlert) utilisaient DÉJÀ le bon volume. v105 : AUDIO SUR LE MOTEUR D'ALERTE (WS-241) — le bip est enfin piloté par acEvalThreats. alertEngineTick publie le niveau (0/1/2) dans g_aud_alert_level ; nouvelle TaskAudioAlert (core 0, prio basse, SEUL producteur I2S post-boot → pas de course sur le buffer statique d'audioBeep) joue un motif TCAS : ORANGE = 1 bip doux 880 Hz/150 ms toutes les ~3 s ; RED = rafale 3 bips aigus 1568 Hz/80 ms toutes les ~1 s ; bip immédiat sur montée de niveau. Gate identique au visuel (au sol/flt_st==0 ou sans fix = silence). Nouveau réglage Settings → TRAFFIC → « ALERT SOUND » (OFF/LOW/MED/HIGH, persisté NVS alert_snd, défaut MED) = volume, OFF coupe. La ligne morte « ALERT MODE » (circuit_ovr inerte depuis v98) est retirée à cette occasion. Le bouton « Sound test » passe par g_aud_test_req (même producteur I2S unique). WS-241 only (seule carte avec DAC câblé). v104 : bouton « Sound test » dédié dans Settings → SYSTEM → Test (rejoue audioTestChime = 3 bips à la demande, pour débuguer le câblage DAC PCM5102A ; no-op hors WS-241). Retiré le carillon auto à l'ouverture de la page (redondant). Boutons Test compactés (52→46px, DY 62→54) pour loger le 6e sur la dalle 450. v103 : MIGRATION ÉCO DATA — vfMigrateOnce() au boot bascule l'ancien défaut VF 2000 → 1000 ft UNE fois (flag NVS atview/vfmig), pour que la flotte EXISTANTE gagne la data par OTA sans réglage écran par écran (un écran provisionné gardait vfilt=2000 et le poussait au boîtier). Respecte un réglage ultérieur. Boîtier miroir = FW v64. v102 : VF (filtre vertical SafeSky) DÉFAUT 2000 → 1000 ft = ÉCO DATA (~−40% du trafic IN reçu = poste data n°1, cf PDF budget EBBY). L'écran pousse g_cfg.vfilt_ft au boîtier à la connexion → VF=1000 dans le beacon → moitié moins de download LTE. Réglable à l'écran (Settings, 500-2000). ⚠️ N'affecte que les écrans à NVS vierge/reset ; un écran déjà provisionné garde sa valeur NVS (vfilt) → régler 1000 une fois via Settings pour la flotte existante. Boîtier miroir = FW v63. v101 : ZOOM ENCODEUR = ±1 NM par cran (radarZoom) — avant : saut entre échelles préréglées kScaleOpts {1,2,4,8,10,20,40}. Maintenant chaque cran de l'encodeur rotatif change la portée radar de 1 NM, bornée 1..40 NM (scale_nm uint8). Les boutons zoom TACTILES (cbSetBtn id 0/1) gardent les paliers préréglés. updSetPage rafraîchit le label radar + le radar lit scale_nm en direct au redraw. v100 : AUDIO I2S RÉPARÉ (WS-241) — passage au driver LEGACY driver/i2s.h (i2s_driver_install/i2s_set_pin/i2s_write). La nouvelle API i2s_std échouait au boot depuis toujours (v69-v85 muets) : le handle du canal était alloué en PSRAM alors que CONFIG_GDMA_ISR_IRAM_SAFE=1 exige la RAM interne → i2s_channel_init_std_mode KO. Le legacy installe son I2S + ISR sans ce check GDMA (intr_alloc_flags=0, pas IRAM) → démarre. Marche pour DAC PCM5102A (jack → casque/AUX Funke) ET ampli MAX98357A (HP), même chaîne BCK5/WS6/DIN7 (PCM5102A : SCK→GND). Bip validé au boot + bouton SYSTEM>Test. tx_desc_auto_clear + i2s_zero_dma_buffer = silence franc (pas de porteuse résiduelle). v99 : FIX accueil WS-241 — le label « ATC V… » tombait à moitié SOUS l'écran (cluster versions bas calé pour 480 via VBOT=+15 depuis v74, jamais remonté au passage 480→450 de v97). Panneau raccourci de 30 px → cluster remonté de 30 px (VBOT +15→-15, PANEL_WS241 only) → ~27 px de marge sous l'ATC sur la dalle 450. T4-S3 (aussi 450, VBOT=0) intact. v98 : ALERTE TRAFIC refondue (WS-241 + T4-S3) — mode circuit RETIRÉ, modèle UNIVERSEL : convergence (CPA tcpa/dcpa) + bulle-œuf décalée VERS L'AVANT dont le lobe avant varie avec la vitesse sol (×30 s, borné 400-2000 m ; arrière 20 %/min 150 m) → un avion qui SUIT (même cap/vitesse, pas de convergence) ne déclenche plus (avant : bulle proximité SYMÉTRIQUE alertait un suiveur co-altitude à <0,5 nm). PLANCHER absolu 150 m co-alt = ROUGE. Gate GND : AUCUNE alerte au sol (flt_st==0). Overlay ROUGE = FLASH FRANC ~2,3 Hz (rouge↔blanc) + agrandi 1,5× (300×44→450×66) et recentré. Chip radar AUTO/CIRC/RTE MASQUÉ (dead). auto-détection AIP (aipNearestAdNm) + g_field_elev_m retirés. ⚠️ g_cfg.circuit_ovr désormais inerte (entrée Settings TRAFFIC + nav encodeur case 26 à nettoyer). v97 : CORRECTION GÉOMÉTRIE — la dalle WS-241 2.41 est bien 600×450 (spec Waveshare, natif SH8601 450×600), PAS 480. Le "600×480" des v71/v94-96 était une erreur (j'avais gonflé la hauteur pour compenser l'offset +16 de la démo ; le vrai fix = offset 0). Passé partout à 450 : ws241_esplcd.h WS241_LCD_H 480→450 (ver_res LVGL), SCR_H WS-241 480→450, RAD_CY 240→225 / RAD_R 198→193 (centre radar), commentaires. Rendu esp_lcd = plein 600×450, offset Y 0. v96 : le chemin esp_lcd SH8601 devient le DÉFAUT de l'env WS-241 (flag -DPANEL_WS241_SH8601_ESPLCD ajouté dans platformio.ini) → `pio run -e WS-241` + OTA/CI buildent l'esp_lcd sans flag manuel. Toutes les WS-241 récentes = SH8601 (v1.0.0 Rev1 + v2.0.1 Rev2, les deux OK). Détection auto contrôleur écartée : la lecture registre 0xDA renvoie 0xFF en QSPI (pas exploitable), et pas de dalle RM690B0 sous la main pour caler un discriminant I2C. ⚠️ Une VRAIE dalle RM690B0 (vieux stock) serait NOIRE avec ce défaut → retirer le flag de l'env pour repasser Arduino_GFX/RM690B0. v95 : chemin esp_lcd WS-241 UNIVERSEL SH8601 (Rev1 v1.0.0 + Rev2 v2.0.1) — le reset dalle diffère selon la révision (v1.0.0 = GPIO21 ; v2.0.1 = TCA9554 @0x20) → on fait les DEUX (reset_gpio_num=WS241_LCD_RST + tcaReset()). Validé hardware sur une dalle v1.0.0 (Rev1) le 2026-07-07 : AT-VIEW rendu propre, mêmes octets/geo 600×480 que la v2.0.1. Le driver RM690B0 pilotait la v1.0.0 en GARBLED (mauvais driver) ; l'esp_lcd_sh8601 la rend nette. ⚠️ Flag opt-in -DPANEL_WS241_SH8601_ESPLCD (pas encore défaut env WS-241 : ne PAS l'activer sur une vraie dalle RM690B0 vieux stock = noir). v94 : WS-241 Rev2.0 (SH8601 v2.0.1) ENFIN RENDU — 2 pièces manquantes trouvées le 2026-07-07 (scan I2C + driver esp_lcd pur en isolation, cf mémoire [[ws241_sh8601_port_reference]]). (1) RESET DALLE VIA TCA9554 : la Rev2.0 pilote le reset AMOLED par l'I/O expander I2C @0x20 (broches 47/48), PAS la GPIO21 de la démo Rev1 → au POR l'expandeur est en entrée, dalle bloquée en reset = NOIR ; fix = config toutes sorties + pulse reset (tcaReset()) AVANT l'init, reset_gpio_num=-1. (2) ORDRE OCTETS RGB565 : le SH8601 attend big-endian, LVGL (LV_COLOR_16_SWAP=0) sort little-endian → bleu 0x001F devient 0x1F00 = VERT ; fix = échange d'octets dans le flush (comme Arduino_GFX en interne). Chemin activé par -DPANEL_WS241_SH8601_ESPLCD (ws241_esplcd.h : vrai driver esp_lcd_sh8601 + LVGL, réplique EXACTE de la démo Waveshare 09_LVGL_Test : double buffer DMA, drv_update_cb mirror, offset +16 Y manuel). Le RTC PCF85063 @0x51 sur le même bus = l'horloge du firmware usine. Diagnostic clé qui a débloqué : test brut examples/ws241_raw (driver SEUL, sans LVGL) + scan I2C → a révélé le TCA9554. v93 : SUPPORT dalles SH8601 WS-241 (stock récent) — le rendu RM690B0 (géométrie 480×600 rot3) pilote les dalles SH8601 (v1.0.0 ET v2.0.1) À CONDITION de leur envoyer l'AMORÇAGE VENDEUR SH8601 dans ws241_shim.h begin() : page CMD2 (0xFE 0x20 / 0x26 0x0A / 0x24 0x80) + pixfmt 0x3A/0xC2 + re-SLPOUT(0x11)/DISPON(0x29) + brightness, à chaque boot (amorçage volatil). Init extraite du dump usine v2.0.1, SANS MADCTL 0x30 ni CASET/PASET (le driver RM690B0 gère la géométrie). Désactivable -DWS241_NO_PRIME pour A/B. v92 : FIX ÉCRAN NOIR (rétroéclairage 0) — la nav encodeur permettait de descendre BRIGHTNESS jusqu'à 0 → panelBright(0) → AMOLED éteint, valeur sauvée NVS → écran noir persistant même après reflash (CPU vivant, IMU OK). Plancher brightness à 1 PARTOUT (edit encodeur, sliders touch mkBigBrightRow/mkSetSliderRow, cbBrightSlider) + AUTO-RÉCUP au boot (bright_lv==0 en NVS → remis à 16). Rallume les écrans éteints dès le reflash. v91 : FIX focus invisible en sous-section — le contour/titre de focus n'existait que sur le cercle retour ; encFocusOutline appliqué à CHAQUE ligne (erReg) + TITRE recoloré (gris/BLEU focus/VERT édition) = sélection lisible ; reset couleurs à l'entrée de section. v90 : NAV ENCODEUR Settings PHASE 2 REVUE (WS-241) — modèle à 2 niveaux DANS une section. Registre EncRow (1 ligne/réglage, rempli par erReg dans les mk*), pas les sous-cellules. TOURNER = passe d'un TITRE à l'autre (contour BLEU). CLIC : sur toggle 2 états = bascule direct ; sur réglage multi-valeurs (radar scale/vertical filter/icons/alert mode/brightness) = ENTRE EN ÉDITION (contour VERT, tourner change la valeur EN DIRECT), re-clic VALIDE et remonte au titre ; sur tuile SYSTEM = ouvre la sous-page ; sur cercle « retour » (dernière ligne) = revient à la grille. APPUI LONG (n'importe où sur Settings) = SORT vers le radar. Le focus suit le scroll (CONFIG 6 lignes). v89 : (remplacé) nav sous-items générique. v88 : NAV ENCODEUR grille Settings (WS-241, phase 1) — sur la page Settings, TOURNER = déplace le focus entre les 5 tuiles (surlignage bordure+fond, groupe LVGL g_encGroup, ordre visuel grille) au lieu de changer de page (fini le retour radar accidentel) ; CLIC = ouvre la section focus ; en section, CLIC = retour à la grille. Radar inchangé (tourner=zoom, appui long=Start/Stop). Phase 2 à venir : focus des sous-items dans chaque section. v87 : OTA écran PAR CARTE — ATV_OTA_TAG distingue enfin ws241/ws216/t4s3/trgb (avant : WS241→t4s3 et WS216→trgb à cause du #define BOARD_T4S3 de WS241 → OTA du mauvais binaire = risque brick). Test WS241/WS216 AVANT T4S3. Chaque carte lit firmware/atv/<tag>/ = SON binaire. ⚠️ Migration : les écrans en v68 (ancienne logique) doivent passer v87 par USB avant de pouvoir OTA proprement (WS-216/WS-241 surtout). v86 : UX upload WROVER — quand le boîtier envoie STATUS rbt=1 (il va tuer le BLE + rebooter pour finir l'upload cloud), l'écran garde un overlay "SAVING FLIGHT — Box rebooting, reconnecting..." pendant une fenêtre de grâce ~40 s AU LIEU de passer toutes les icônes en rouge (déconnexion prise pour une panne). Effacé au retour d'un status normal. Parse le champ STATUS rbt + g_rbt_ms. v85 : durcissement init audio WS-241 (PAS un fix — l'audio reste muet). L'init I2S échoue car gdma (CONFIG_GDMA_ISR_IRAM_SAFE=1) exige un user-context en RAM interne, or le driver I2S alloue le handle du canal en MALLOC_CAP_DEFAULT → PSRAM sur ce build. NON corrigeable au niveau sketch : les flags GDMA/I2S_ISR_IRAM_SAFE sont dans les libs précompilées pioarduino. La tentative heap_caps_malloc_extmem_enable() n'agit QUE sur les allocs malloc()/heap_caps_malloc_default, PAS sur le heap_caps_malloc(DEFAULT) direct du driver → sans effet (gardée, inoffensive). Reste utile : i2s_del_channel sur échec (pas de fuite de handle) + log d'erreur propre au lieu d'un plantage silencieux. VRAI fix à faire quand le DAC sera câblé : driver i2s legacy (driver/i2s.h) ou framework recompilé avec CONFIG_I2S_ISR_IRAM_SAFE=y. v84 : AIP EMBARQUÉE flash sur TOUS les écrans (avant : WS-241 seul, les autres lisaient la SD → pas d'AIP sans carte) → AIP visible sur tous les radars. v83 : WS-216 capsule cap descendue (TOP_MID +28→+58) → sous le N (cardinal extérieur), plus d'interférence. v82 : WS-216 cardinaux N/E/S/W plus gros (montserrat_24) + À L'EXTÉRIEUR de l'anneau (RAD_CARD_OFF +12) ; échelle remontée (−52) pour loger le S dessous. v81 : cardinaux N/E/S/W initialisés à leur vraie position (north-up) au lieu d'empilés en haut → visibles même sans STATUS BLE (avant : « disparus » quand le boîtier n'est pas connecté). v80 : WS-216 label échelle radar agrandi (montserrat_14 gris → 28 TFG). v79 : GS retirée du radar sur TOUTES les cartes (r_radar_gs=nullptr partout ; T4-S3 l'était déjà). v78 : WS-216 glyphes zoom poussés DANS L'ANGLE (décalage vers le coin bas-ext, zone tactile inchangée). v77 : WS-216 zoom = 2 GRANDES zones tactiles de coin (bas-gauche −, bas-droite +), juste le glyphe barres (style T4) centré, EVENT_BUBBLE (swipe préservé) → taps fiables au 1/4 inférieur hors radar. v76 : WS-216 (carré) — boutons zoom +/- dans les coins bas (+ bas-droite, − bas-gauche), agrandis 34→56 px + cible tactile élargie (taps fiables) ; radar RAD_R 175→192 (le carré n'a pas de verre qui clippe). WS-216 only, T-RGB rond inchangé. v75 : WS-241 fine-tuning radar (deltas WS241-only, T4 inchangé) — cluster SafeSky/LTE/GNSS descendu (R_TOP_EXTRA), engrenage+chip remontés (R_GEAR_UP), boutons +/- rapprochés du centre (R_ZOOM_IN). v74 : WS-241 accueil — cluster versions descendu de +15 (au lieu de +30) → ~27 px de marge sous l'ATC (ne colle plus en bas). v73 : WS-241 marges de respiration — RAD_R 208→198 (~20 px de blanc haut/bas, cardinaux N/S ne touchent plus) + bouton zoom "−" réancré SCR_H (ne flotte plus). v72 : WS-241 layout 600×480 — radar recentré (RAD_CY 240/RAD_R 208), pages+overlays+AIP+gear+accueil réancrés via SCR_W/SCR_H board-aware (T4 reste 450). v71 : FIX bande noire bas WS-241 — dalle 2.41 = 600×480 (pas 450), WS241_NATIVE_W/LCD_H 450→480 + UI_OY 0 → canvas 480 remplit pile la hauteur. v70 : ENCODEUR ROTATIF + poussoir (EC11) WS-241 — tourner=zoom radar (page suiv/préc ailleurs), clic=page suivante, appui long=action sheet Start/Stop. A=GPIO38/B=39/SW=40, décodeur quadrature sur ISR. Gated BOARD_WS241, no-op ailleurs. v69 : AUDIO I2S (DAC PCM5102A) TEST sur WS-241 — bip de validation au boot + bouton TEST (BCK=5/LCK=6/DIN=7, SCK→GND ; API i2s_std core 3.x). Gated BOARD_WS241, no-op ailleurs. v68 : SYSTEM = tuiles en grille 2 colonnes (même style que la grille SETTINGS, contour bleu), plus de barres pleine largeur ; SD card en libellé d'état. v67 : SYSTEM = un gros bouton plein large par page (le nom EST sur le bouton, plus de couple label+OPEN). v66 : MENU Settings — fusion CONFIG+DISPLAY en 1 section "CONFIG" scrollable (swipe down ; brightness/theme/scale/vfilt/altdiff/callsign), grille passe à 5 tuiles (6e libre dev futur), SYSTEM = boutons WIFI/FlightLogs/Updates/Diagnostic/Test. v65 : CULLING GÉOGRAPHIQUE AIP dans aipDrawCb — ne dessine que CTR/aérodromes dans la fenêtre radar (own ± portée×1.6), rejet bbox/point en e6 avant projection trig → coût ∝ visible, plus ∝ EU entière → tactile +/- réactif au sol ET en vol (l'AIP bouge en vol, le redraw reste léger). v64 : AIP_MAX_CTR 2048. v63 : AIP embarquée flash. */
 // ── Versioning lisible MAJOR.MINOR.BUILD + canal (miroir de l'ATC). ────────────
 // VIEW_TRAIN partagé avec l'ATC (même release) ; VIEW_CH : 0=dev 1=rc 2=client.
 // Affiché "1.2.38-dev" sur ABOUT (couleur ambre/bleu/vert). version.txt reste = VIEW_VERSION.
@@ -186,7 +186,7 @@ static inline const std::string& bleStr(const std::string& s){ return s; }
   #define VIEW_CH_SUFFIX ""
 #endif
 #define VIEW_VSTR     VIEW_TRAIN "." VIEW_VERSION VIEW_CH_SUFFIX   // ex "1.2.38-dev"
-#define VIEW_VER_STR  "ATV " VIEW_VSTR "  " __DATE__               // boot banner (ex "ATV 1.2.38-dev  Jun 26 2026")
+#define VIEW_VER_STR  "AKV " VIEW_VSTR "  " __DATE__   /* (v270) désignateur AirKi View */               // boot banner (ex "ATV 1.2.38-dev  Jun 26 2026")
 
 #ifdef BOARD_T4S3
 #ifdef PANEL_WS241
@@ -249,20 +249,54 @@ static char g_unit_name[24]   = "ATVIEW-EBBY1-01";
 static char g_paired_mac[18]  = "";              // empty = connect to first ATCORE- found
 static char g_peer_name[24]   = "";              // name of the connected AT-CORE (cleared on disconnect)
 
+// ── (v270) Polices AirKi — Instrument Sans SemiBold (UI) + Geist Mono Medium (chiffres) ───────────────
+// Générées par lv_font_conv (tools/fonts/, symboles FontAwesome inclus) dans examples/at_core_debug/fonts/.
+// Les appels historiques lv_font_montserrat_NN sont REDIRIGÉS par macro (tailles absentes → voisine).
+LV_FONT_DECLARE(airki_sans_12) LV_FONT_DECLARE(airki_sans_14) LV_FONT_DECLARE(airki_sans_16) LV_FONT_DECLARE(airki_sans_18)
+LV_FONT_DECLARE(airki_sans_20) LV_FONT_DECLARE(airki_sans_22) LV_FONT_DECLARE(airki_sans_24) LV_FONT_DECLARE(airki_sans_28)
+LV_FONT_DECLARE(airki_sans_32) LV_FONT_DECLARE(airki_sans_40)
+LV_FONT_DECLARE(airki_mono_13) LV_FONT_DECLARE(airki_mono_14) LV_FONT_DECLARE(airki_mono_18) LV_FONT_DECLARE(airki_mono_20)
+LV_FONT_DECLARE(airki_mono_22) LV_FONT_DECLARE(airki_mono_28) LV_FONT_DECLARE(airki_mono_40)
+#define lv_font_montserrat_12 airki_sans_12
+#define lv_font_montserrat_14 airki_sans_14
+#define lv_font_montserrat_16 airki_sans_16
+#define lv_font_montserrat_18 airki_sans_18
+#define lv_font_montserrat_20 airki_sans_20
+#define lv_font_montserrat_22 airki_sans_22
+#define lv_font_montserrat_24 airki_sans_24
+#define lv_font_montserrat_26 airki_sans_28
+#define lv_font_montserrat_28 airki_sans_28
+#define lv_font_montserrat_30 airki_sans_32
+#define lv_font_montserrat_32 airki_sans_32
+#define lv_font_montserrat_34 airki_sans_32
+#define lv_font_montserrat_38 airki_sans_40
+#define lv_font_montserrat_40 airki_sans_40
+#define FM_13 (&airki_mono_13)
+#define FM_14 (&airki_mono_14)
+#define FM_18 (&airki_mono_18)
+#define FM_20 (&airki_mono_20)
+#define FM_22 (&airki_mono_22)
+#define FM_28 (&airki_mono_28)
+#define FM_40 (&airki_mono_40)
+#ifdef BOARD_WS241
+  #define ROW_BG UI_BG     // (v294) fond « repos » d'une ligne d'action restylée (les confirmations le remettent après l'armement ambre)
+#else
+  #define ROW_BG UI_SURF
+#endif
 #define C_AMBER  lv_color_hex(0xF5A623)
 #define C_GREEN  lv_color_hex(0x22c55e)
 #define C_CYAN   lv_color_hex(0x00E5FF)
 #define C_BLUE   lv_color_hex(0x60a5fa)
 #define C_RED    lv_color_hex(0xef4444)
 #define C_ORANGE lv_color_hex(0xf97316)
-#define C_BRAND  lv_color_hex(0x7393B4)  // bleu logo AeroTrace (provisoire)
+#define C_BRAND  lv_color_hex(0xF5A623)  // (v270) accent AirKi = ambre (plus de bleu ; jamais en texte)
 
 static bool g_dark_theme = true;
-static inline lv_color_t TBG()  {return g_dark_theme?lv_color_hex(0x000000):lv_color_hex(0xFFFFFF);}
-static inline lv_color_t TFG()  {return g_dark_theme?lv_color_hex(0xFFFFFF):lv_color_hex(0x0f172a);}
-static inline lv_color_t TGREY(){return g_dark_theme?lv_color_hex(0x6b7280):lv_color_hex(0x6b7280);}
-static inline lv_color_t TGRID(){return g_dark_theme?lv_color_hex(0x2a2a2a):lv_color_hex(0xd0d0d0);}
-static inline lv_color_t TRING(){return g_dark_theme?lv_color_hex(0x888888):lv_color_hex(0x9ca3af);}
+static inline lv_color_t TBG()  {return g_dark_theme?lv_color_hex(0x141414):lv_color_hex(0xF4F2ED);}   // (v270) encre / papier AirKi
+static inline lv_color_t TFG()  {return g_dark_theme?lv_color_hex(0xFFFFFF):lv_color_hex(0x141414);}
+static inline lv_color_t TGREY(){return g_dark_theme?lv_color_hex(0x9A9A94):lv_color_hex(0x4A4A46);}
+static inline lv_color_t TGRID(){return g_dark_theme?lv_color_hex(0x2C2C2C):lv_color_hex(0xDDD9D2);}
+static inline lv_color_t TRING(){return g_dark_theme?lv_color_hex(0x8D9096):lv_color_hex(0x8D9096);}
 static inline lv_color_t THDG() {return g_dark_theme?lv_color_hex(0x0d1b2a):lv_color_hex(0xe2e8f0);}
 static inline lv_color_t PILL_IC_OFF(){return g_dark_theme?lv_color_hex(0x2d3f52):lv_color_hex(0xb0bcc8);}
 static inline lv_color_t PILL_IC_ON() {return g_dark_theme?lv_color_hex(0xffffff):lv_color_hex(0x0d1117);}
@@ -311,7 +345,7 @@ struct TrailPt { float xm, ym; uint32_t t; uint8_t lvl; };
 struct AcTrail { char cs[9]; TrailPt pts[TRAIL_MAX]; uint8_t head, cnt; uint32_t last; };
 static float g_own_dx=0.0f, g_own_dy=0.0f;   // déplacement cumulé own (m, intégré spd/hdg) — repère de la traînée
 // (v115) Position ÉCRAN du trafic (posée par updateRadarDR) → sert au dessin TRIANGLE dans aipDrawCb.
-struct TrfScr { int16_t x, y; float hdg; lv_color_t col; bool shown; };
+struct TrfScr { int16_t x, y; float hdg; lv_color_t col; bool shown; bool stale; uint8_t src; };   // (v280) stale → contour seul · (v286) src 3 = AirKi → halo
 static TrfScr g_trf_scr[MAX_TRF];
 struct AlertData    { bool co,gforce,rpm,traffic; char msg[64]; bool valid; };
 struct DebugData    {
@@ -355,12 +389,12 @@ static const lv_font_t* kAltFont[] = {&lv_font_montserrat_26,&lv_font_montserrat
 #endif
 
 // ── Couleurs UI SOMBRES — menu Settings watchOS (dalle AMOLED : noir = pixels éteints)
-#define UI_BG      lv_color_hex(0x000000)   // fond page
-#define UI_SURF    lv_color_hex(0x111519)   // surface d'une ligne
-#define UI_SURF_F  lv_color_hex(0x1b2228)   // surface de la ligne FOCUS (molette)
-#define UI_INK     lv_color_hex(0xf4f7fa)   // texte primaire
-#define UI_INK2    lv_color_hex(0x8b95a1)   // texte secondaire (sous-titre)
-#define UI_CHEV    lv_color_hex(0x5a636d)   // chevron ›
+#define UI_BG      lv_color_hex(0x141414)   // fond page — encre AirKi (v270)
+#define UI_SURF    lv_color_hex(0x1C1C1A)   // surface d'une ligne (v270)
+#define UI_SURF_F  lv_color_hex(0x2C2C2C)   // surface de la ligne FOCUS (molette) = rule-dark (v270)
+#define UI_INK     lv_color_hex(0xFFFFFF)   // texte primaire sur encre (v270)
+#define UI_INK2    lv_color_hex(0x9A9A94)   // texte secondaire sur encre = muted-dark (v270)
+#define UI_CHEV    lv_color_hex(0x8D9096)   // chevron › = etch (v270)
 #define UI_TRACK   lv_color_hex(0x2a3138)   // piste inactive (segment / slider / stepper) sur fond sombre
 struct CfgData { uint8_t scale_nm,brightness,trf_src; bool dist_nm,alt_ft,dark,show_grnd,wifi_en,aip_en,ad_heli,spd_kt; int16_t vfilt_ft; uint8_t icon_sz; bool show_cs,show_vdiff; uint8_t circuit_ovr; uint8_t alert_snd; bool trf_tri; bool club; };   // club (v213 T32) : surface pilote minimale  // trf_tri (v115) : trafic dessiné en TRIANGLE au lieu des silhouettes d'avion (défaut false). alert_snd (v105) : volume alerte 0-3. circuit_ovr : inerte. (fin de struct → init agrégat inchangé, chargés par cfgLoad)
 // NB : l'init historique {…,false,2000,2} décalait les champs (le 2000 tombait sur le
@@ -387,7 +421,11 @@ struct SegCtl {
     lv_obj_t *lblA, *lblB;   // labels (recoloration texte actif/inactif)
     bool     *val;           // champ config bool pointé
     bool      aIsTrue;       // segA sélectionné ⇔ *val == aIsTrue
+    lv_obj_t *pill, *knob;   // (v292, WS241) rendu PILULE pour les lignes OFF/ON (segA/segB cachés) — nullptr sinon
 };
+#ifdef BOARD_WS241
+static void p1SwitchSet(lv_obj_t*,lv_obj_t*,bool);   // (v292) défini plus bas (page 1 Settings)
+#endif
 static SegCtl g_seg[10];  // THEME/ALTDIFF/CALLSIGN + GROUNDED/SHAPE/AIP/HELI (+marge). (v115) +SHAPE
 static int    g_seg_n = 0;
 // Segmented multi-options (SOURCE 4, ICONS SIZE 3) — même raison de placement.
@@ -400,6 +438,10 @@ struct SegN {
 static SegN g_segn[2];
 static int  g_segn_n = 0;
 static Preferences g_prefs;
+// (v269) calibration IMU — déclarées ici car utilisées par la page Diagnostic (avant le bloc IMU)
+static bool           g_imu_manual=false;     // (v269) repère repos issu d'une calibration manuelle (NVS) → plus d'auto-zéro
+static volatile bool  g_imu_level_req=false;  // (v269) demande « Level IMU » (bouton Diagnostic) → moyenne 0,5 s puis sauvegarde
+static bool           g_diag_level_armed=false;
 
 static StatusData  g_status  = {};
 static FlightData  g_flight  = {};
@@ -504,6 +546,67 @@ static lv_obj_t *r_spk_btn=nullptr;     // (v215 club) bouton haut-parleur (volu
 static lv_obj_t *r_spk_arc[3]={0,0,0};  // (v220) arcs de niveau 1/2/3 dessinés
 static lv_obj_t *r_spk_slash=nullptr;   // (v220) barre rouge « son coupé »
 static lv_obj_t *r_p0_upd=nullptr;      // (v198) invite accueil "UPDATE AVAILABLE" (ambre) si MAJ ATC/ATV
+// (v272) Accueil AirKi View — objets mis à jour par updateAllPages()
+static lv_obj_t *r_p0_dot[3]={},*r_p0_st[3]={},*r_p0_sub[3]={};   // GPS · LTE · TRAFFIC : pastille, libellé, détail
+static lv_obj_t *r_p0_pilot=nullptr,*r_p0_box=nullptr,*r_p0_hex=nullptr,*r_p0_utc=nullptr,*r_p0_reg=nullptr;
+static char      g_p0_trg[4]="";        // trigramme du pilote authentifié (posé par _authOkVisual)
+static char      g_utc[6]="";           // (v273) heure UTC « HH:MM » reçue du boîtier (trame FLIGHT, ATC v206)
+static char      g_ac_owner[4]="";      // (v274) trigramme du pilote propriétaire (trame FLIGHT « own », ATC v207) = pilote par défaut
+static int8_t    g_box_dev=-1;          // (v287) canal du boîtier : -1 inconnu (ATC <210) · 0 flotte · 1 dev → canal OTA écran
+#ifdef ATV_OTA_DEV
+  #define DEV_UI() (true)
+#else
+  #define DEV_UI() (g_box_dev==1)       // (v293) Debug / Diagnostic / Test visibles seulement sur le canal DEV (lu en NVS au boot)
+#endif
+static lv_obj_t *r_ak_gs=nullptr,*r_ak_alt=nullptr,*r_ak_utc=nullptr;   // (v275) radar AirKi : GS, ALT, UTC
+static lv_obj_t *r_north=nullptr; static lv_point_t g_north_pts[2];    // (v278) trait NORD (tourne avec le cap)
+#ifdef BOARD_WS241
+// (v280) spec « AirKi View Radar » : icônes d'état DESSINÉES (grille 24, trait 2,4 @26 px) + immat bas-droite
+static lv_obj_t *r_ic_gps=nullptr,*r_ic_lte=nullptr,*r_ic_ss=nullptr,*r_ak_reg=nullptr;
+static uint8_t g_ic_gps=0;   // 0 no signal (etch) · 1 acquiring (ambre) · 2 fix (blanc + point vert)
+static uint8_t g_ic_lte=0;   // barres allumées 0..4 (0 = no link : tout etch)
+static uint8_t g_ic_ss=0;    // 0 no link (etch) · 1 linked (contour blanc) · 2 traffic (cœur vert)
+static int     g_akY[4]={18,37,105,124};   // y des 4 lignes des blocs de coin (label/valeur ×2), calculés sur les métriques police
+static lv_obj_t* mkIcon(lv_obj_t*p,int x,int y,lv_event_cb_t cb){
+    lv_obj_t*o=lv_obj_create(p); lv_obj_set_size(o,26,26); lv_obj_set_pos(o,x,y);
+    lv_obj_set_style_bg_opa(o,LV_OPA_TRANSP,0); lv_obj_set_style_border_width(o,0,0); lv_obj_set_style_pad_all(o,0,0);
+    lv_obj_set_style_shadow_opa(o,LV_OPA_TRANSP,0); lv_obj_clear_flag(o,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(o,cb,LV_EVENT_DRAW_MAIN_END,NULL); return o; }
+static void icGpsDraw(lv_event_t*e){   // réticule : anneau r5 + 4 traits, point vert au fix
+    lv_draw_ctx_t*ctx=lv_event_get_draw_ctx(e); lv_area_t a; lv_obj_get_coords(lv_event_get_target(e),&a);
+    lv_coord_t cx=a.x1+13, cy=a.y1+13;
+    lv_color_t col=(g_ic_gps==2)?TFG():(g_ic_gps==1)?C_AMBER:lv_color_hex(0x8D9096);
+    lv_draw_arc_dsc_t ad; lv_draw_arc_dsc_init(&ad); ad.color=col; ad.width=3; ad.opa=LV_OPA_COVER;
+    lv_point_t c={cx,cy}; lv_draw_arc(ctx,&ad,&c,7,0,360);
+    lv_draw_line_dsc_t ld; lv_draw_line_dsc_init(&ld); ld.color=col; ld.width=3; ld.opa=LV_OPA_COVER;
+    lv_point_t q1,q2;
+    q1={cx,(lv_coord_t)(a.y1+1)}; q2={cx,(lv_coord_t)(a.y1+5)};  lv_draw_line(ctx,&ld,&q1,&q2);
+    q1={cx,(lv_coord_t)(a.y1+21)};q2={cx,(lv_coord_t)(a.y1+25)}; lv_draw_line(ctx,&ld,&q1,&q2);
+    q1={(lv_coord_t)(a.x1+1),cy}; q2={(lv_coord_t)(a.x1+5),cy};  lv_draw_line(ctx,&ld,&q1,&q2);
+    q1={(lv_coord_t)(a.x1+21),cy};q2={(lv_coord_t)(a.x1+25),cy}; lv_draw_line(ctx,&ld,&q1,&q2);
+    if(g_ic_gps==2){ lv_draw_rect_dsc_t d; lv_draw_rect_dsc_init(&d); d.bg_opa=LV_OPA_COVER; d.border_width=0; d.radius=LV_RADIUS_CIRCLE; d.bg_color=C_GREEN;
+        lv_area_t r={(lv_coord_t)(cx-2),(lv_coord_t)(cy-2),(lv_coord_t)(cx+2),(lv_coord_t)(cy+2)}; lv_draw_rect(ctx,&d,&r); }
+}
+static void icLteDraw(lv_event_t*e){   // 4 barres pleines sur la pente du A ; éteintes = etch
+    lv_draw_ctx_t*ctx=lv_event_get_draw_ctx(e); lv_area_t a; lv_obj_get_coords(lv_event_get_target(e),&a);
+    static const uint8_t bx[4]={2,8,15,21}, by[4]={17,13,9,3};
+    lv_draw_rect_dsc_t d; lv_draw_rect_dsc_init(&d); d.bg_opa=LV_OPA_COVER; d.border_width=0; d.radius=0;
+    for(int i=0;i<4;i++){ d.bg_color=(i<g_ic_lte)?TFG():lv_color_hex(0x8D9096);
+        lv_area_t r={(lv_coord_t)(a.x1+bx[i]),(lv_coord_t)(a.y1+by[i]),(lv_coord_t)(a.x1+bx[i]+3),(lv_coord_t)(a.y1+24)}; lv_draw_rect(ctx,&d,&r); }
+}
+static void icSsDraw(lv_event_t*e){    // losange TCAS : contour = lien, cœur vert = contact acquis
+    lv_draw_ctx_t*ctx=lv_event_get_draw_ctx(e); lv_area_t a; lv_obj_get_coords(lv_event_get_target(e),&a);
+    lv_coord_t cx=a.x1+13, cy=a.y1+13;
+    lv_color_t col=(g_ic_ss>=1)?TFG():lv_color_hex(0x8D9096);
+    lv_draw_rect_dsc_t d; lv_draw_rect_dsc_init(&d); d.bg_opa=LV_OPA_COVER; d.border_width=0;
+    auto dia=[&](int h,lv_color_t c){ lv_point_t q[4]={{cx,(lv_coord_t)(cy-h)},{(lv_coord_t)(cx+h),cy},{cx,(lv_coord_t)(cy+h)},{(lv_coord_t)(cx-h),cy}}; d.bg_color=c; lv_draw_polygon(ctx,&d,q,4); };
+    dia(11,col); dia(7,TBG()); if(g_ic_ss==2) dia(4,C_GREEN);
+}
+static inline void kScaleNum(char* b, size_t n, uint8_t s){ if(s) snprintf(b,n,"%d",(int)s); else snprintf(b,n,"0.5"); }   // (v280) RANGE : nombre seul, « NM » à part (22 px gris)
+#define RAD_SCALE_TXT kScaleNum
+#else
+#define RAD_SCALE_TXT kScaleLbl
+#endif
 static int       g_atv_remote=0;        // (v198) version ATV cloud si > VIEW_VERSION (check boot), sinon 0
 
 // ── Widget refs — Radar (page 1) ──────────────────────────────────────────────
@@ -514,26 +617,26 @@ static int       g_atv_remote=0;        // (v198) version ATV cloud si > VIEW_VE
 // (juin 2026) Radar CENTRÉ sur l'écran (« mettre le radar bien au milieu »).
 // CX=300 = centre du 600×450 → cluster bas + pill cap recentrés (RB_DX/HDG_DX=0).
 #ifdef BOARD_WS241
-#define RAD_CX 375          // (v230, test Christophe) radar poussé à DROITE — centré dans un carré 450×450 côté droit (colonne gauche = icônes)
+#define RAD_CX 300          // (v230, test Christophe) radar poussé à DROITE — centré dans un carré 450×450 côté droit (colonne gauche = icônes)
 #else
 #define RAD_CX 300          // centre radar écran (= centre du 600 px)
 #endif
 #ifdef PANEL_WS241
-#define RAD_CY 225          // WS-241 = dalle 600×450 → centre vertical 225 (l'offset +16 colonnes de la dalle est compensé par WS241_LCD_YGAP, pas ici)
-#define RAD_R  193          // cardinaux N/S : 225±(193+12)=±205 → ~20 px de blanc haut/bas
+#define RAD_CY 228          // WS-241 = dalle 600×450 — (v280) spec : 6 px sous le centre géométrique, → centre vertical 225 (l'offset +16 colonnes de la dalle est compensé par WS241_LCD_YGAP, pas ici)
+#define RAD_R  180          // cardinaux N/S : 225±(193+12) — (v280) spec : r extérieur 174, intérieur 87,=±205 → ~20 px de blanc haut/bas
 #else
 #define RAD_CY 225
 #define RAD_R  193          // T4-S3 450 px : (juin 2026) réduit pour que S/N (cardinaux extérieurs) tiennent
 #endif
 #define RLC_X  10           // x colonne annotations gauche (pastilles GPS/LTE + mode SafeSky)
 #ifdef BOARD_WS241
-#define RB_DX  75           // (v230) suit le radar décalé à droite
+#define RB_DX  0            // (v230) suit le radar décalé à droite
 #else
 #define RB_DX  0            // cluster scale/GS centré sous le radar (radar au milieu)
 #endif
 #define RB_DY  0
 #ifdef BOARD_WS241
-#define HDG_DX 75           // (v230) capsule cap suit le radar décalé à droite
+#define HDG_DX 0            // (v230) capsule cap suit le radar décalé à droite
 #else
 #define HDG_DX 0            // pill cap + overlays centrés sur le radar (= centre écran)
 #endif
@@ -1071,6 +1174,15 @@ static bool   g_erEdit=false;                       // true = on édite la valeu
 // n'importe quel type d'objet (bouton/slider/track segmented/tuile).
 static void encFocusOutline(lv_obj_t* o){
     if(!o) return;
+#ifdef BOARD_WS241
+    // (v292) DS AirKi : focus = fond surface + bord AMBRE 1 px · édition = bord VERT (statut) — plus de halo épais
+    lv_obj_set_style_outline_width(o,0,LV_STATE_FOCUSED); lv_obj_set_style_outline_width(o,0,LV_STATE_EDITED); lv_obj_set_style_outline_width(o,0,LV_STATE_FOCUS_KEY);
+    lv_obj_set_style_bg_color(o,UI_SURF_F,LV_STATE_FOCUSED); lv_obj_set_style_bg_opa(o,LV_OPA_COVER,LV_STATE_FOCUSED);
+    lv_obj_set_style_border_color(o,C_BRAND,LV_STATE_FOCUSED); lv_obj_set_style_border_width(o,1,LV_STATE_FOCUSED);
+    lv_obj_set_style_bg_color(o,UI_SURF_F,LV_STATE_EDITED); lv_obj_set_style_bg_opa(o,LV_OPA_COVER,LV_STATE_EDITED);
+    lv_obj_set_style_border_color(o,C_GREEN,LV_STATE_EDITED); lv_obj_set_style_border_width(o,1,LV_STATE_EDITED);
+    return;
+#endif
     lv_obj_set_style_outline_width(o,4,LV_STATE_FOCUSED);
     lv_obj_set_style_outline_color(o,C_BRAND,LV_STATE_FOCUSED);
     lv_obj_set_style_outline_opa(o,LV_OPA_COVER,LV_STATE_FOCUSED);
@@ -1157,12 +1269,12 @@ static void encoderPoll(){        // appelé depuis loop() (contexte LVGL, jamai
     static bool pinFired=false;
     if(!pressed) pinFired=false;
     if(pressed && down && clubActive() && !pinFired && now-t0>=6000)   /* pinShow() gère lui-même le re-open */{ pinFired=true; pinShow(); }
-    else if(pressed && down && !longFired && now-t0>=ENC_LONG_MS){ longFired=true;   // (v90) APPUI LONG = SORTIE
+    else if(pressed && down && !longFired && now-t0>=((g_page==1&&!g_ovOpen&&!g_maint_ov&&!g_acedit_ov&&!g_vol_ov)?2000u:ENC_LONG_MS)){ longFired=true;   // (v90) APPUI LONG = SORTIE · (v276) radar : 2 s
         if(g_maint_ov){ _maint_close(); }                         // page WiFi : ferme (sortie molette OK malgré nav off)
         else if(g_acedit_ov){ /* éditeur immat : sortie tactile seule */ }
         else if(g_ovOpen){ if(g_ovClose) lv_event_send(g_ovClose,LV_EVENT_CLICKED,NULL); }  // overlay Setup → retour (ferme)
         else if(g_vol_ov){ volApply(g_vol_sel); }   // (v247) appui LONG = VALIDER aussi (l'appui appuyé fermait sans appliquer → « 1 fois sur 2 » ; annuler = tap hors panneau)
-        else if(g_page==1) radarActShow();                        // radar → action sheet Start/Stop
+        else if(g_page==1){ g_navPage=2; g_navPending=true; }     // (v276) radar → appui LONG 2 s = SETTINGS (l'engrenage est retiré)
         else if(g_page==2){ g_navPage=1; g_navPending=true; }     // Settings (grille/section/édition) → SORT vers le radar
     }
     else if(!pressed && down){ down=false; if(!longFired && now-t0>=30){   // (v90) CLIC COURT = valider / activer
@@ -1355,6 +1467,11 @@ void parseStatus(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_status.valid=true;g_dataUpdated=true;}
 void parseFlight(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
     g_flight.gforce_z=d["gf"]|1.0f;g_flight.co_ppm=d["co"]|0;
+    { const char* u=d["utc"]|""; strlcpy(g_utc,u,sizeof(g_utc)); }   // (v273) heure UTC pour l'accueil
+    { const char* o=d["own"]|""; strlcpy(g_ac_owner,o,sizeof(g_ac_owner)); }   // (v274) propriétaire = pilote par défaut
+    { int dv=d["dev"]|-1; if(dv>=0 && dv<=1 && dv!=g_box_dev){ g_box_dev=(int8_t)dv;   // (v287) canal OTA suit le boîtier
+        Preferences p; if(p.begin("atview",false)){ p.putChar("otadev",g_box_dev); p.end(); }
+        Serial.printf("[OTA] canal boîtier = %s → écran %s\n", dv?"dev":"flotte", dv?"ws241dev":"ws241"); } }
     g_flight.rpm=d["rpm"]|0;g_flight.phase=d["phase"]|0;
     g_flight.valid=true;g_dataUpdated=true;}
 void parseTraffic(const char*j){JsonDocument d;if(deserializeJson(d,j))return;
@@ -1737,6 +1854,7 @@ static void cbDebugLongPress(lv_event_t*e){
 // ── NVS ───────────────────────────────────────────────────────────────────────
 void cfgLoad(){
     g_prefs.begin("atview",true);
+    g_box_dev       =g_prefs.getChar("otadev",-1);   // (v287) canal OTA mémorisé (-1 = inconnu → tag compilé)
     g_cfg.scale_nm  =g_prefs.getUChar("scale",4);
     // brightness = niveau hardware 0-16 (clé bright_lv, défaut 16=max)
     {uint8_t bl=g_prefs.getUChar("bright_lv",16); if(bl==0||bl>16)bl=16; g_cfg.brightness=bl;}  // (v92) 0 en NVS = noir accidentel → plein (auto-récup écran éteint)
@@ -1757,7 +1875,7 @@ void cfgLoad(){
     g_cfg.show_cs   =g_prefs.getBool("show_cs",true);   // decluttering : afficher le callsign
     g_cfg.show_vdiff=g_prefs.getBool("show_vdiff",true);// decluttering : afficher la diff verticale
     g_cfg.alert_snd =g_prefs.getUChar("alert_snd",2);   // (v105) volume alerte audio : 0=OFF 1=LOW 2=MED 3=HIGH (défaut MED)
-    g_cfg.trf_tri   =false;  // (2026-07-20) mode TRIANGLE RETIRÉ (toggle SHAPE supprimé à la refonte) → TOUJOURS des icônes avion, on ignore l'ancien NVS (sinon un écran resté en triangle était bloqué sans UI pour revenir)
+    g_cfg.trf_tri   =g_prefs.getBool("trf_tri",false);   // (v271) mode TRIANGLE réactivé : réglage Traffic → TARGETS (choix Christophe 20/09) (sinon un écran resté en triangle était bloqué sans UI pour revenir)
     g_prefs.end();
     g_dark_theme=g_cfg.dark;}
 void cfgSave(){
@@ -2124,6 +2242,9 @@ void p0UpdateAcId();
 // ── Theme rebuild ─────────────────────────────────────────────────────────────
 void rebuildAllPages(){
     g_dark_theme=g_cfg.dark;
+    // (v282) objets créés À LA VOLÉE hors build*Page (haut-parleur radar, updClubUi) : lv_obj_clean les détruit
+    // → pointeurs remis à zéro AVANT, sinon updClubUi repositionne un objet mort (crash LoadProhibited constaté 20/09).
+    r_spk_btn=nullptr; r_spk_slash=nullptr; for(int k=0;k<3;k++) r_spk_arc[k]=nullptr;
     lv_obj_set_style_bg_color(lv_scr_act(),TBG(),0);
     for(int i=0;i<NUM_PAGES;i++){
         lv_obj_clean(g_pages[i]);
@@ -2162,90 +2283,68 @@ void p0UpdateAcId(){
 }
 
 void buildStatusPage(){
+    // (v272) ACCUEIL « AirKi View » — maquette validée 20/09 (design system AirKi, jetons exacts).
+    // Panneau 600×450 sur encre #141414 (thème clair : papier #F4F2ED / texte encre). Rien sous 13 px.
     lv_obj_t*p=g_pages[0];
-    // (juin 2026) Thème GLOBAL : la page accueil suit LIGHT/DARK comme le radar
-    // (avant : fond blanc forcé). TBG()=blanc en clair, noir en sombre.
-    lv_obj_set_style_bg_color(p,TBG(),0);
-    lv_obj_set_style_bg_opa(p,LV_OPA_COVER,0);
-    // (v12) Géométrie par carte. T4-S3 : logos PLUS GROS (place dispo sur le 600×450) +
-    // bloc versions du bas (batterie/ATV/ATC) ré-espacé pour ne PAS se chevaucher ni
-    // coller au bord bas (overlay à UI_OY=-15 → y écran = y local - 15). T-RGB inchangé.
+    // L'accueil est TOUJOURS sur encre (maquette DS « View home », validée 20/09) — le thème N/B ne concerne que le radar.
+    const bool dk=true;
+    const lv_color_t AK_TXT  = lv_color_hex(0xFFFFFF);   // texte primaire sur encre
+    const lv_color_t AK_MUTE = lv_color_hex(0x9A9A94);   // libellés / unités (muted-dark)
+    const lv_color_t AK_RULE = lv_color_hex(0x2C2C2C);   // filets 1 px (rule-dark)
 #ifdef BOARD_T4S3
-    // WS-241 (dalle 600×450, UI_OY=0) : le cluster bas (versions ATV/ATC) était calé pour 480
-    // (VBOT=+15, ère v74) → depuis le passage à 450 (v97) l'ATC tombait à moitié SOUS l'écran.
-    // Le panneau a raccourci de 30 px → on REMONTE le cluster de 30 px (VBOT=-15) pour retrouver
-    // les ~27 px de marge sous l'ATC sur la dalle 450. Le T4-S3 (aussi 450) garde VBOT=0.
-#ifdef PANEL_WS241
-    const int VBOT=-15;
-#else
-    const int VBOT=0;
+    lv_obj_set_size(p,SCR_W,SCR_H); lv_obj_set_pos(p,0,0);   // (v272) PLEIN PANNEAU 600×450 à (0,0), comme le radar — plus de canevas 480 centré
 #endif
-    const int vwZoom=400, vwY=44, atZoom=480, atY=82, acidY=176,
-              batY=394+VBOT, verY=422+VBOT, atcY=422+VBOT;
-    const lv_font_t *FID=&lv_font_montserrat_24, *FVER=&lv_font_montserrat_16;   // (juin 2026) identité PLUS GRANDE
-    const int chkY0=226, chkDY=33;                                               // (juin 2026) plus d'air sous l'identité + 5 checks (SafeSky)
-#else
-    const int vwZoom=320, vwY=70, atZoom=384, atY=108, acidY=190, batY=414, verY=432, atcY=450;
-    const lv_font_t *FID=&lv_font_montserrat_14, *FVER=&lv_font_montserrat_12;
-    const int chkY0=218, chkDY=30;
-#endif
+    lv_obj_set_style_bg_color(p,lv_color_hex(0x141414),0); lv_obj_set_style_bg_opa(p,LV_OPA_COVER,0);
+    lv_obj_set_style_radius(p,0,0); lv_obj_set_style_border_width(p,0,0); lv_obj_set_style_pad_all(p,0,0);   // coins CARRÉS : la page remplit tout le 600×450
+    // RÈGLE DE CONCEPTION (Christophe 20/09) : 5 px minimum VIERGES tout autour de chaque page, aucun texte collé au bord.
+    for(int i=0;i<N_CHK;i++){ r_chk_dot[i]=r_chk_ico[i]=r_chk_lbl[i]=nullptr; }   // anciennes lignes « check » supprimées
 
-    // ── Logos bicolores (A bleu + reste noir) — zoom LVGL pour respecter proportions maquette
-    lv_obj_t*lVw=lv_img_create(p);
-    lv_img_set_src(lVw,&img_logo_atview);          // 110×22 source
-    lv_img_set_zoom(lVw,vwZoom);
-    lv_obj_align(lVw,LV_ALIGN_TOP_MID,0,vwY);
-    // (juin 2026) Thème sombre : logos bicolores (bleu+noir, pensés fond blanc) → on les
-    // recolore en TFG (blanc) en DARK pour rester lisibles ; en LIGHT on garde l'original.
-    if(g_dark_theme){lv_obj_set_style_img_recolor(lVw,TFG(),0);lv_obj_set_style_img_recolor_opa(lVw,LV_OPA_COVER,0);}
-    // Long-press 1.5s sur ce logo = oublie pair BLE + reboot. Même geste
-    // qu'en page Settings (logo footer). Critique ici : c'est le SEUL moyen
-    // de sortir d'un blocage "Scanning BLE…" quand la MAC stockée pointe
-    // vers une carte AT-CORE absente (swap hardware) — Settings inaccessible
-    // sans connexion BLE. Action explicite utilisateur, pas d'auto-pair
-    // dangereux qui risquerait de se connecter au mauvais AT-CORE voisin.
-    lv_obj_add_flag(lVw,LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(lVw,_cbForgetPair,LV_EVENT_LONG_PRESSED,NULL);
+    // ── Monogramme deux couleurs (96 px) + « AirKi » (Bold 40) + « View » (SemiBold 20 = ½ hauteur, même ligne de base) + baseline
+    lv_obj_t*mk=lv_img_create(p); lv_img_set_src(mk,&img_airki_mark); lv_obj_set_pos(mk,40,44);
+    lv_obj_add_flag(mk,LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(mk,_cbForgetPair,LV_EVENT_LONG_PRESSED,NULL);   // geste conservé : appui long = oublier l'appairage + reboot
+    lv_obj_t*t1=mkLbl(p,"AirKi",AK_TXT,&airki_sans_40,LV_ALIGN_TOP_LEFT,152,50);
+    lv_obj_update_layout(t1);
+    // Ligne de base : sans_40 = top+49-9 = top+40 ; sans_20 = top+29-7 = top+22 → décalage exact +18 (mesuré dans les fontes générées)
+    mkLbl(p,"View",AK_TXT,&airki_sans_20,LV_ALIGN_TOP_LEFT,152+lv_obj_get_width(t1)+10,50+18);
+    mkLbl(p,"Not alone in the sky",AK_MUTE,&airki_sans_18,LV_ALIGN_TOP_LEFT,154,106);
 
-    lv_obj_t*lAt=lv_img_create(p);
-    lv_img_set_src(lAt,&img_logo_aerotrace);       // 240×50 source
-    lv_img_set_zoom(lAt,atZoom);                    // T4 ×1.875 (~450×94) — plus gros
-    lv_obj_align(lAt,LV_ALIGN_TOP_MID,0,atY);
-    if(g_dark_theme){lv_obj_set_style_img_recolor(lAt,TFG(),0);lv_obj_set_style_img_recolor_opa(lAt,LV_OPA_COVER,0);}
+    // ── Trois lignes d'état : pastille 12 px · libellé mono 20 · détail mono 18 gris
+    const char* names[3]={"GPS","LTE","TRAFFIC"};
+    for(int i=0;i<3;i++){
+        int y=190+i*42;
+        lv_obj_t*d=lv_obj_create(p); lv_obj_set_size(d,12,12); lv_obj_set_pos(d,40,y+7);
+        lv_obj_set_style_radius(d,LV_RADIUS_CIRCLE,0); lv_obj_set_style_border_width(d,1,0); lv_obj_set_style_border_color(d,AK_RULE,0);
+        lv_obj_set_style_bg_color(d,lv_color_hex(0x8D9096),0); lv_obj_set_style_bg_opa(d,LV_OPA_COVER,0); lv_obj_set_style_shadow_opa(d,LV_OPA_TRANSP,0);
+        lv_obj_clear_flag(d,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+        r_p0_dot[i]=d;
+        r_p0_st[i]=mkLbl(p,names[i],AK_TXT,FM_20,LV_ALIGN_TOP_LEFT,64,y);
+        r_p0_sub[i]=mkLbl(p,"",AK_MUTE,FM_18,LV_ALIGN_TOP_LEFT,64+(int)(strlen(names[i])*12)+14,y+2);
+    }
 
-    // ── Identité appareil transmise à SafeSky (sous le logo, centrée).
-    g_p0_acid=mkLbl(p,"",TFG(),FID,LV_ALIGN_TOP_MID,0,acidY);
-    p0UpdateAcId();
-
-    // ── 6 check rows (cercle bleu + label) — décalées à gauche, plus d'air entre lignes
-    const int X = 105;  // colonne cercle (decalee a gauche)
-    const int Y0= chkY0;  // 1ere ligne (board-conditionnel : plus bas + plus espacé sur T4)
-    const int DY= chkDY;  // espacement vertical (board-conditionnel)
-    mkCheckRow(p,CHK_CORE,X,Y0+0*DY,"AT-CORE");
-    mkCheckRow(p,CHK_BT,  X,Y0+1*DY,"Bluetooth");
-    mkCheckRow(p,CHK_GPS, X,Y0+2*DY,"GPS");
-    mkCheckRow(p,CHK_LTE, X,Y0+3*DY,"LTE");
-    mkCheckRow(p,CHK_SKY, X,Y0+4*DY,"SafeSky");   // (juin 2026) statut SafeSky sous LTE
-    // ADS-B / ADS-L et OGN / FLARM retirés (non poussés pour l'instant).
-
-    // ── Versions ATV (gauche) / ATC (droite), aux bords, colorées par canal.
-    // Batterie AT-CORE retirée (non nécessaire). Date de build retirée ici (trop long → se
-    // chevauchait au milieu ; la date reste sur ABOUT). r_p0_bat reste nullptr (update no-op).
-    mkLbl(p,"ATV " VIEW_VSTR,verColor(VIEW_VSTR),FVER,LV_ALIGN_TOP_LEFT,40,verY);
-    r_p0_atc=mkLbl(p,"ATC --",TGREY(),FVER,LV_ALIGN_TOP_RIGHT,-40,atcY);  // rempli live (g_status.fws)
-    // (v213 T32) GESTE CACHÉ : maintenir ~8 s cette ligne (accueil) en mode club → clavier PIN
-    // admin (NVS adm_pin, déf. 1470) → déverrouillage temporaire de l'UI complète.
+    // ── Colonne droite, calée au bord : PILOT · BOX · HEX · FIRMWARE (libellés mono 14 capitales, valeurs 28)
+    const int RX=-40; int ry=150;
+    mkLbl(p,"PILOT",AK_MUTE,FM_14,LV_ALIGN_TOP_RIGHT,RX,ry);       r_p0_pilot=mkLbl(p,"--",AK_TXT,&airki_sans_28,LV_ALIGN_TOP_RIGHT,RX,ry+18);
+    ry+=56; mkLbl(p,"BOX",AK_MUTE,FM_14,LV_ALIGN_TOP_RIGHT,RX,ry); r_p0_box=mkLbl(p,"--",AK_TXT,FM_28,LV_ALIGN_TOP_RIGHT,RX,ry+18);
+    ry+=56; mkLbl(p,"HEX",AK_MUTE,FM_14,LV_ALIGN_TOP_RIGHT,RX,ry); r_p0_hex=mkLbl(p,"--",AK_TXT,FM_28,LV_ALIGN_TOP_RIGHT,RX,ry+18);
+    ry+=56; mkLbl(p,"FIRMWARE",AK_MUTE,FM_14,LV_ALIGN_TOP_RIGHT,RX,ry);
+    r_p0_atc=mkLbl(p,"AKV " VIEW_VSTR " · AKC --",AK_MUTE,FM_18,LV_ALIGN_TOP_RIGHT,RX,ry+18);   // rempli live (g_status.fwv)
+    // (v213 T32) GESTE CACHÉ conservé : maintenir ~8 s la ligne firmware en mode club → clavier PIN admin
     lv_obj_add_flag(r_p0_atc,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(r_p0_atc,[](lv_event_t*e){
         static uint8_t rep8=0; lv_event_code_t c=lv_event_get_code(e);
         if(c==LV_EVENT_PRESSED) rep8=0;
         else if(c==LV_EVENT_LONG_PRESSED_REPEAT){ if(clubActive() && ++rep8>=70){ rep8=0; pinShow(); } }
     },LV_EVENT_ALL,NULL);
-    // (v198) Invite de MAJ, centrée en bas de l'accueil — cachée par défaut, montrée par le refresh
-    // si le boîtier a vu une MAJ (STATUS oav>fwv, check boot fiable ATC v137) ou si le check ATV
-    // au boot a vu une MAJ écran (g_atv_remote). Informe sans check permanent (impossible WROVER).
-    r_p0_upd=mkLbl(p,"",C_AMBER,FS_CAP,LV_ALIGN_BOTTOM_MID,0,-16);
+
+    // ── Bas : UTC à gauche (mono 28 + unité 14), immatriculation à droite (mono 28)
+    r_p0_utc=mkLbl(p,"--:--",AK_TXT,FM_28,LV_ALIGN_BOTTOM_LEFT,40,-26);
+    mkLbl(p,"UTC",AK_MUTE,FM_14,LV_ALIGN_BOTTOM_LEFT,40+5*17+10,-30);
+    r_p0_reg=mkLbl(p,"--",AK_TXT,FM_28,LV_ALIGN_BOTTOM_RIGHT,-40,-26);
+    // (v198) Invite de MAJ (ambre = attention, jamais du texte ambre long) — centrée en bas, cachée par défaut
+    r_p0_upd=mkLbl(p,"",C_AMBER,&airki_sans_14,LV_ALIGN_BOTTOM_MID,0,-8);
     lv_obj_add_flag(r_p0_upd,LV_OBJ_FLAG_HIDDEN);
+    g_p0_acid=nullptr;   // l'ancienne ligne identité centrée n'existe plus (p0UpdateAcId → no-op)
 }
 
 // ── Pilot DB / Auth functions ─────────────────────────────────────────────────
@@ -2524,6 +2623,7 @@ void authError(const char*msg){
 
 // "Welcome back <TRG> !" en rouge + ronds verts pleins
 static void _authOkVisual(const char*trg){
+    if(trg&&trg[0]) strlcpy(g_p0_trg,trg,sizeof(g_p0_trg));   // (v272) affiché sur l'accueil
     if(g_auth_prompt){
         char b[40];snprintf(b,sizeof(b),"Welcome back %s !",trg&&trg[0]?trg:"???");
         lv_label_set_text(g_auth_prompt,b);
@@ -3886,13 +3986,32 @@ static void aipDrawCb(lv_event_t*e){
             float sz=(float)kIconHalf[g_cfg.icon_sz]*0.6f;   // taille suit le réglage ICONS S/M/L
             int X=g_trf_scr[i].x+ox, Y=g_trf_scr[i].y+oy;
             lv_point_t p[3];
+#ifdef BOARD_WS241
+            (void)sz;   // (v280) spec : triangle plat M0 -13 L11 11 L-11 11 (26 px), plein si à jour, CONTOUR seul si périmé
+            p[0].x=(lv_coord_t)(X+13.f*sn);          p[0].y=(lv_coord_t)(Y-13.f*cs);
+            p[1].x=(lv_coord_t)(X-11.f*sn-11.f*cs);  p[1].y=(lv_coord_t)(Y+11.f*cs-11.f*sn);
+            p[2].x=(lv_coord_t)(X-11.f*sn+11.f*cs);  p[2].y=(lv_coord_t)(Y+11.f*cs+11.f*sn);
+            td.bg_color=g_trf_scr[i].col;
+            lv_draw_polygon(ctx,&td,p,3);
+            if(g_trf_scr[i].stale){ float gx=X-3.f*sn, gy=Y+3.f*cs; lv_point_t q[3];   // centroïde (0,3) → intérieur repeint fond = contour
+                for(int k=0;k<3;k++){ q[k].x=(lv_coord_t)(gx+((float)p[k].x-gx)*0.6f); q[k].y=(lv_coord_t)(gy+((float)p[k].y-gy)*0.6f); }
+                lv_draw_rect_dsc_t tb=td; tb.bg_color=TBG(); lv_draw_polygon(ctx,&tb,q,3); }
+#else
             p[0].x=(lv_coord_t)(X+sz*sn);                 p[0].y=(lv_coord_t)(Y-sz*cs);                 // nez (dans l'axe du cap)
             p[1].x=(lv_coord_t)(X-0.6f*sz*sn-0.7f*sz*cs); p[1].y=(lv_coord_t)(Y+0.6f*sz*cs-0.7f*sz*sn); // arrière-gauche
             p[2].x=(lv_coord_t)(X-0.6f*sz*sn+0.7f*sz*cs); p[2].y=(lv_coord_t)(Y+0.6f*sz*cs+0.7f*sz*sn); // arrière-droite
             td.bg_color=g_trf_scr[i].col;
             lv_draw_polygon(ctx,&td,p,3);
+#endif
         }
     }
+#ifdef BOARD_WS241
+    {   // (v286) SIGNE AirKi : halo 2 px r 20 autour des cibles src=3 (autre boîtier AirKi, source « ERKENS » côté SafeSky)
+        lv_draw_arc_dsc_t hd; lv_draw_arc_dsc_init(&hd); hd.width=2; hd.opa=LV_OPA_COVER;
+        for(int i=0;i<MAX_TRF;i++){ if(!g_trf_scr[i].shown||g_trf_scr[i].src!=3) continue;
+            hd.color=g_trf_scr[i].col; lv_point_t c={(lv_coord_t)(g_trf_scr[i].x+ox),(lv_coord_t)(g_trf_scr[i].y+oy)}; lv_draw_arc(ctx,&hd,&c,20,0,360); }
+    }
+#endif
     alertRingsDraw(ctx,ox,oy);                      // (v179) anneaux cibles menaçantes (indépendant de l'AIP)
     if(!g_cfg.aip_en||!g_aip_loaded)return;         // le reste = AIP, seulement si activée
     // Clip du dessin AIP : T-RGB = cercle radar | T4 = PLEIN ÉCRAN (2026-06-05,
@@ -3948,6 +4067,9 @@ static void aipDrawCb(lv_event_t*e){
               lv_draw_rect_dsc_t fd; lv_draw_rect_dsc_init(&fd);
               fd.bg_color=(g_aip_ctr[c].type_id==13)?lv_color_hex(0x818cf8):lv_color_hex(0x4f46e5);
               fd.bg_opa=LV_OPA_20; fd.border_opa=LV_OPA_TRANSP; fd.radius=0;
+#ifdef BOARD_WS241
+              fd.bg_color=lv_color_hex(0x60A5FA); fd.bg_opa=(g_aip_ctr[c].type_id==13)?20:36;   // (v280) spec : wash bleu info 14 % (advisory 8 %)
+#endif
               float ymin=1e9f,ymax=-1e9f;
               for(int q=0;q<ne_;q++){ if(ey_[q]<ymin)ymin=ey_[q]; if(ey_[q]>ymax)ymax=ey_[q]; }
               int y0=(int)fmaxf(ymin,0.0f), y1=(int)fminf(ymax,(float)SCR_H);
@@ -3974,6 +4096,10 @@ static void aipDrawCb(lv_event_t*e){
               lv_draw_line_dsc_t od; lv_draw_line_dsc_init(&od);
               od.color=(g_aip_ctr[c].type_id==13)?lv_color_hex(0x818cf8):lv_color_hex(0x4f46e5);
               od.width=1; od.opa=170;
+#ifdef BOARD_WS241
+              od.color=lv_color_hex(0x60A5FA); od.width=2;   // (v280) spec : filet bleu info 55 %, advisory 35 % tireté 6/5
+              if(g_aip_ctr[c].type_id==13){ od.opa=90; od.dash_width=6; od.dash_gap=5; } else od.opa=140;
+#endif
               for(int q=0;q<ne_;q++){
                   float xa=ex_[q], ya=ey_[q], xb=ex_[(q+1)%ne_], yb=ey_[(q+1)%ne_];
                   // clip grossier : segment entièrement hors écran (marge 40 px) → sauté ;
@@ -3989,6 +4115,9 @@ static void aipDrawCb(lv_event_t*e){
     // Aerodromes — small amber dot
     lv_draw_rect_dsc_t ad_d;lv_draw_rect_dsc_init(&ad_d);
     ad_d.bg_color=lv_color_hex(0xFBBF24);ad_d.bg_opa=LV_OPA_COVER;
+#ifdef BOARD_WS241
+    ad_d.bg_color=lv_color_hex(0x8D9096);   // (v280) spec : rien d'ambre sur le radar hors avion propre → aérodromes en etch
+#endif
     ad_d.radius=LV_RADIUS_CIRCLE;ad_d.border_width=0;
     for(uint16_t a=0;a<g_aip_ad_cnt;a++){
         uint8_t tid=g_aip_ads[a].type_id;
@@ -4020,6 +4149,10 @@ void buildRadarPage(){
     lv_obj_clear_flag(p,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(p,LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scroll_dir(p,LV_DIR_NONE);
+#ifdef BOARD_WS241
+    // (v280) spec blocs de coin : label 13 px, 3 px, valeur 40 px, 14 px entre blocs — top 18, marges 20
+    g_akY[0]=18; g_akY[1]=g_akY[0]+FM_13->line_height+3; g_akY[2]=g_akY[1]+FM_40->line_height+14; g_akY[3]=g_akY[2]+FM_13->line_height+3;
+#endif
 
     // Heading pill (top centre du radar) — (juin 2026) descendue un peu sur T4-S3
     lv_obj_t*hb=lv_obj_create(p);lv_obj_set_size(hb,HDG_W,HDG_H);
@@ -4037,6 +4170,13 @@ void buildRadarPage(){
     r_radar_hdg=lv_label_create(hb);lv_label_set_text(r_radar_hdg,"---°");
     lv_obj_set_style_text_color(r_radar_hdg,TFG(),0);
     lv_obj_set_style_text_font(r_radar_hdg,&HDG_FONT,0);lv_obj_center(r_radar_hdg);
+#ifdef BOARD_WS241
+    // (v275) DS AirKi : cap en HAUT-DROITE, texte seul (plus de capsule), Geist Mono 28 + unité « HDG » 13 gris
+    lv_obj_set_size(hb,150,FM_40->line_height); lv_obj_align(hb,LV_ALIGN_TOP_RIGHT,-20,g_akY[1]);   // (v280) spec : valeur 40 px, marge 20
+    lv_obj_set_style_bg_opa(hb,LV_OPA_TRANSP,0); lv_obj_set_style_border_width(hb,0,0);
+    lv_obj_set_style_text_font(r_radar_hdg,FM_40,0); lv_obj_align(r_radar_hdg,LV_ALIGN_RIGHT_MID,0,0);
+    mkLbl(p,"HDG",TGREY(),FM_13,LV_ALIGN_TOP_RIGHT,-20,g_akY[0]);
+#endif
 
     // GS — RETIRÉE du radar sur TOUTES les cartes (« GS pas nécessaire », 2026-07-01 ; T4-S3 l'était
     // déjà). r_radar_gs=nullptr → updateAllPages garde `if(r_radar_gs)` (no-op), plus de label GS.
@@ -4073,18 +4213,18 @@ void buildRadarPage(){
     r_flt_stop=lv_btn_create(p);
 #ifdef BOARD_T4S3
     // Aligné sur le chip Start (colonne gauche sous BLE, même slot) — gros format vol.
-    lv_obj_set_size(r_flt_stop,130,56);
-    lv_obj_set_pos(r_flt_stop,RLC_X,300);
+    lv_obj_set_size(r_flt_stop,96,44);
+    lv_obj_set_pos(r_flt_stop,10,196);   // (v275) zone libre à gauche du radar centré
 #else
     lv_obj_set_size(r_flt_stop,48,40);
     lv_obj_set_pos(r_flt_stop,8,186);
 #endif
-    lv_obj_set_style_bg_color(r_flt_stop,C_RED,0);lv_obj_set_style_radius(r_flt_stop,10,0);
+    lv_obj_set_style_bg_color(r_flt_stop,C_AMBER,0);lv_obj_set_style_radius(r_flt_stop,4,0);   // (v275) DS : ambre = action/attention, plus de rouge
     lv_obj_set_style_border_color(r_flt_stop,lv_color_hex(0xffffff),0);lv_obj_set_style_border_width(r_flt_stop,2,0);
     lv_obj_set_style_shadow_opa(r_flt_stop,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(r_flt_stop,[](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtl("stop_flight"); },LV_EVENT_CLICKED,NULL);
     {lv_obj_t*l=lv_label_create(r_flt_stop);lv_label_set_text(l,"STOP");
-     lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
+     lv_obj_set_style_text_color(l,lv_color_hex(0x141414),0);   // (v275) encre sur ambre
 #ifdef BOARD_T4S3
      lv_obj_set_style_text_font(l,&lv_font_montserrat_20,0);   // gros bouton colonne gauche
 #else
@@ -4145,25 +4285,32 @@ void buildRadarPage(){
     if(r_hdr_sky){
         lv_obj_t* sp=PILL_OF(r_hdr_sky);
         lv_obj_clear_flag(sp,LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_size(sp,52,52);lv_obj_set_pos(sp,RLC_X,8+R_TOP_EXTRA);   // 24×24 ×2 = 48 → pastille 52
-        lv_img_set_zoom(r_hdr_sky,512);                          // 256 = 1× → 512 = 2×
+        lv_obj_set_size(sp,40,40);lv_obj_set_pos(sp,16,394);   // (v278) bas-gauche EN LIGNE, plus petit : centres 36/88/140, axe 414
+        lv_img_set_zoom(r_hdr_sky,400);                          // 256 = 1× → 400 ≈ 1,56× (24 px → 37 px)
         lv_obj_center(r_hdr_sky);
+#ifdef BOARD_WS241
+        lv_obj_add_flag(sp,LV_OBJ_FLAG_HIDDEN);                  // (v280) remplacée par le losange dessiné (r_ic_ss)
+#endif
     }
     // Statut de vol, à DROITE de l'icône SafeSky (défaut GND)
-    lv_obj_set_pos(r_ss_gnd, RLC_X + 52 + 14, 24+R_TOP_EXTRA);
-    lv_obj_set_style_text_font(r_ss_gnd, &lv_font_montserrat_22, 0);
+    lv_obj_align(r_ss_gnd, LV_ALIGN_BOTTOM_RIGHT, -16, -12);   // (v278) statut GND/FLT en BAS À DROITE — (v280) restylé plus bas (encadré 14 px)
+    lv_obj_set_style_text_font(r_ss_gnd, FM_22, 0);
     lv_label_set_text(r_ss_gnd, "GND");
     lv_obj_clear_flag(r_ss_gnd, LV_OBJ_FLAG_HIDDEN);
     // LTE & GPS(GNSS) : CENTRÉS sous l'icône SafeSky (centre x≈36), agrandis manuellement
     // (pas de transform_zoom : il les faisait disparaître). Pastille PILL_W=64 → x=4 = centre 36.
-    if(r_hdr_lte){ lv_obj_set_pos(PILL_OF(r_hdr_lte), RLC_X-6, 54+R_TOP_EXTRA);   // (v230) encore remonté (retour Christophe)
-        // barres plus grandes
-        static const int8_t bh2[4]={9,14,19,25}; const int bw=5, sp=7, gx=(PILL_W-(4*bw+3*(sp-bw)))/2;
+    if(r_hdr_lte){ lv_obj_set_pos(PILL_OF(r_hdr_lte), 56, 394);   // (v278) centre x 88, axe y 414
+        static const int8_t bh2[4]={8,12,16,21}; const int bw=4, sp=6, gx=(PILL_W-(4*bw+3*(sp-bw)))/2;   // barres un poil plus petites
         for(int i=0;i<4;i++) if(r_hdr_lte_b[i]){
             lv_obj_set_size(r_hdr_lte_b[i],bw,bh2[i]);
-            lv_obj_set_pos(r_hdr_lte_b[i],gx+i*sp,(PILL_H-2)-bh2[i]); } }
-    if(r_hdr_gps){ lv_obj_set_pos(PILL_OF(r_hdr_gps), RLC_X-6, 100+R_TOP_EXTRA);   // (v230) encore remonté
-        lv_obj_set_style_text_font(r_hdr_gps,&lv_font_montserrat_28,0); }   // symbole GPS plus grand
+            lv_obj_set_pos(r_hdr_lte_b[i],gx+i*sp,(PILL_H-5)-bh2[i]); } }   // bas des barres à 429
+    if(r_hdr_gps){ lv_obj_set_pos(PILL_OF(r_hdr_gps), 108, 394);   // (v278) centre x 140
+        lv_obj_set_style_text_font(r_hdr_gps,&lv_font_montserrat_24,0);
+        lv_obj_align(r_hdr_gps,LV_ALIGN_CENTER,0,5); }   // symbole GPS un peu plus petit et ABAISSÉ sur l'axe des icônes
+#ifdef BOARD_WS241
+    if(r_hdr_lte) lv_obj_add_flag(PILL_OF(r_hdr_lte),LV_OBJ_FLAG_HIDDEN);   // (v280) remplacées par les icônes dessinées r_ic_lte / r_ic_gps
+    if(r_hdr_gps) lv_obj_add_flag(PILL_OF(r_hdr_gps),LV_OBJ_FLAG_HIDDEN);
+#endif
     #undef PILL_OF
 #endif
 
@@ -4180,6 +4327,15 @@ void buildRadarPage(){
     lv_obj_set_style_bg_opa(ri,LV_OPA_TRANSP,0);lv_obj_set_style_border_color(ri,TFG(),0);
     lv_obj_set_style_border_width(ri,1,0);lv_obj_set_style_shadow_opa(ri,LV_OPA_TRANSP,0);
     lv_obj_set_style_pad_all(ri,0,0);lv_obj_clear_flag(ri,LV_OBJ_FLAG_SCROLLABLE);
+#ifdef BOARD_WS241
+    // (v280) spec : anneaux 1,5 px blanc 34 % → 2 px à 34 % d'opacité ; repères de quart 2 px (R-6 → R+4) aux 4 points de l'écran
+    lv_obj_set_style_border_width(ro,2,0); lv_obj_set_style_border_opa(ro,87,0);
+    lv_obj_set_style_border_width(ri,2,0); lv_obj_set_style_border_opa(ri,87,0);
+    { static lv_point_t qm[4][2]={{{RAD_CX,RAD_CY-RAD_R-4},{RAD_CX,RAD_CY-RAD_R+6}},{{RAD_CX,RAD_CY+RAD_R-6},{RAD_CX,RAD_CY+RAD_R+4}},
+                                  {{RAD_CX-RAD_R-4,RAD_CY},{RAD_CX-RAD_R+6,RAD_CY}},{{RAD_CX+RAD_R-6,RAD_CY},{RAD_CX+RAD_R+4,RAD_CY}}};
+      for(int q=0;q<4;q++){ lv_obj_t*l=lv_line_create(p); lv_line_set_points(l,qm[q],2);
+          lv_obj_set_style_line_color(l,TFG(),0); lv_obj_set_style_line_width(l,2,0); lv_obj_set_style_line_opa(l,87,0); } }
+#endif
 
     // Tick marks — cardinal (every 90°) longer and brighter
     static lv_point_t tick_pts[12][2];
@@ -4192,7 +4348,11 @@ void buildRadarPage(){
         tick_pts[t][1].y=(lv_coord_t)(RAD_CY-cosf(a)*(float)RAD_R);
         lv_obj_t*tm=lv_line_create(p);lv_line_set_points(tm,tick_pts[t],2);
         lv_obj_set_style_line_color(tm,TFG(),0);
-        lv_obj_set_style_line_width(tm,(t%3==0)?2:1,0);}
+        lv_obj_set_style_line_width(tm,(t%3==0)?2:1,0);
+#ifdef BOARD_WS241
+        lv_obj_add_flag(tm,LV_OBJ_FLAG_HIDDEN);   // (v278) DS AirKi : cercles seuls, pas de graduations
+#endif
+        }
 
     // Cross lines (faint grid)
     static lv_point_t hpts[2]={{RAD_CX-RAD_R,RAD_CY},{RAD_CX+RAD_R,RAD_CY}};
@@ -4201,11 +4361,30 @@ void buildRadarPage(){
     lv_obj_set_style_line_color(hl,TGRID(),0);lv_obj_set_style_line_width(hl,1,0);
     lv_obj_t*vl=lv_line_create(p);lv_line_set_points(vl,vpts,2);
     lv_obj_set_style_line_color(vl,TGRID(),0);lv_obj_set_style_line_width(vl,1,0);
+#ifdef BOARD_WS241
+    lv_obj_add_flag(hl,LV_OBJ_FLAG_HIDDEN); lv_obj_add_flag(vl,LV_OBJ_FLAG_HIDDEN);   // (v278) plus de quadrants
+#endif
 
     // Own aircraft triangle — small and thin, no heading line
     static lv_point_t tri[4]={{RAD_CX,RAD_CY-14},{RAD_CX-8,RAD_CY+8},{RAD_CX+8,RAD_CY+8},{RAD_CX,RAD_CY-14}};
     lv_obj_t*ot=lv_line_create(p);lv_line_set_points(ot,tri,4);
-    lv_obj_set_style_line_color(ot,C_GREEN,0);lv_obj_set_style_line_width(ot,2,0);
+    lv_obj_set_style_line_color(ot,C_AMBER,0);lv_obj_set_style_line_width(ot,3,0);   // (v275) avion propre = ambre
+#ifdef BOARD_WS241
+    lv_obj_add_flag(ot,LV_OBJ_FLAG_HIDDEN);
+    {   // (v278) position propre = CHEVRON ambre PLEIN (2 triangles convexes dessinés au DRAW_MAIN_END)
+        lv_obj_t* own=lv_obj_create(p); lv_obj_set_size(own,44,44); lv_obj_set_pos(own,RAD_CX-22,RAD_CY-22);
+        lv_obj_set_style_bg_opa(own,LV_OPA_TRANSP,0); lv_obj_set_style_border_width(own,0,0); lv_obj_set_style_pad_all(own,0,0);
+        lv_obj_set_style_shadow_opa(own,LV_OPA_TRANSP,0); lv_obj_clear_flag(own,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(own,[](lv_event_t*e){
+            lv_draw_ctx_t*ctx=lv_event_get_draw_ctx(e); lv_area_t a; lv_obj_get_coords(lv_event_get_target(e),&a);
+            lv_coord_t cx=a.x1+22, cy=a.y1+22;
+            lv_draw_rect_dsc_t d; lv_draw_rect_dsc_init(&d); d.bg_opa=LV_OPA_COVER; d.border_width=0; d.bg_color=C_AMBER;
+            lv_point_t L[3]={{cx,(lv_coord_t)(cy-20)},{cx,(lv_coord_t)(cy+10)},{(lv_coord_t)(cx-14),(lv_coord_t)(cy+18)}};   // (v280) spec M300 208 L314 246 L300 238 L286 246
+            lv_point_t R[3]={{cx,(lv_coord_t)(cy-20)},{(lv_coord_t)(cx+14),(lv_coord_t)(cy+18)},{cx,(lv_coord_t)(cy+10)}};
+            lv_draw_polygon(ctx,&d,L,3); lv_draw_polygon(ctx,&d,R,3);
+        },LV_EVENT_DRAW_MAIN_END,NULL);
+    }
+#endif
 
     // Cardinal labels N/E/S/W — position radiale via RAD_CARD_OFF (T4 = à l'extérieur de l'anneau)
     const char*cnames[]={"N","E","S","W"};
@@ -4222,6 +4401,12 @@ void buildRadarPage(){
         // (juin 2026) largeur fixe + texte centré → W (large) ne paraît plus décalé
         lv_obj_set_width(r_card[ci],24);
         lv_obj_set_style_text_align(r_card[ci],LV_TEXT_ALIGN_CENTER,0);
+#ifdef BOARD_WS241
+        lv_obj_add_flag(r_card[ci],LV_OBJ_FLAG_HIDDEN);   // (v278) plus de lettres N/S/E/W → trait NORD (r_north)
+        if(ci==0){ g_north_pts[0]={(lv_coord_t)RAD_CX,(lv_coord_t)(RAD_CY-RAD_R+8)}; g_north_pts[1]={(lv_coord_t)RAD_CX,(lv_coord_t)(RAD_CY-RAD_R-6)};
+                   r_north=lv_line_create(p); lv_line_set_points(r_north,g_north_pts,2);   // (v280) spec : trait plein 3 px, R-8 → R+6
+                   lv_obj_set_style_line_color(r_north,TFG(),0); lv_obj_set_style_line_width(r_north,3,0); lv_obj_set_style_line_rounded(r_north,false,0); }
+#endif
         // (2026-07-01) position INITIALE correcte N/E/S/W (north-up) au lieu des 4 empilées en
         // haut → cardinaux visibles même SANS STATUS BLE (avant : « disparus » hors connexion).
         float ra=(float)cbear0[ci]*(float)M_PI/180.0f; int ri=RAD_R+RAD_CARD_OFF;
@@ -4230,9 +4415,17 @@ void buildRadarPage(){
     // Scale label — entre le S de la rose et la GS (ordre : S → 4nm → GS XXkt).
     // (juin 2026) T4-S3 : police PLUS GRANDE + couleur premier-plan (« affichage plus
     // clair et grand du NM du 2ème cadran »). T-RGB inchangé.
-    char scl[12];kScaleLbl(scl,12,g_cfg.scale_nm);
+    char scl[12];RAD_SCALE_TXT(scl,12,g_cfg.scale_nm);
 #ifdef BOARD_T4S3
     r_radar_scale_lbl=mkLbl(p,scl,TFG(),&lv_font_montserrat_32,LV_ALIGN_BOTTOM_MID,RB_DX,-36+RB_DY);   // (juin 2026) descendu
+#ifdef BOARD_WS241
+    // (v275) DS AirKi : échelle = « RANGE » sous le cap, haut-droite, Geist Mono 20
+    // (v280) spec : RANGE = nombre 40 px + « NM » 22 px gris sur la même ligne de base, bloc 2 haut-droite
+    { lv_obj_t*nm=mkLbl(p,"NM",TGREY(),FM_22,LV_ALIGN_TOP_RIGHT,-20,g_akY[3]+(FM_40->line_height-FM_40->base_line)-(FM_22->line_height-FM_22->base_line));
+      lv_obj_update_layout(nm); int nmw=lv_obj_get_width(nm);
+      lv_obj_set_style_text_font(r_radar_scale_lbl,FM_40,0); lv_obj_align(r_radar_scale_lbl,LV_ALIGN_TOP_RIGHT,-20-nmw-8,g_akY[3]); }
+    mkLbl(p,"RANGE",TGREY(),FM_13,LV_ALIGN_TOP_RIGHT,-20,g_akY[2]);
+#endif
 #elif defined(BOARD_WS216)
     r_radar_scale_lbl=mkLbl(p,scl,TFG(),&lv_font_montserrat_28,LV_ALIGN_BOTTOM_MID,RB_DX,-52+RB_DY);   // (2026-07-01) échelle plus grande + lisible (carré) ; remontée pour loger le S (cardinal extérieur) dessous
 #else
@@ -4333,6 +4526,23 @@ void buildRadarPage(){
     lv_obj_clear_flag(r_aip_layer,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(r_aip_layer,aipDrawCb,LV_EVENT_DRAW_MAIN_END,NULL);
 
+    // (v271) Bouton NOIR / BLANC directement sur le radar (demande Christophe 20/09) : bascule le thème encre/papier
+    // (g_cfg.dark, persisté) et reconstruit les pages en DIFFÉRÉ via lv_async_call — jamais détruire l'objet qui
+    // traite l'événement. Coin haut-gauche, 40 px, bordure 1 px, glyphe = thème CIBLE (« W » sur encre, « B » sur papier).
+    // (v275) DS AirKi : GS / ALT en HAUT-GAUCHE (unités 13 gris + valeurs Geist Mono 28), UTC en BAS-DROITE (mono 18)
+    // (v280) spec : blocs haut-gauche GS KT / ALT FT — label 13 gris, valeur Geist Mono 40, marge 20/18
+    mkLbl(p,"GS KT",TGREY(),FM_13,LV_ALIGN_TOP_LEFT,20,g_akY[0]);   r_ak_gs =mkLbl(p,"---",TFG(),FM_40,LV_ALIGN_TOP_LEFT,20,g_akY[1]);
+    mkLbl(p,g_cfg.alt_ft?"ALT FT":"ALT M",TGREY(),FM_13,LV_ALIGN_TOP_LEFT,20,g_akY[2]); r_ak_alt=mkLbl(p,"---",TFG(),FM_40,LV_ALIGN_TOP_LEFT,20,g_akY[3]);
+    // (v280) icônes d'état DESSINÉES (spec Status Icons) : 26 px, gap 18, 16 px du bas, 20 px du bord — créées APRÈS la couche AIP (au-dessus du wash)
+    r_ic_gps=mkIcon(p,20,SCR_H-16-26,icGpsDraw); r_ic_lte=mkIcon(p,64,SCR_H-16-26,icLteDraw); r_ic_ss=mkIcon(p,108,SCR_H-16-26,icSsDraw);
+    // (v280) bas-droite : immat 14 px gris + état GND/FLT encadré (1 px rule-dark, 5×9, radius 3)
+    if(r_ss_gnd){ lv_obj_set_style_text_font(r_ss_gnd,FM_18,0); lv_obj_set_style_border_width(r_ss_gnd,1,0);   // (v281) 18 px lv_obj_set_style_border_color(r_ss_gnd,TGRID(),0);
+        lv_obj_set_style_border_opa(r_ss_gnd,LV_OPA_COVER,0); lv_obj_set_style_radius(r_ss_gnd,3,0); lv_obj_set_style_pad_ver(r_ss_gnd,5,0); lv_obj_set_style_pad_hor(r_ss_gnd,9,0);
+        lv_obj_align(r_ss_gnd,LV_ALIGN_BOTTOM_RIGHT,-20,-16); lv_obj_move_foreground(r_ss_gnd); }
+    r_ak_reg=mkLbl(p,"---",TGREY(),FM_18,LV_ALIGN_BOTTOM_RIGHT,-110,-22);   // (v281) 18 px, replacé par align_to dans updateAllPages
+    r_ak_utc=nullptr;   // (v277) heure RETIRÉE du radar (Christophe) — reste sur l'accueil
+    // (v277) bouton thème RETIRÉ du radar (Christophe) : le thème N/B se règle dans Settings → THEME.
+
     // CO arc gauge — 3 fixed color bands (30° total) in bottom-right quadrant
     // LVGL arc convention: 0°=right(3h), increases CW → compass120°=LVGL30°, compass150°=LVGL60°
     // Each band 10°: green(30-40°) caution(40-50°) danger(50-60°)
@@ -4409,6 +4619,9 @@ void buildRadarPage(){
         r_radar_alt[i]=lv_label_create(p);lv_label_set_text(r_radar_alt[i],"");
         lv_obj_set_style_text_font(r_radar_alt[i],kAltFont[g_cfg.icon_sz],0);  // (v147) Δalt proportionnelle au réglage ICONS S/M/L
         lv_obj_set_style_text_color(r_radar_alt[i],C_CYAN,0);
+#ifdef BOARD_WS241
+        lv_obj_set_style_text_font(r_radar_alt[i],FM_22,0); lv_obj_set_style_text_font(r_radar_cs[i],FM_14,0);   // (v284) Δalt 22 (centaines de ft) / immat 14
+#endif
         lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);}
 
     // Alert overlay
@@ -4446,7 +4659,11 @@ void buildRadarPage(){
      lv_obj_add_event_cb(gear,[](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED){ g_navPage=2; g_navPending=true; } },LV_EVENT_CLICKED,NULL);
      lv_obj_t* gl=lv_label_create(gear);lv_label_set_text(gl,LV_SYMBOL_SETTINGS);
      lv_obj_set_style_text_color(gl,lv_color_hex(0x000000),0);   // (v245) glyphe NOIR (fond transparent)
-     lv_obj_set_style_text_font(gl,&lv_font_montserrat_40,0);lv_obj_center(gl);}   // (v245) même taille que le son
+     lv_obj_set_style_text_font(gl,&lv_font_montserrat_40,0);lv_obj_center(gl);
+#ifdef BOARD_WS241
+     lv_obj_add_flag(gear,LV_OBJ_FLAG_HIDDEN);   // (v276) plus d'icône Settings sur le radar : appui LONG 2 s sur la molette
+#endif
+    }
 
     // Toggle rapide MODE ALERTE (au-dessus de l'engrenage) : tap = cycle AUTO→CIRC→RTE.
     // Couleur = état effectif (refresh dans updateRadarDR). Usage opérationnel (bascule en vol).
@@ -4488,7 +4705,7 @@ void updSetPage(){
     if(s_wifi_v)lv_label_set_text(s_wifi_v,g_wifi_active?"192.168.4.1":g_cfg.wifi_en?"ON":"OFF");
     if(s_aip_v)lv_label_set_text(s_aip_v,!g_aip_loaded?"NO DATA":g_cfg.aip_en?"ON":"OFF");
     if(s_heli_v)lv_label_set_text(s_heli_v,g_cfg.ad_heli?"ON":"OFF");
-    kScaleLbl(b,12,g_cfg.scale_nm); lv_label_set_text(r_radar_scale_lbl,b);
+    RAD_SCALE_TXT(b,12,g_cfg.scale_nm); lv_label_set_text(r_radar_scale_lbl,b);
     panelBright(g_cfg.brightness);}
 
 static void cbSetBtn(lv_event_t*e){
@@ -4621,8 +4838,14 @@ static void segApplyStyle(SegCtl &s){
     bool aSel = (*s.val == s.aIsTrue);
     lv_obj_t *on  = aSel? s.segA : s.segB,  *off = aSel? s.segB : s.segA;
     lv_obj_t *onL = aSel? s.lblA : s.lblB,  *offL= aSel? s.lblB : s.lblA;
+#ifdef BOARD_WS241
+    if(s.pill){ p1SwitchSet(s.pill,s.knob,*s.val); return; }               // (v292) pilule
+    lv_obj_set_style_bg_color(on,UI_INK,0); lv_obj_set_style_bg_opa(on,LV_OPA_COVER,0);   // (v292) actif = blanc / texte encre (plus d'ambre)
+    lv_obj_set_style_text_color(onL,UI_BG,0);
+#else
     lv_obj_set_style_bg_color(on,C_BRAND,0); lv_obj_set_style_bg_opa(on,LV_OPA_COVER,0);
     lv_obj_set_style_text_color(onL,lv_color_hex(0xffffff),0);
+#endif
     lv_obj_set_style_bg_opa(off,LV_OPA_TRANSP,0);
     lv_obj_set_style_text_color(offL,UI_INK2,0);
 }
@@ -4654,9 +4877,68 @@ static void cbSeg(lv_event_t*e){
 }
 
 // Ligne label + segmented (2 options) — réservé T4-S3.
+#ifdef BOARD_WS241
+// ── (v292) Lignes de SECTION Settings dans l'esprit de la page 1 : conteneur 560×48 à x=20, bord 1 px rule-dark radius 6,
+// libellé Instrument Sans 20 blanc à gauche, contrôle à droite. Focus molette = encFocusOutline (bord ambre / vert).
+static lv_obj_t* s_bright_sl=nullptr;
+static const int SEC_ROWH=48;
+static lv_obj_t* secRow(lv_obj_t*p,int y,const char*k,lv_obj_t**tl){
+    lv_obj_t*r=lv_obj_create(p); lv_obj_set_size(r,SETW-40,SEC_ROWH); lv_obj_set_pos(r,20,y);
+    lv_obj_set_style_bg_color(r,UI_BG,0); lv_obj_set_style_bg_opa(r,LV_OPA_COVER,0); lv_obj_set_style_radius(r,6,0);
+    lv_obj_set_style_border_width(r,1,0); lv_obj_set_style_border_color(r,UI_SURF_F,0); lv_obj_set_style_shadow_opa(r,LV_OPA_TRANSP,0); lv_obj_set_style_pad_all(r,0,0);
+    lv_obj_clear_flag(r,LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t*l=lv_label_create(r); lv_label_set_text(l,k); lv_obj_set_style_text_color(l,UI_INK,0); lv_obj_set_style_text_font(l,&airki_sans_20,0); lv_obj_align(l,LV_ALIGN_LEFT_MID,16,0);
+    if(tl)*tl=l; return r;
+}
+static lv_obj_t* secTrack(lv_obj_t*r,int n,int cw){   // bande segmentée à droite : n cellules de cw px, bord 1 px
+    lv_obj_t*tr=lv_obj_create(r); lv_obj_set_size(tr,n*cw+2,34); lv_obj_align(tr,LV_ALIGN_RIGHT_MID,-8,0);
+    lv_obj_set_style_radius(tr,6,0); lv_obj_set_style_bg_opa(tr,LV_OPA_TRANSP,0); lv_obj_set_style_border_width(tr,1,0); lv_obj_set_style_border_color(tr,UI_SURF_F,0);
+    lv_obj_set_style_pad_all(tr,0,0); lv_obj_set_style_shadow_opa(tr,LV_OPA_TRANSP,0); lv_obj_clear_flag(tr,LV_OBJ_FLAG_SCROLLABLE);
+    return tr;
+}
+static lv_obj_t* secCell(lv_obj_t*tr,int i,int cw,const char*txt,lv_event_cb_t cb,void*ud,lv_obj_t**lbl){
+    lv_obj_t*c=lv_btn_create(tr); lv_obj_set_size(c,cw-2,28); lv_obj_set_pos(c,1+i*cw,2);
+    lv_obj_set_style_radius(c,4,0); lv_obj_set_style_shadow_opa(c,LV_OPA_TRANSP,0); lv_obj_set_style_border_width(c,0,0); lv_obj_set_style_pad_all(c,0,0);
+    lv_obj_set_style_outline_width(c,0,LV_STATE_FOCUSED); lv_obj_set_style_outline_width(c,0,LV_STATE_FOCUS_KEY);
+    lv_obj_add_event_cb(c,cb,LV_EVENT_CLICKED,ud);
+    lv_obj_t*l=lv_label_create(c); lv_label_set_text(l,txt); lv_obj_set_style_text_font(l,&airki_sans_16,0); lv_obj_center(l);
+    if(lbl)*lbl=l; return c;
+}
+static void _segRowToggleCb(lv_event_t*e){   // tap sur une ligne pilule → bascule (envoie le clic à la moitié opposée)
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    int idx=(int)(intptr_t)lv_event_get_user_data(e); if(idx<0||idx>=g_seg_n)return;
+    SegCtl&s=g_seg[idx]; lv_event_send((*s.val==s.aIsTrue)? s.segB : s.segA, LV_EVENT_CLICKED, NULL);
+}
+#endif
 static void mkSegRow(lv_obj_t*p,const char*k,int y,const char*a,const char*b,
                      bool*val,bool aIsTrue){
     if(g_seg_n>=10)return;
+#ifdef BOARD_WS241
+    {   int idx=g_seg_n; lv_obj_t*_tl=nullptr; lv_obj_t*r=secRow(p,y,k,&_tl);
+        g_seg[idx].val=val; g_seg[idx].aIsTrue=aIsTrue; g_seg[idx].pill=nullptr; g_seg[idx].knob=nullptr;
+        if(!strcmp(a,"OFF")&&!strcmp(b,"ON")){   // PILULE : segA/segB cachés (logique cbSeg conservée), la ligne bascule au tap
+            lv_obj_t*sa=lv_btn_create(r); lv_obj_set_size(sa,1,1); lv_obj_add_flag(sa,LV_OBJ_FLAG_HIDDEN); lv_obj_add_event_cb(sa,cbSeg,LV_EVENT_CLICKED,(void*)(intptr_t)((idx<<1)|0));
+            lv_obj_t*sb=lv_btn_create(r); lv_obj_set_size(sb,1,1); lv_obj_add_flag(sb,LV_OBJ_FLAG_HIDDEN); lv_obj_add_event_cb(sb,cbSeg,LV_EVENT_CLICKED,(void*)(intptr_t)((idx<<1)|1));
+            lv_obj_t*la=lv_label_create(sa); lv_obj_t*lb=lv_label_create(sb);
+            g_seg[idx].segA=sa; g_seg[idx].segB=sb; g_seg[idx].lblA=la; g_seg[idx].lblB=lb;
+            lv_obj_t*pill=lv_obj_create(r); lv_obj_set_size(pill,44,24); lv_obj_align(pill,LV_ALIGN_RIGHT_MID,-14,0);
+            lv_obj_set_style_radius(pill,LV_RADIUS_CIRCLE,0); lv_obj_set_style_bg_opa(pill,LV_OPA_COVER,0); lv_obj_set_style_border_color(pill,UI_CHEV,0);
+            lv_obj_set_style_pad_all(pill,0,0); lv_obj_set_style_shadow_opa(pill,LV_OPA_TRANSP,0); lv_obj_clear_flag(pill,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_t*knob=lv_obj_create(pill); lv_obj_set_size(knob,18,18); lv_obj_set_style_radius(knob,LV_RADIUS_CIRCLE,0); lv_obj_set_style_bg_opa(knob,LV_OPA_COVER,0);
+            lv_obj_set_style_border_width(knob,0,0); lv_obj_set_style_pad_all(knob,0,0); lv_obj_set_style_shadow_opa(knob,LV_OPA_TRANSP,0); lv_obj_clear_flag(knob,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+            g_seg[idx].pill=pill; g_seg[idx].knob=knob;
+            lv_obj_add_event_cb(r,_segRowToggleCb,LV_EVENT_CLICKED,(void*)(intptr_t)idx);
+        } else {                                  // 2 options nommées (LIGHT/DARK, ICONS/TRIANGLES) : 2 cellules
+            const int cw=96; lv_obj_t*tr=secTrack(r,2,cw); lv_obj_t*la,*lb;
+            lv_obj_t*sa=secCell(tr,0,cw,a,cbSeg,(void*)(intptr_t)((idx<<1)|0),&la);
+            lv_obj_t*sb=secCell(tr,1,cw,b,cbSeg,(void*)(intptr_t)((idx<<1)|1),&lb);
+            g_seg[idx].segA=sa; g_seg[idx].segB=sb; g_seg[idx].lblA=la; g_seg[idx].lblB=lb;
+        }
+        g_seg_n++; segApplyStyle(g_seg[idx]);
+        erReg(p,r,_tl,ER_SEG,idx);
+        return;
+    }
+#endif
     lv_obj_t*_tl=mkLblP(p,k,UI_INK,FS_ROW,40,y+11);
     const int TW=224,TH=52,TX=SETW-40-TW,HW=(TW-6)/2;   // track à droite (board-aware SETW), 3px pad bords
     lv_obj_t*tr=lv_obj_create(p);
@@ -4679,7 +4961,7 @@ static void mkSegRow(lv_obj_t*p,const char*k,int y,const char*a,const char*b,
     lv_obj_t*lb=lv_label_create(sb);lv_label_set_text(lb,b);
     lv_obj_set_style_text_font(lb,FS_VALUE,0);lv_obj_center(lb);
     g_seg[idx].segA=sa;g_seg[idx].segB=sb;g_seg[idx].lblA=la;g_seg[idx].lblB=lb;
-    g_seg[idx].val=val;g_seg[idx].aIsTrue=aIsTrue;
+    g_seg[idx].val=val;g_seg[idx].aIsTrue=aIsTrue; g_seg[idx].pill=nullptr; g_seg[idx].knob=nullptr;
     g_seg_n++; segApplyStyle(g_seg[idx]);
 #if defined(BOARD_WS241)
     erReg(p,tr,_tl,ER_SEG,idx);   // nav encodeur : 1 ligne, focus sur le track, titre recoloré
@@ -4710,6 +4992,22 @@ static lv_obj_t* mkBigStepRow(lv_obj_t*p,const char*k,int y,const char*v,int idn
 
 // Slider brightness épais (gros knob) — réservé T4-S3.
 static void mkBigBrightRow(lv_obj_t*p,const char*k,int y,uint8_t val){
+#ifdef BOARD_WS241
+    {   lv_obj_t*_tl=nullptr; lv_obj_t*r=secRow(p,y,k,&_tl);
+        char b[8]; snprintf(b,8,"%d/16",val);
+        s_bright_v=lv_label_create(r); lv_label_set_text(s_bright_v,b); lv_obj_set_style_text_color(s_bright_v,UI_INK2,0); lv_obj_set_style_text_font(s_bright_v,FM_14,0);
+        lv_obj_set_width(s_bright_v,52); lv_obj_set_style_text_align(s_bright_v,LV_TEXT_ALIGN_RIGHT,0); lv_obj_align(s_bright_v,LV_ALIGN_RIGHT_MID,-14,0);
+        lv_obj_t*sl=lv_slider_create(r); lv_obj_set_size(sl,180,6); lv_obj_align(sl,LV_ALIGN_RIGHT_MID,-80,0);
+        lv_slider_set_range(sl,1,16); lv_slider_set_value(sl,val,LV_ANIM_OFF);
+        lv_obj_set_style_bg_color(sl,UI_SURF_F,LV_PART_MAIN); lv_obj_set_style_bg_opa(sl,LV_OPA_COVER,LV_PART_MAIN); lv_obj_set_style_radius(sl,3,LV_PART_MAIN);
+        lv_obj_set_style_bg_color(sl,UI_INK,LV_PART_INDICATOR); lv_obj_set_style_bg_opa(sl,LV_OPA_COVER,LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(sl,UI_INK,LV_PART_KNOB); lv_obj_set_style_pad_all(sl,6,LV_PART_KNOB);
+        lv_obj_set_style_outline_width(sl,0,LV_STATE_FOCUSED); lv_obj_set_style_outline_width(sl,0,LV_STATE_FOCUS_KEY);
+        lv_obj_add_event_cb(sl,cbBrightSlider,LV_EVENT_ALL,NULL);
+        s_bright_sl=sl; erReg(p,r,_tl,ER_BRIGHT,-1);   // focus = la ligne ; l'édition molette pilote s_bright_sl
+        return;
+    }
+#endif
     lv_obj_t*_tl=mkLblP(p,k,UI_INK,FS_ROW,40,y+11);
     lv_obj_t*sl=lv_slider_create(p);
     lv_obj_set_size(sl,224,14);lv_obj_set_pos(sl,SETW-264,y+19);   // bande board-aware (alignée seg/stepper)
@@ -4729,9 +5027,15 @@ static void mkBigBrightRow(lv_obj_t*p,const char*k,int y,uint8_t val){
 static void segNApply(SegN &s){
     for(int i=0;i<s.n;i++){
         bool on=(*s.val==i);
+#ifdef BOARD_WS241
+        lv_obj_set_style_bg_color(s.cell[i],UI_INK,0);   // (v292) actif = blanc / texte encre
+        lv_obj_set_style_bg_opa(s.cell[i],on?LV_OPA_COVER:LV_OPA_TRANSP,0);
+        lv_obj_set_style_text_color(s.lbl[i],on?UI_BG:UI_INK2,0);
+#else
         lv_obj_set_style_bg_color(s.cell[i],C_BRAND,0);
         lv_obj_set_style_bg_opa(s.cell[i],on?LV_OPA_COVER:LV_OPA_TRANSP,0);
         lv_obj_set_style_text_color(s.lbl[i],on?lv_color_hex(0xffffff):UI_INK2,0);
+#endif
     }
 }
 static void updSegNs(){ for(int i=0;i<g_segn_n;i++) segNApply(g_segn[i]); }
@@ -4752,6 +5056,16 @@ static void cbSegN(lv_event_t*e){
 // Ligne label + segmented N options (cellules égales dans la bande 336..560).
 static void mkSegRowN(lv_obj_t*p,const char*k,int y,const char*const*opts,int n,uint8_t*val,uint8_t kind){
     if(g_segn_n>=2||n>4)return;
+#ifdef BOARD_WS241
+    {   int idx=g_segn_n; lv_obj_t*_tl=nullptr; lv_obj_t*r=secRow(p,y,k,&_tl);
+        const int cw=(n>=4)?66:80; lv_obj_t*tr=secTrack(r,n,cw);
+        for(int i=0;i<n;i++){ lv_obj_t*l; g_segn[idx].cell[i]=secCell(tr,i,cw,opts[i],cbSegN,(void*)(intptr_t)((idx<<3)|i),&l); g_segn[idx].lbl[i]=l; }
+        g_segn[idx].n=(uint8_t)n; g_segn[idx].val=val; g_segn[idx].kind=kind;
+        g_segn_n++; segNApply(g_segn[idx]);
+        erReg(p,r,_tl,ER_SEGN,idx);
+        return;
+    }
+#endif
     lv_obj_t*_tl=mkLblP(p,k,UI_INK,FS_ROW,40,y+11);
     const int TW=224,TH=52,TX=SETW-40-TW,pad=3,cw=(TW-2*pad)/n;
     lv_obj_t*tr=lv_obj_create(p);
@@ -5029,7 +5343,7 @@ static void _maint_scan_cb(lv_event_t*e){
     g_status.wsr=0; g_scan_pending=true; g_scan_t0=millis();}
 
 // ── Écran VOLS (WP8) — liste multi-select, transfert, suppression ─────────────
-struct VolItem { char fid[20]; char d[12]; char s[6]; char e[6]; uint8_t up; bool sel; lv_obj_t* lbl; lv_obj_t* row; };
+struct VolItem { char fid[28]; char d[12]; char s[6]; char e[6]; uint8_t up; bool sel; lv_obj_t* lbl; lv_obj_t* row; };
 static VolItem  g_vols[16];
 static int      g_vols_n=0;
 static lv_obj_t* g_vols_ov=nullptr;
@@ -5135,18 +5449,33 @@ static void _vols_row_cb(lv_event_t*e){
     int i=(int)(intptr_t)lv_obj_get_user_data(b);
     if(i<0||i>=g_vols_n)return;
     g_vols[i].sel=!g_vols[i].sel;
+#ifdef BOARD_WS241
+    lv_obj_set_style_bg_color(b, g_vols[i].sel?UI_INK:ROW_BG, 0);   // (v294) sélection = blanc / encre
+    if(g_vols[i].lbl) lv_obj_set_style_text_color(g_vols[i].lbl,
+        g_vols[i].sel?UI_BG:(g_vols[i].up?C_GREEN:UI_INK),0);
+#else
     lv_obj_set_style_bg_color(b, g_vols[i].sel?C_BRAND:UI_SURF, 0);
     if(g_vols[i].lbl) lv_obj_set_style_text_color(g_vols[i].lbl,
         g_vols[i].sel?lv_color_hex(0xffffff):(g_vols[i].up?C_GREEN:UI_INK),0);
+#endif
 }
 
 // Lit CHR_FLIGHTS, parse le JSON, construit les lignes.
 static void volsBuildList(){
-    if(!g_chrFl||!g_vols_list)return;
+    if(!g_chrFl||!g_vols_list){ Serial.printf("[VOLS] build: chrFl=%d list=%d\n",(int)(g_chrFl!=nullptr),(int)(g_vols_list!=nullptr)); return; }
     if(g_vols_load){lv_obj_add_flag(g_vols_load,LV_OBJ_FLAG_HIDDEN);}
     std::string v=bleStr(g_chrFl->readValue());
-    JsonDocument d; if(deserializeJson(d,v.c_str()))return;
+    Serial.printf("[VOLS] read %u o (MTU %u) : %.60s\n",(unsigned)v.size(),(unsigned)NimBLEDevice::getMTU(),v.c_str());   // (v267)
+    JsonDocument d; DeserializationError de=deserializeJson(d,v.c_str());
+    if(de){   // (v265) avant : return silencieux → l'écran gardait l'affichage précédent sans rien dire
+        Serial.printf("[VOLS] parse KO: %s\n",de.c_str());
+        lv_obj_clean(g_vols_list); g_vols_n=0;
+        lv_obj_t*l=lv_label_create(g_vols_list);lv_label_set_text(l,"List error - retry");
+        lv_obj_set_style_text_color(l,UI_INK2,0);lv_obj_set_style_text_font(l,FS_CAP,0);
+        return;
+    }
     JsonArray arr=d.as<JsonArray>();
+    Serial.printf("[VOLS] parse OK: isArray=%d n=%u\n",(int)d.is<JsonArray>(),(unsigned)arr.size());   // (v265 diag)
     lv_obj_clean(g_vols_list); g_vols_n=0;
     const int ROWH=42; const lv_font_t* RF=FS_CAP;   // lignes watchOS (sombres, arrondies)
     for(JsonObject o:arr){
@@ -5163,6 +5492,11 @@ static void volsBuildList(){
         // (v192) CLICKABLE = on garde le tap pour cocher/décocher (le drag scrolle la liste).
         lv_obj_clear_flag(b,LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_style_bg_color(b,UI_SURF,0);lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);
+#ifdef BOARD_WS241
+        lv_obj_set_style_bg_color(b,ROW_BG,0);lv_obj_set_style_radius(b,4,0);   // (v294) ligne bordée, texte mono 14 ; sélection = blanc/encre
+        lv_obj_set_style_border_width(b,1,0);lv_obj_set_style_border_color(b,UI_SURF_F,0);
+        RF=FM_14;
+#endif
         const char* md=strlen(it.d)>=10?it.d+5:it.d;
         char r[52];
         if(it.up) snprintf(r,sizeof(r),"%s  %s>%s   " LV_SYMBOL_OK " sent",md,it.s,it.e);
@@ -5183,7 +5517,7 @@ static void volsBuildList(){
 // (v192) « Send selected » → {"cmd":"uploadlist","f":["fid",...]} des vols cochés (≤8, cf boîtier).
 static void _vols_sendsel_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
-    char p[240]; int o=snprintf(p,sizeof(p),"{\"cmd\":\"uploadlist\",\"f\":[");
+    char p[360]; int o=snprintf(p,sizeof(p),"{\"cmd\":\"uploadlist\",\"f\":[");   // (v268) 8 fids de 22 car.
     int nsel=0;
     for(int i=0;i<g_vols_n && nsel<8 && o<200;i++) if(g_vols[i].sel){
         o+=snprintf(p+o,sizeof(p)-o,"%s\"%s\"",nsel?",":"",g_vols[i].fid); nsel++;
@@ -5232,9 +5566,19 @@ static lv_obj_t* volBtn(lv_obj_t*par,const char*txt,lv_color_t bg,int w,int h,in
 // (sélection rotatif visible) + ajout au groupe rotatif (ovAdd). Label = child0 (cf confirmations).
 static lv_obj_t* volActBtn(lv_obj_t*par,const char*txt,lv_color_t bg,int w,int h,int dx,int y,lv_event_cb_t cb){
     lv_obj_t*b=volBtn(par,txt,bg,w,h,dx,y,cb,FS_CAP);
+#ifdef BOARD_WS241
+    (void)bg;   // (v294) boutons SECONDAIRES bordés (la couleur de fond n'est plus utilisée) ; focus molette = bord ambre + surface
+    lv_obj_set_style_bg_color(b,UI_BG,0);lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);lv_obj_set_style_radius(b,4,0);
+    lv_obj_set_style_border_width(b,1,0);lv_obj_set_style_border_color(b,UI_CHEV,0);
+    lv_obj_set_style_bg_color(b,UI_SURF_F,LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(b,UI_SURF_F,LV_STATE_FOCUSED);lv_obj_set_style_border_color(b,C_BRAND,LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(b,0,LV_STATE_FOCUSED);lv_obj_set_style_outline_width(b,0,LV_STATE_FOCUS_KEY);
+    { lv_obj_t*l=lv_obj_get_child(b,0); if(l) lv_obj_set_style_text_font(l,&airki_sans_16,0); }
+#else
     lv_obj_set_style_outline_width(b,3,LV_STATE_FOCUSED);
     lv_obj_set_style_outline_color(b,lv_color_hex(0xffffff),LV_STATE_FOCUSED);
     lv_obj_set_style_outline_pad(b,2,LV_STATE_FOCUSED);
+#endif
     ovAdd(b);
     return b;}
 
@@ -5261,6 +5605,12 @@ void mkVolsOverlay(){
     lv_obj_set_size(g_vols_list,SETW-48,146);lv_obj_set_pos(g_vols_list,24,118);
     lv_obj_set_style_bg_color(g_vols_list,lv_color_hex(0x0b0f14),0);lv_obj_set_style_bg_opa(g_vols_list,LV_OPA_COVER,0);
     lv_obj_set_style_radius(g_vols_list,14,0);lv_obj_set_style_border_width(g_vols_list,0,0);lv_obj_set_style_pad_all(g_vols_list,6,0);
+#ifdef BOARD_WS241
+    lv_obj_set_size(g_vols_list,SETW-40,146);lv_obj_set_pos(g_vols_list,20,112);   // (v294) cadre 1 px rule-dark radius 6 sur encre
+    lv_obj_set_style_bg_color(g_vols_list,UI_BG,0);lv_obj_set_style_radius(g_vols_list,6,0);
+    lv_obj_set_style_border_width(g_vols_list,1,0);lv_obj_set_style_border_color(g_vols_list,UI_SURF_F,0);
+    lv_obj_set_pos(g_vols_wifi,20,84);
+#endif
     lv_obj_set_flex_flow(g_vols_list,LV_FLEX_FLOW_COLUMN);lv_obj_set_style_pad_row(g_vols_list,5,0);
     g_vols_load=lv_label_create(g_vols_list);lv_label_set_text(g_vols_load,"Loading...");
     lv_obj_set_style_text_color(g_vols_load,UI_INK2,0);lv_obj_set_style_text_font(g_vols_load,FS_CAP,0);
@@ -5309,6 +5659,17 @@ static void _open_vols_cb(lv_event_t*e){
 #else
   #define ATV_OTA_TAG "trgb" ATV_DEV_SFX
 #endif
+#if defined(BOARD_WS241)
+  #define ATV_OTA_BASE "ws241"
+#elif defined(BOARD_WS216)
+  #define ATV_OTA_BASE "ws216"
+#elif defined(BOARD_T4S3)
+  #define ATV_OTA_BASE "t4s3"
+#else
+  #define ATV_OTA_BASE "trgb"
+#endif
+// (v287) tag OTA EFFECTIF : le boîtier (ATC ≥210) annonce son canal dans la trame FLIGHT → l'écran suit ; inconnu → tag compilé
+static const char* atvOtaTag(){ return g_box_dev==1 ? ATV_OTA_BASE "dev" : g_box_dev==0 ? ATV_OTA_BASE : ATV_OTA_TAG; }
 static lv_obj_t* g_atvota_ov=nullptr,*g_atvota_lbl=nullptr;
 static void atvOtaShow(const char* m, lv_color_t c){
     if(!g_atvota_ov){
@@ -5355,7 +5716,7 @@ static void atvCloudOta(){
     WiFiClientSecure client; client.setInsecure(); client.setHandshakeTimeout(20);
     char url[200];
     // 1) version
-    snprintf(url,sizeof(url),"https://%s/v0/b/%s/o/firmware%%2Fatv%%2F%s%%2Fversion.txt?alt=media",ATV_STORAGE_HOST,ATV_STORAGE_BUCKET,ATV_OTA_TAG);
+    snprintf(url,sizeof(url),"https://%s/v0/b/%s/o/firmware%%2Fatv%%2F%s%%2Fversion.txt?alt=media",ATV_STORAGE_HOST,ATV_STORAGE_BUCKET,atvOtaTag());   // (v287)
     int remote=-1; { HTTPClient http; http.setConnectTimeout(10000); http.setTimeout(20000);
         bool bg=http.begin(client,url); int code=bg?http.GET():-999;
         // (v195) BUG CORRIGÉ : un corps VIDE/tronqué (code=200 mais lecture TLS partielle sur heap
@@ -5375,7 +5736,7 @@ static void atvCloudOta(){
     // échouait par intermittence (2e handshake sur session servie → « bloqué à 0% » puis reboot
     // muet, vécu sur les 5 écrans). Désormais : client NEUF par tentative + 3 ESSAIS + logs
     // série à chaque étape + message UI explicite en échec final.
-    snprintf(url,sizeof(url),"https://%s/v0/b/%s/o/firmware%%2Fatv%%2F%s%%2Ffirmware.bin?alt=media",ATV_STORAGE_HOST,ATV_STORAGE_BUCKET,ATV_OTA_TAG);
+    snprintf(url,sizeof(url),"https://%s/v0/b/%s/o/firmware%%2Fatv%%2F%s%%2Ffirmware.bin?alt=media",ATV_STORAGE_HOST,ATV_STORAGE_BUCKET,atvOtaTag());   // (v287)
     bool okFlash=false;
     for(int att=1; att<=3 && !okFlash; att++){
         snprintf(b,sizeof(b),"Downloading v%d... (try %d/3)",remote,att); atvOtaShow(b,C_AMBER);
@@ -5438,6 +5799,9 @@ static void _upd_atv_cb(lv_event_t*e){ if(lv_event_get_code(e)!=LV_EVENT_CLICKED
 // Ajoute un label VALEUR à droite d'une ligne d'action (mkActRow n'en a pas). Retourne le label.
 static lv_obj_t* rowValue(lv_obj_t*row,const char*txt,lv_color_t col){
     lv_obj_t*v=lv_label_create(row);lv_obj_set_style_text_font(v,FS_VALUE,0);lv_obj_set_style_text_color(v,col,0);
+#ifdef BOARD_WS241
+    lv_obj_set_style_text_font(v,FM_18,0);   // (v294) valeur technique en Geist Mono
+#endif
     lv_label_set_text(v,txt); lv_obj_align(v,LV_ALIGN_RIGHT_MID,-16,0); return v;
 }
 static void showUpdatesPage(){
@@ -5464,26 +5828,26 @@ static void showUpdatesPage(){
     // fait un check+download ROBUSTE (kill-BLE si besoin, fiable WROVER écran connecté). No-op si déjà
     // à jour. Avant : bouton affiché SEULEMENT si oav>fwv → or "Check now" (check passif 1-TLS) échoue
     // souvent sur WROVER → oav restait 0 → pas de bouton → OTA WROVER inutilisable sans USB.
-    {lv_obj_t*r=mkActRow(g_upd_ov,A0+0*DA,lv_color_hex(0x30d158),LV_SYMBOL_DOWNLOAD,"AT-CORE",_upd_atc_cb);
+    {lv_obj_t*r=mkActRow(g_upd_ov,A0+0*DA,lv_color_hex(0x30d158),LV_SYMBOL_DOWNLOAD,"AirKi Core",_upd_atc_cb);   // (v294) nom produit
      if(g_status.valid && g_status.oav>g_status.fwv){
-        snprintf(ab,sizeof(ab),"v%d " LV_SYMBOL_RIGHT " v%d",g_status.fwv,g_status.oav); rowValue(r,ab,C_AMBER);
+        snprintf(ab,sizeof(ab),"v%d " LV_SYMBOL_RIGHT " v%d",g_status.fwv,g_status.oav); rowValue(r,ab,UI_INK);   // (v294) blanc (jamais d'ambre en texte)
      }else{
         if(g_status.valid && g_status.fws[0]) snprintf(ab,sizeof(ab),"%s",g_status.fws);
         else if(g_status.valid)               snprintf(ab,sizeof(ab),"v%d",g_status.fwv);
         else                                  strlcpy(ab,"offline",sizeof(ab));
-        rowValue(r,ab,(g_status.valid&&g_status.fws[0])?verColor(g_status.fws):TGREY());
+        rowValue(r,ab,UI_INK2);   // (v294) gris muted (plus de couleur par canal)
      }
      ovAdd(r);}
-    // AT-VIEW : toujours actionnable (self-OTA cloud ; no-op si déjà à jour).
-    {lv_obj_t*r=mkActRow(g_upd_ov,A0+1*DA,lv_color_hex(0x0a84ff),LV_SYMBOL_DOWNLOAD,"AT-VIEW",_upd_atv_cb);
-     rowValue(r,VIEW_VSTR,verColor(VIEW_VSTR)); ovAdd(r);}
+    // AirKi View : toujours actionnable (self-OTA cloud ; no-op si déjà à jour).
+    {lv_obj_t*r=mkActRow(g_upd_ov,A0+1*DA,lv_color_hex(0x0a84ff),LV_SYMBOL_DOWNLOAD,"AirKi View",_upd_atv_cb);
+     rowValue(r,VIEW_VSTR,UI_INK2); ovAdd(r);}
     // (v197) « Check now » RETIRÉ (retour Christophe) : le check passif 1-TLS échoue souvent sur
     // WROVER écran connecté (heap) → affichait « up to date » à tort. Le tap sur une ligne AT-CORE/
     // AT-VIEW fait DÉJÀ le vrai check+install ROBUSTE (kill-BLE côté boîtier). À la place, une simple
     // invite : taper la ligne vérifie ET installe si une MAJ existe (sinon « already up to date »).
     {lv_obj_t*h=lv_label_create(g_upd_ov);
-     lv_label_set_text(h,"Tap AT-CORE or AT-VIEW to check & install");
-     lv_obj_set_style_text_font(h,FS_CAP,0); lv_obj_set_style_text_color(h,TGREY(),0);
+     lv_label_set_text(h,"Tap a line to check and install");
+     lv_obj_set_style_text_font(h,&airki_sans_16,0); lv_obj_set_style_text_color(h,UI_INK2,0);
      lv_obj_set_width(h,SCR_W-80); lv_obj_set_style_text_align(h,LV_TEXT_ALIGN_CENTER,0);
      lv_label_set_long_mode(h,LV_LABEL_LONG_WRAP);
      lv_obj_align(h,LV_ALIGN_TOP_MID,0,A0+2*DA+8);}
@@ -5516,11 +5880,19 @@ static void _diag_close_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLIC
 // est partie / que le process tourne (retour Christophe : quand un process s'exécute, l'indiquer).
 static void sendCtlToast(const char* cmd, const char* msg){ sendCtl(cmd); acEditToast(msg, g_connected); }
 static void _diag_test_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) sendCtlToast("wifitest", g_connected?"WiFi test…":"Box offline"); }
+// (v269) Level IMU (2 taps) : avion À PLAT, moteur coupé ou au ralenti → capture du repère repos, persisté.
+static void _diag_level_cb(lv_event_t*e){
+    if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,1);
+    if(!g_diag_level_armed){ g_diag_level_armed=true; if(l)lv_label_set_text(l,"Level? (flat)"); lv_obj_set_style_bg_color(b,C_AMBER,0); return; }
+    g_diag_level_armed=false; if(l)lv_label_set_text(l,"Level IMU"); lv_obj_set_style_bg_color(b,ROW_BG,0);
+    g_imu_level_req=true; acEditToast("Levelling…",true);   // imuTick annule la demande si pas d'IMU
+}
 static void _diag_reboot_cb(lv_event_t*e){
     if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
     lv_obj_t*b=lv_event_get_target(e);lv_obj_t*l=lv_obj_get_child(b,1);   // child1 = nom (child0 = pastille)
     if(!g_diag_reboot_armed){ g_diag_reboot_armed=true; if(l)lv_label_set_text(l,"Confirm?"); lv_obj_set_style_bg_color(b,C_AMBER,0); return; }
-    g_diag_reboot_armed=false; if(l)lv_label_set_text(l,"Reboot box"); lv_obj_set_style_bg_color(b,UI_SURF,0);
+    g_diag_reboot_armed=false; if(l)lv_label_set_text(l,"Reboot box"); lv_obj_set_style_bg_color(b,ROW_BG,0);
     sendCtlToast("reboot", g_connected?"Rebooting box…":"Box offline");
 }
 // Unpair box (2-tap) : casse le lien BLE écran↔boîtier. Si connecté → {"cmd":"unpair"}
@@ -5592,7 +5964,7 @@ static void showDiagPage(){
     g_diag_wst=mkInfoRow(g_diag_ov,96,lv_color_hex(0x0a84ff),LV_SYMBOL_WIFI,"WiFi"); diagWifiStatus();
     // (v254) ligne « SD Card » (SD locale ÉCRAN) RETIRÉE — seule la SD du BOÎTIER compte
     // (affichée dans la section Debug/versions, live via STATUS sd_ok).
-    const int A0=196,DA=62;   // zone visible ~450 px
+    const int A0=196,DA=62;   // zone visible ~450 px (page scrollable : Club mode à A0+4*DA, Level IMU à A0+5*DA)
     ovAdd(mkActRow  (g_diag_ov,A0+0*DA,C_ORANGE,             LV_SYMBOL_POWER, "Reboot box",_diag_reboot_cb));
     ovAdd(mkActRow  (g_diag_ov,A0+1*DA,lv_color_hex(0x7c3aed),LV_SYMBOL_TRASH,"Unpair box",_diag_unpair_cb));
     g_diag_cloud=mkSwitchRow(g_diag_ov,A0+2*DA,lv_color_hex(0x30d158),LV_SYMBOL_UPLOAD,"Cloud upload",g_status.valid&&g_status.cup,_diag_cloud_cb); ovAdd(g_diag_cloud);
@@ -5610,6 +5982,8 @@ static void showDiagPage(){
             if(g_cfg.club){ g_club_unlock=true; g_club_unlock_ms=millis(); }
             switchSet((lv_obj_t*)lv_event_get_current_target(e), g_cfg.club); });
       ovAdd(r); }
+    // (v269) Level IMU en DERNIER (ordre molette = ordre d'ovAdd) : sous « Club mode », page scrollable
+    ovAdd(mkActRow  (g_diag_ov,A0+5*DA,lv_color_hex(0x0a84ff),LV_SYMBOL_GPS,  "Level IMU",_diag_level_cb));   // (v269) sous « Club mode » (A0+4*DA) — page scrollable
     ovReady(bk);
 }
 static void _open_diag_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) showDiagPage(); }
@@ -5674,6 +6048,31 @@ static void showWifiSetupInfo(){
 #ifdef BOARD_T4S3
     lv_obj_set_size(g_wifisetup_ov,600,480);lv_obj_set_pos(g_wifisetup_ov,0,UI_OY);
     const lv_font_t* TF=&lv_font_montserrat_22; const lv_font_t* BF=&lv_font_montserrat_18;
+#ifdef BOARD_WS241
+    {   // (v294) page WiFi Setup dans l'esprit Settings : titre sans 28, étapes sans 18, identifiants en mono 18, boutons = primaire blanc / secondaire bordé
+        lv_obj_set_style_bg_color(g_wifisetup_ov,UI_BG,0);lv_obj_set_style_bg_opa(g_wifisetup_ov,LV_OPA_COVER,0);
+        lv_obj_set_style_border_width(g_wifisetup_ov,0,0);lv_obj_set_style_radius(g_wifisetup_ov,0,0);
+        lv_obj_set_style_pad_all(g_wifisetup_ov,0,0);lv_obj_clear_flag(g_wifisetup_ov,LV_OBJ_FLAG_SCROLLABLE);
+        char ssid[28]; snprintf(ssid,sizeof(ssid),"ATCORE-SETUP-%s",(g_status.valid&&g_status.box[0])?g_status.box:"----");
+        mkLblP(g_wifisetup_ov,"WiFi Setup",UI_INK,&airki_sans_28,20,18);
+        mkLblP(g_wifisetup_ov,"1. Tap Open portal below.",UI_INK,&airki_sans_18,20,84);
+        mkLblP(g_wifisetup_ov,"2. On your phone, join the network (about 10 s):",UI_INK2,&airki_sans_18,20,120);
+        mkLblP(g_wifisetup_ov,ssid,UI_INK,FM_18,44,150);
+        mkLblP(g_wifisetup_ov,"password  ebby-atc",UI_INK,FM_18,44,178);
+        mkLblP(g_wifisetup_ov,"3. Open  http://192.168.4.1",UI_INK2,&airki_sans_18,20,218);
+        mkLblP(g_wifisetup_ov,"Edit callsign, type, hex and club WiFi.",UI_INK,&airki_sans_18,20,258);
+        mkLblP(g_wifisetup_ov,"The box reboots after Save.",UI_INK2,&airki_sans_18,20,288);
+        lv_obj_t*bp=lv_btn_create(g_wifisetup_ov);lv_obj_set_size(bp,200,44);lv_obj_align(bp,LV_ALIGN_BOTTOM_RIGHT,-20,-20);
+        lv_obj_set_style_bg_color(bp,UI_INK,0);lv_obj_set_style_radius(bp,4,0);lv_obj_set_style_border_width(bp,0,0);lv_obj_set_style_shadow_opa(bp,LV_OPA_TRANSP,0);
+        lv_obj_add_event_cb(bp,_wifisetup_portal_cb,LV_EVENT_CLICKED,NULL);
+        {lv_obj_t*l=lv_label_create(bp);lv_label_set_text(l,"Open portal");lv_obj_set_style_text_color(l,UI_BG,0);lv_obj_set_style_text_font(l,&airki_sans_18,0);lv_obj_center(l);}
+        lv_obj_t*b=lv_btn_create(g_wifisetup_ov);lv_obj_set_size(b,120,44);lv_obj_align(b,LV_ALIGN_BOTTOM_RIGHT,-236,-20);
+        lv_obj_set_style_bg_color(b,UI_BG,0);lv_obj_set_style_bg_opa(b,LV_OPA_COVER,0);lv_obj_set_style_radius(b,4,0);lv_obj_set_style_border_width(b,1,0);lv_obj_set_style_border_color(b,UI_CHEV,0);lv_obj_set_style_shadow_opa(b,LV_OPA_TRANSP,0);
+        lv_obj_add_event_cb(b,_wifisetup_close_cb,LV_EVENT_CLICKED,NULL);
+        {lv_obj_t*l=lv_label_create(b);lv_label_set_text(l,"Close");lv_obj_set_style_text_color(l,UI_INK,0);lv_obj_set_style_text_font(l,&airki_sans_18,0);lv_obj_center(l);}
+        return;
+    }
+#endif
 #else
     lv_obj_set_size(g_wifisetup_ov,480,480);lv_obj_set_pos(g_wifisetup_ov,UI_OX,UI_OY);
     const lv_font_t* TF=&lv_font_montserrat_18; const lv_font_t* BF=&lv_font_montserrat_14;
@@ -6398,6 +6797,28 @@ static void pickShow(const char* title,const char* const* opts,int n,int cur,voi
     int ph=56+n*60+14; if(ph>466)ph=466;
     lv_obj_t* pan=lv_obj_create(g_pick_ov);
     lv_obj_set_size(pan,360,ph);lv_obj_center(pan);
+#ifdef BOARD_WS241
+    // (v294) popup de choix Settings : panneau encre bord 1 px rule-dark radius 6, titre sans 20 blanc, options = lignes bordées 52 px,
+    // sélection = fond blanc / texte encre (jamais d'ambre). Tap hors panneau = fermer.
+    lv_obj_set_style_bg_color(pan,UI_BG,0);lv_obj_set_style_bg_opa(pan,LV_OPA_COVER,0);
+    lv_obj_set_style_border_color(pan,UI_SURF_F,0);lv_obj_set_style_border_width(pan,1,0);
+    lv_obj_set_style_radius(pan,6,0);lv_obj_set_style_shadow_opa(pan,LV_OPA_TRANSP,0);
+    lv_obj_clear_flag(pan,LV_OBJ_FLAG_SCROLLABLE);lv_obj_add_flag(pan,LV_OBJ_FLAG_CLICKABLE);
+    mkLblP(pan,title,UI_INK,&airki_sans_20,20,14);
+    for(int i=0;i<n;i++){
+        lv_obj_t* bt=lv_btn_create(pan);
+        lv_obj_set_size(bt,320,52);lv_obj_set_pos(bt,20,52+i*60);
+        bool sel=(i==cur);
+        lv_obj_set_style_bg_color(bt,sel?UI_INK:UI_BG,0);lv_obj_set_style_bg_opa(bt,LV_OPA_COVER,0);
+        lv_obj_set_style_radius(bt,6,0);lv_obj_set_style_border_width(bt,1,0);lv_obj_set_style_border_color(bt,sel?UI_INK:UI_SURF_F,0);
+        lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(bt,0,0);
+        lv_obj_set_style_bg_color(bt,UI_SURF_F,LV_STATE_PRESSED);
+        lv_obj_add_event_cb(bt,_pick_sel_cb,LV_EVENT_CLICKED,(void*)(intptr_t)i);
+        lv_obj_t* l=lv_label_create(bt);lv_label_set_text(l,opts[i]);
+        lv_obj_set_style_text_color(l,sel?UI_BG:UI_INK,0);
+        lv_obj_set_style_text_font(l,FM_18,0);lv_obj_center(l);
+    }
+#else
     lv_obj_set_style_bg_color(pan,TBG(),0);lv_obj_set_style_bg_opa(pan,LV_OPA_COVER,0);
     lv_obj_set_style_border_color(pan,TFG(),0);lv_obj_set_style_border_width(pan,2,0);
     lv_obj_set_style_radius(pan,16,0);lv_obj_set_style_shadow_opa(pan,LV_OPA_TRANSP,0);
@@ -6415,6 +6836,7 @@ static void pickShow(const char* title,const char* const* opts,int n,int cur,voi
         lv_obj_set_style_text_color(l,sel?lv_color_hex(0xffffff):lv_color_hex(0x0f172a),0);
         lv_obj_set_style_text_font(l,&lv_font_montserrat_20,0);lv_obj_center(l);
     }
+#endif
 }
 
 // ── Valeurs + apply/idx des popups énumérés ─────────────────────────────────
@@ -6446,10 +6868,19 @@ static void _pop_open_cb(lv_event_t*e){
 }
 static lv_obj_t* mkPopRow(lv_obj_t*p,const char*k,int y,const char*curval,
                           const char* title,const char* const* opts,int n,int(*idx)(),void(*apply)(int)){
-    lv_obj_t*_tl=mkLblP(p,k,UI_INK,FS_ROW,40,y+11);
     if(g_pop_n>=6) return nullptr;
     int pi=g_pop_n;
     g_pop[pi].title=title; g_pop[pi].opts=opts; g_pop[pi].n=n; g_pop[pi].idx=idx; g_pop[pi].apply=apply;
+#ifdef BOARD_WS241
+    {   lv_obj_t*_tl=nullptr; lv_obj_t*r=secRow(p,y,k,&_tl);   // (v292) valeur mono 18 gris + chevron ; tap = popup, molette = cycle
+        lv_obj_add_event_cb(r,_pop_open_cb,LV_EVENT_CLICKED,(void*)(intptr_t)pi);
+        lv_obj_t*cv=lv_label_create(r); lv_label_set_text(cv,LV_SYMBOL_RIGHT); lv_obj_set_style_text_color(cv,UI_CHEV,0); lv_obj_set_style_text_font(cv,&airki_sans_18,0); lv_obj_align(cv,LV_ALIGN_RIGHT_MID,-14,0);
+        lv_obj_t*vl=lv_label_create(r); lv_label_set_text(vl,curval); lv_obj_set_style_text_color(vl,UI_INK2,0); lv_obj_set_style_text_font(vl,FM_18,0); lv_obj_align(vl,LV_ALIGN_RIGHT_MID,-40,0);
+        g_pop_n++; erReg(p,r,_tl,ER_POP,pi);
+        return vl;
+    }
+#endif
+    lv_obj_t*_tl=mkLblP(p,k,UI_INK,FS_ROW,40,y+11);
     const int BW=224,BH=52,BX=SETW-40-BW;
     lv_obj_t*bt=lv_btn_create(p);lv_obj_set_size(bt,BW,BH);lv_obj_set_pos(bt,BX,y);
     lv_obj_set_style_bg_color(bt,UI_TRACK,0);lv_obj_set_style_radius(bt,14,0);
@@ -6466,6 +6897,15 @@ static lv_obj_t* mkPopRow(lv_obj_t*p,const char*k,int y,const char*curval,
 }
 
 // ── Navigation menu ↔ sections ──────────────────────────────────────────────
+#ifdef BOARD_WS241
+static lv_obj_t* g_p1Rows[10]; static int g_p1_n=0;                       // (v291) lignes de la page 1 (ordre molette)
+static lv_obj_t *s_p1_diag_v=nullptr,*s_p1_level_v=nullptr,*s_p1_club_pill=nullptr,*s_p1_club_knob=nullptr;
+static void p1SwitchSet(lv_obj_t*pill,lv_obj_t*knob,bool on){
+    if(!pill||!knob) return;
+    lv_obj_set_style_bg_color(pill,on?UI_INK:UI_SURF_F,0); lv_obj_set_style_border_width(pill,on?0:1,0);
+    lv_obj_set_style_bg_color(knob,on?UI_BG:UI_CHEV,0); lv_obj_set_pos(knob,on?23:3,3);
+}
+#endif
 static void settingsShowMenu(){
     if(!s_menu)return;
     s_cur_sec=-1;
@@ -6476,9 +6916,18 @@ static void settingsShowMenu(){
 #endif
     if(s_back_btn) lv_obj_add_flag(s_back_btn,LV_OBJ_FLAG_HIDDEN);   // pas de retour sur le menu
     if(s_set_aclbl){ lv_obj_clear_flag(s_set_aclbl,LV_OBJ_FLAG_HIDDEN); }   // bloc Active Aircraft visible (menu)
+#ifdef BOARD_WS241
+    if(s_set_acval){ char ac[48]; snprintf(ac,sizeof(ac),"%s \xC2\xB7 %s \xC2\xB7 %s",   // (v291) « FJFVB · VL3 · 38ED5C »
+                       g_ac_reg[0]?g_ac_reg:"---", g_ac_type[0]?g_ac_type:"---", g_ac_hex[0]?g_ac_hex:"------");
+                     lv_label_set_text(s_set_acval,ac); lv_obj_clear_flag(s_set_acval,LV_OBJ_FLAG_HIDDEN); }
+    if(s_p1_diag_v){ char d[48]; if(g_status.valid&&g_status.fwv) snprintf(d,sizeof(d),"AKV " VIEW_VERSION " \xC2\xB7 AKC %d \xC2\xB7 SD %s",g_status.fwv,g_sd_ok?"ok":"--");
+                     else snprintf(d,sizeof(d),"AKV " VIEW_VERSION " \xC2\xB7 AKC -- \xC2\xB7 SD %s",g_sd_ok?"ok":"--"); lv_label_set_text(s_p1_diag_v,d); }
+    p1SwitchSet(s_p1_club_pill,s_p1_club_knob,g_cfg.club);
+#else
     if(s_set_acval){ char ac[40]; snprintf(ac,sizeof(ac),"%s/%s/%s",
                        g_ac_reg[0]?g_ac_reg:"---", g_ac_type[0]?g_ac_type:"---", g_ac_hex[0]?g_ac_hex:"------");
                      lv_label_set_text(s_set_acval,ac); lv_obj_clear_flag(s_set_acval,LV_OBJ_FLAG_HIDDEN); }
+#endif
     if(s_set_title) lv_label_set_text(s_set_title,"SETTINGS");
     if(s_set_uline&&s_set_title){ lv_obj_update_layout(s_set_title); lv_obj_set_width(s_set_uline,lv_obj_get_width(s_set_title)); }
 #if defined(BOARD_WS241)
@@ -6495,13 +6944,29 @@ static void settingsShowMenu(){
 #else
     const int* gord=gordR; const int gn=5;
 #endif
-    for(int k=0;k<gn;k++) if(g_menuBtns[gord[k]]) lv_group_add_obj(g_encGroup,g_menuBtns[gord[k]]);
+    for(int k=0;k<gn;k++) if(g_menuBtns[gord[k]]) lv_group_add_obj(g_encGroup,g_menuBtns[gord[k]]);   // (v293) sections présentes (Debug absent hors DEV)
     if(g_menuBtns[gord[0]]) lv_group_focus_obj(g_menuBtns[gord[0]]);
     g_erAct_n=0; g_erCur=0; g_erEdit=false;   // (v90) plus de section active
 #endif
 }
 
 #if defined(BOARD_WS241)
+// (v295) Style du bouton RETOUR (sections + overlays) : disque 52 px bord blanc 1 px, chevron blanc recentré ;
+// FOCUS molette / appui = disque AMBRE plein + chevron ENCRE (accent = action, texte encre sur ambre comme STOP).
+static void backBtnStyle(lv_obj_t*bk){
+    if(!bk) return;
+    lv_obj_set_size(bk,52,52); lv_obj_set_pos(bk,SETW-20-52,14);
+    lv_obj_set_style_radius(bk,LV_RADIUS_CIRCLE,0); lv_obj_set_style_shadow_opa(bk,LV_OPA_TRANSP,0); lv_obj_set_style_pad_all(bk,0,0);
+    lv_obj_set_style_bg_color(bk,UI_BG,0); lv_obj_set_style_bg_opa(bk,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(bk,1,0); lv_obj_set_style_border_color(bk,UI_INK,0);
+    lv_obj_set_style_text_color(bk,UI_INK,0);
+    lv_obj_set_style_bg_color(bk,C_BRAND,LV_STATE_PRESSED); lv_obj_set_style_border_color(bk,C_BRAND,LV_STATE_PRESSED); lv_obj_set_style_text_color(bk,UI_BG,LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(bk,C_BRAND,LV_STATE_FOCUSED); lv_obj_set_style_bg_opa(bk,LV_OPA_COVER,LV_STATE_FOCUSED);
+    lv_obj_set_style_border_color(bk,C_BRAND,LV_STATE_FOCUSED); lv_obj_set_style_border_width(bk,1,LV_STATE_FOCUSED); lv_obj_set_style_text_color(bk,UI_BG,LV_STATE_FOCUSED);
+    lv_obj_set_style_outline_width(bk,0,LV_STATE_FOCUSED); lv_obj_set_style_outline_width(bk,0,LV_STATE_FOCUS_KEY);
+    lv_obj_t*l=lv_obj_get_child(bk,0);
+    if(l){ lv_obj_remove_local_style_prop(l,LV_STYLE_TEXT_COLOR,0); lv_obj_set_style_text_font(l,&airki_sans_22,0); lv_obj_align(l,LV_ALIGN_CENTER,-2,0); }   // couleur héritée du bouton (blanc → encre au focus) ; glyphe recentré
+}
 // ── (v90) Nav encodeur DANS une section : focus par ligne + édition de valeur ──
 static void erSetState(int ai,bool focused,bool editing){   // ai = index dans g_erAct
     if(ai<0||ai>=g_erAct_n) return;
@@ -6517,13 +6982,14 @@ static void erSetState(int ai,bool focused,bool editing){   // ai = index dans g
         if(focused||editing) lv_obj_scroll_to_view(o,LV_ANIM_ON);
     }
     // (v91) Le TITRE change de couleur : gris = inactif · BLEU = focus · VERT = édition (bien plus lisible)
-    if(ttl) lv_obj_set_style_text_color(ttl, editing? C_GREEN : (focused? C_BRAND : UI_INK2), 0);   // neutre = gris clair (lisible sur noir)
+    (void)editing; (void)focused;
+    if(ttl) lv_obj_set_style_text_color(ttl, UI_INK, 0);   // (v292) DS : libellé toujours blanc — l'état se lit sur le bord de la ligne (ambre focus / vert édition)
 }
 static void erBuildActive(lv_obj_t* sect){
     g_erAct_n=0; g_erCur=0; g_erEdit=false;
     // (v251) « retour » EN TÊTE (règle v249 appliquée aussi aux SECTIONS) : une molette en
     // ARRIÈRE depuis la 1re ligne = retour ; après la dernière ligne, wrap → retour → 1re ligne.
-    if(s_back_btn){ encFocusOutline(s_back_btn); g_erAct[g_erAct_n++]=-1; }
+    if(s_back_btn){ encFocusOutline(s_back_btn); backBtnStyle(s_back_btn); g_erAct[g_erAct_n++]=-1; }   // (v295) style retour APRÈS le focus générique
     for(int i=0;i<g_er_n && g_erAct_n<16;i++) if(g_er[i].sect==sect) g_erAct[g_erAct_n++]=(int8_t)i;
     for(int a=0;a<g_erAct_n;a++) erSetState(a,false,false);   // (v91) remet tout au neutre (évite les titres restés bleus)
     g_erCur=(g_erAct_n>1)?1:0;                                // focus initial = 1re ligne de CONTENU
@@ -6548,7 +7014,8 @@ static void erEditApply(int dir){   // applique un pas d'édition sur la ligne f
     }else if(r.type==ER_BRIGHT){
         int v=(int)g_cfg.brightness+(dir>0?1:-1); if(v<1)v=1; if(v>16)v=16;   // (v92) plancher 1 : jamais de noir total
         g_cfg.brightness=(uint8_t)v; panelBright(g_cfg.brightness);
-        if(r.focus) lv_slider_set_value(r.focus,v,LV_ANIM_OFF);
+        if(s_bright_sl) lv_slider_set_value(s_bright_sl,v,LV_ANIM_OFF);   // (v292) le focus est la LIGNE, le slider est à part
+        else if(r.focus) lv_slider_set_value(r.focus,v,LV_ANIM_OFF);
         if(s_bright_v){char b[8];snprintf(b,8,"%d/16",v);lv_label_set_text(s_bright_v,b);}
     }
 }
@@ -6588,9 +7055,14 @@ static void settingsOpenSection(int i){
     if(s_set_title) lv_label_set_text(s_set_title,kSecName[i]);        // titre épuré (le retour est le cercle à droite)
 #ifdef BOARD_T4S3
     // En-tête aux couleurs de la section (rappel de la tuile du menu) : pastille + titre colorés.
+#ifdef BOARD_WS241
+    if(s_hdr_chip) lv_obj_add_flag(s_hdr_chip,LV_OBJ_FLAG_HIDDEN);                  // (v292) DS : pas de pastille, titre blanc
+    if(s_set_title)lv_obj_set_style_text_color(s_set_title,UI_INK,0);
+#else
     if(s_hdr_chip){ lv_obj_set_style_bg_color(s_hdr_chip,lv_color_hex(kSecColor[i]),0); lv_obj_clear_flag(s_hdr_chip,LV_OBJ_FLAG_HIDDEN); }
     if(s_hdr_ico)  lv_label_set_text(s_hdr_ico,kSecSym[i]);
     if(s_set_title)lv_obj_set_style_text_color(s_set_title,lv_color_hex(kSecColor[i]),0);
+#endif
 #endif
     if(s_set_uline&&s_set_title){ lv_obj_update_layout(s_set_title); lv_obj_set_width(s_set_uline,lv_obj_get_width(s_set_title)); }
 #if defined(BOARD_WS241)
@@ -6606,6 +7078,31 @@ static void _sec_back_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKE
 static const int MENU_ROWH = 76;   // 4 lignes tiennent dans 450 px sans être coupées par le bas
 static void mkMenuRow(lv_obj_t*p,int secIdx,int y,lv_color_t chip,const char*sym,
                       const char*name,const char*sub){
+#ifdef BOARD_WS241
+    {   // (v290) DS AirKi : ligne de liste sobre — pas de pastille colorée ni d'icône, nom + sous-titre + chevron,
+        // filet 1 px rule-dark en bas, focus molette = surface #2C2C2C + repère ambre 3 px à gauche (accent, jamais texte)
+        (void)chip; (void)sym;
+        const int RX=20, RW=SETW-40, RH=MENU_ROWH;
+        lv_obj_t*bt=lv_btn_create(p);
+        lv_obj_set_size(bt,RW,RH);lv_obj_set_pos(bt,RX,y);
+        lv_obj_set_style_bg_color(bt,UI_BG,0);lv_obj_set_style_bg_opa(bt,LV_OPA_COVER,0);
+        lv_obj_set_style_radius(bt,0,0);lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0);lv_obj_set_style_pad_all(bt,0,0);
+        lv_obj_set_style_border_width(bt,1,0);lv_obj_set_style_border_side(bt,LV_BORDER_SIDE_BOTTOM,0);lv_obj_set_style_border_color(bt,UI_SURF_F,0);
+        lv_obj_set_style_bg_color(bt,UI_SURF_F,LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(bt,UI_SURF_F,LV_STATE_FOCUSED);lv_obj_set_style_bg_opa(bt,LV_OPA_COVER,LV_STATE_FOCUSED);
+        lv_obj_set_style_border_width(bt,3,LV_STATE_FOCUSED);lv_obj_set_style_border_side(bt,LV_BORDER_SIDE_LEFT,LV_STATE_FOCUSED);
+        lv_obj_set_style_border_color(bt,C_BRAND,LV_STATE_FOCUSED);
+        lv_obj_set_style_outline_width(bt,0,LV_STATE_FOCUSED);lv_obj_set_style_outline_width(bt,0,LV_STATE_FOCUS_KEY);
+        lv_obj_add_event_cb(bt,_menu_btn_cb,LV_EVENT_CLICKED,(void*)(intptr_t)secIdx);
+        if(secIdx>=0&&secIdx<6) g_menuBtns[secIdx]=bt;
+        mkLblP(bt,name,UI_INK,&airki_sans_24,16,14);
+        mkLblP(bt,sub,UI_INK2,&airki_sans_16,16,46);
+        lv_obj_t*cv=lv_label_create(bt);lv_label_set_text(cv,LV_SYMBOL_RIGHT);
+        lv_obj_set_style_text_color(cv,UI_CHEV,0);lv_obj_set_style_text_font(cv,&airki_sans_20,0);
+        lv_obj_align(cv,LV_ALIGN_RIGHT_MID,-16,0);
+        return;
+    }
+#endif
     const int RX=24, RW=SETW-48, RH=MENU_ROWH, CS=52;
     lv_obj_t*bt=lv_btn_create(p);
     lv_obj_set_size(bt,RW,RH);lv_obj_set_pos(bt,RX,y);
@@ -6631,10 +7128,58 @@ static void mkMenuRow(lv_obj_t*p,int secIdx,int y,lv_color_t chip,const char*sym
 #endif
 }
 
+#ifdef BOARD_WS241
+// ── (v291) SETTINGS page 1 — maquette « 5 · Réglages » : ligne plate 42 px, bord 1 px rule-dark radius 6,
+// nom Instrument Sans 20 blanc, valeur technique Geist Mono 18 gris (ou hint sans 16), chevron etch, pilule pour les toggles.
+static const int P1_ROWH=42;
+static lv_obj_t* p1Row(lv_obj_t*p,int y,const char*name,const char*val,const lv_font_t*vf,bool chev,lv_event_cb_t cb,void*ud,lv_obj_t**valOut){
+    lv_obj_t*bt=lv_btn_create(p); lv_obj_set_size(bt,SETW-40,P1_ROWH); lv_obj_set_pos(bt,20,y);
+    lv_obj_set_style_bg_color(bt,UI_BG,0); lv_obj_set_style_bg_opa(bt,LV_OPA_COVER,0); lv_obj_set_style_radius(bt,6,0);
+    lv_obj_set_style_border_width(bt,1,0); lv_obj_set_style_border_color(bt,UI_SURF_F,0); lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0); lv_obj_set_style_pad_all(bt,0,0);
+    lv_obj_set_style_bg_color(bt,UI_SURF_F,LV_STATE_PRESSED);
+    lv_obj_set_style_bg_color(bt,UI_SURF_F,LV_STATE_FOCUSED); lv_obj_set_style_border_color(bt,C_BRAND,LV_STATE_FOCUSED);   // focus molette : surface + bord ambre
+    lv_obj_set_style_outline_width(bt,0,LV_STATE_FOCUSED); lv_obj_set_style_outline_width(bt,0,LV_STATE_FOCUS_KEY);
+    if(cb) lv_obj_add_event_cb(bt,cb,LV_EVENT_CLICKED,ud);
+    lv_obj_t*n=lv_label_create(bt); lv_label_set_text(n,name); lv_obj_set_style_text_color(n,UI_INK,0); lv_obj_set_style_text_font(n,&airki_sans_20,0); lv_obj_align(n,LV_ALIGN_LEFT_MID,16,0);
+    if(chev){ lv_obj_t*cv=lv_label_create(bt); lv_label_set_text(cv,LV_SYMBOL_RIGHT); lv_obj_set_style_text_color(cv,UI_CHEV,0); lv_obj_set_style_text_font(cv,&airki_sans_18,0); lv_obj_align(cv,LV_ALIGN_RIGHT_MID,-14,0); }
+    if(val){ lv_obj_t*v=lv_label_create(bt); lv_label_set_text(v,val); lv_obj_set_style_text_color(v,UI_INK2,0); lv_obj_set_style_text_font(v,vf,0);
+             lv_obj_align(v,LV_ALIGN_RIGHT_MID,chev?-40:-16,0); if(valOut)*valOut=v; }
+    if(g_p1_n<10) g_p1Rows[g_p1_n++]=bt;
+    return bt;
+}
+static lv_obj_t* p1Switch(lv_obj_t*p,int y,const char*name,bool on,lv_event_cb_t cb,lv_obj_t**pillOut,lv_obj_t**knobOut){
+    lv_obj_t*bt=p1Row(p,y,name,nullptr,nullptr,false,cb,nullptr,nullptr);
+    lv_obj_t*pill=lv_obj_create(bt); lv_obj_set_size(pill,44,24); lv_obj_align(pill,LV_ALIGN_RIGHT_MID,-14,0);
+    lv_obj_set_style_radius(pill,LV_RADIUS_CIRCLE,0); lv_obj_set_style_bg_opa(pill,LV_OPA_COVER,0); lv_obj_set_style_border_color(pill,UI_CHEV,0);
+    lv_obj_set_style_pad_all(pill,0,0); lv_obj_set_style_shadow_opa(pill,LV_OPA_TRANSP,0); lv_obj_clear_flag(pill,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_t*knob=lv_obj_create(pill); lv_obj_set_size(knob,18,18); lv_obj_set_style_radius(knob,LV_RADIUS_CIRCLE,0); lv_obj_set_style_bg_opa(knob,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(knob,0,0); lv_obj_set_style_pad_all(knob,0,0); lv_obj_set_style_shadow_opa(knob,LV_OPA_TRANSP,0); lv_obj_clear_flag(knob,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+    if(pillOut)*pillOut=pill; if(knobOut)*knobOut=knob; p1SwitchSet(pill,knob,on);
+    return bt;
+}
+static void _p1_club_cb(lv_event_t*e){ if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;
+    g_cfg.club=!g_cfg.club; cfgSave(); if(g_cfg.club){ g_club_unlock=true; g_club_unlock_ms=millis(); }
+    p1SwitchSet(s_p1_club_pill,s_p1_club_knob,g_cfg.club); }
+static void _p1_level_cb(lv_event_t*e){ if(lv_event_get_code(e)!=LV_EVENT_CLICKED)return;   // (v269) 2 taps : arme puis exécute
+    lv_obj_t*b=lv_event_get_target(e);
+    if(!g_diag_level_armed){ g_diag_level_armed=true; if(s_p1_level_v) lv_label_set_text(s_p1_level_v,"flat? tap again"); lv_obj_set_style_border_color(b,C_AMBER,0); return; }
+    g_diag_level_armed=false; if(s_p1_level_v) lv_label_set_text(s_p1_level_v,"aircraft flat, then tap twice"); lv_obj_set_style_border_color(b,UI_SURF_F,0);
+    g_imu_level_req=true; acEditToast("Levelling\xE2\x80\xA6",true); }
+static void _p1_aircraft_cb(lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) showWifiSetupInfo(); }
+#endif
+
 // Ligne de NAVIGATION watchOS (sous-page) : pastille icône colorée + nom + chevron ›, callback
 // custom. Plus courte que mkMenuRow (pas de sous-titre). Focus molette + erReg ER_TILE (WS-241).
 static const int NAV_ROWH = 54;
 static void mkNavRow(lv_obj_t*p,int y,lv_color_t chip,const char*sym,const char*name,lv_event_cb_t cb){
+#ifdef BOARD_WS241
+    {   (void)chip; (void)sym; lv_obj_t*r=secRow(p,y,name,nullptr);   // (v292) ligne de navigation : nom + chevron, sans pastille
+        lv_obj_add_flag(r,LV_OBJ_FLAG_CLICKABLE); lv_obj_add_event_cb(r,cb,LV_EVENT_CLICKED,NULL);
+        lv_obj_t*cv=lv_label_create(r); lv_label_set_text(cv,LV_SYMBOL_RIGHT); lv_obj_set_style_text_color(cv,UI_CHEV,0); lv_obj_set_style_text_font(cv,&airki_sans_18,0); lv_obj_align(cv,LV_ALIGN_RIGHT_MID,-14,0);
+        erReg(p,r,nullptr,ER_TILE,-1);
+        return;
+    }
+#endif
     const int RX=24, RW=SETW-48, RH=NAV_ROWH, CS=40;
     lv_obj_t*bt=lv_btn_create(p);
     lv_obj_set_size(bt,RW,RH);lv_obj_set_pos(bt,RX,y);
@@ -6662,6 +7207,21 @@ static void mkNavRow(lv_obj_t*p,int y,lv_color_t chip,const char*sym,const char*
 // Ligne d'ACTION watchOS (dans un overlay) : pastille icône colorée + nom, focus molette.
 // Retourne le bouton (à passer à ovAdd). Pas de chevron (action, pas destination), pas d'erReg.
 static lv_obj_t* mkActRow(lv_obj_t*p,int y,lv_color_t chip,const char*sym,const char*name,lv_event_cb_t cb){
+#ifdef BOARD_WS241
+    {   (void)chip; (void)sym;   // (v294) ligne d'action Settings : 560×48 bord 1 px radius 6, nom sans 20. ENFANTS : [0] pastille fantôme 1×1 (les
+        // callbacks lisent le libellé en child 1 — inchangé), [1] libellé, [2] éventuel interrupteur (mkSwitchRow).
+        lv_obj_t*bt=lv_btn_create(p); lv_obj_set_size(bt,SETW-40,48); lv_obj_set_pos(bt,20,y);
+        lv_obj_set_style_bg_color(bt,UI_BG,0); lv_obj_set_style_bg_opa(bt,LV_OPA_COVER,0); lv_obj_set_style_radius(bt,6,0);
+        lv_obj_set_style_border_width(bt,1,0); lv_obj_set_style_border_color(bt,UI_SURF_F,0); lv_obj_set_style_shadow_opa(bt,LV_OPA_TRANSP,0); lv_obj_set_style_pad_all(bt,0,0);
+        lv_obj_set_style_bg_color(bt,UI_SURF_F,LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(bt,UI_SURF_F,LV_STATE_FOCUSED); lv_obj_set_style_border_color(bt,C_BRAND,LV_STATE_FOCUSED);
+        lv_obj_set_style_outline_width(bt,0,LV_STATE_FOCUSED); lv_obj_set_style_outline_width(bt,0,LV_STATE_FOCUS_KEY);
+        if(cb) lv_obj_add_event_cb(bt,cb,LV_EVENT_CLICKED,NULL);
+        lv_obj_t*ch=lv_obj_create(bt); lv_obj_set_size(ch,1,1); lv_obj_add_flag(ch,LV_OBJ_FLAG_HIDDEN);   // child 0 fantôme
+        lv_obj_t*l=lv_label_create(bt); lv_label_set_text(l,name); lv_obj_set_style_text_color(l,UI_INK,0); lv_obj_set_style_text_font(l,&airki_sans_20,0); lv_obj_align(l,LV_ALIGN_LEFT_MID,16,0);
+        return bt;
+    }
+#endif
     const int RX=24, RW=SETW-48, RH=NAV_ROWH, CS=40;
     lv_obj_t*bt=lv_btn_create(p);
     lv_obj_set_size(bt,RW,RH);lv_obj_set_pos(bt,RX,y);
@@ -6684,6 +7244,21 @@ static lv_obj_t* mkActRow(lv_obj_t*p,int y,lv_color_t chip,const char*sym,const 
 // En-tête d'overlay watchOS : pastille icône colorée + titre (dans la couleur) + cercle RETOUR
 // (haut-droite). Retourne le bouton retour (à passer à ovReady comme cible de l'appui long).
 static lv_obj_t* ovHeader(lv_obj_t*p,lv_color_t accent,const char*sym,const char*title,lv_event_cb_t closeCb){
+#ifdef BOARD_WS241
+    {   (void)accent; (void)sym;   // (v294) en-tête Settings : titre sans 28 blanc, retour rond 44 px bord 1 px etch, focus molette = bord ambre
+        mkLblP(p,title,UI_INK,&airki_sans_28,20,18);
+        lv_obj_t*bk=lv_btn_create(p);lv_obj_set_size(bk,44,44);lv_obj_set_pos(bk,SETW-20-44,16);
+        lv_obj_set_style_radius(bk,LV_RADIUS_CIRCLE,0);lv_obj_set_style_bg_color(bk,UI_BG,0);lv_obj_set_style_bg_opa(bk,LV_OPA_COVER,0);
+        lv_obj_set_style_shadow_opa(bk,LV_OPA_TRANSP,0);lv_obj_set_style_border_width(bk,1,0);lv_obj_set_style_border_color(bk,UI_CHEV,0);
+        lv_obj_set_style_bg_color(bk,UI_SURF_F,LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(bk,UI_SURF_F,LV_STATE_FOCUSED);lv_obj_set_style_border_color(bk,C_BRAND,LV_STATE_FOCUSED);
+        lv_obj_set_style_outline_width(bk,0,LV_STATE_FOCUSED);lv_obj_set_style_outline_width(bk,0,LV_STATE_FOCUS_KEY);
+        lv_obj_add_event_cb(bk,closeCb,LV_EVENT_CLICKED,NULL);
+        lv_obj_t*bl=lv_label_create(bk);lv_label_set_text(bl,LV_SYMBOL_LEFT);lv_obj_center(bl);
+        backBtnStyle(bk);   // (v295)
+        return bk;
+    }
+#endif
     lv_obj_t*ch=lv_obj_create(p);lv_obj_set_size(ch,48,48);lv_obj_set_pos(ch,24,20);
     lv_obj_set_style_bg_color(ch,accent,0);lv_obj_set_style_radius(ch,14,0);
     lv_obj_set_style_border_width(ch,0,0);lv_obj_set_style_pad_all(ch,0,0);lv_obj_clear_flag(ch,LV_OBJ_FLAG_SCROLLABLE);
@@ -6704,6 +7279,18 @@ static lv_obj_t* ovHeader(lv_obj_t*p,lv_color_t accent,const char*sym,const char
 // Ligne INFO (lecture seule) : look DISTINCT des actions → PAS de carte (fond transparent),
 // nom gris clair, valeur à droite. Pastille plus petite. Retourne le label VALEUR (à remplir).
 static lv_obj_t* mkInfoRow(lv_obj_t*p,int y,lv_color_t chip,const char*sym,const char*name){
+#ifdef BOARD_WS241
+    {   (void)chip; (void)sym;   // (v294) ligne INFO : sans bord (lecture seule), nom gris sans 18, valeur mono 16 blanche à droite
+        lv_obj_t*row=lv_obj_create(p); lv_obj_set_size(row,SETW-40,44); lv_obj_set_pos(row,20,y);
+        lv_obj_set_style_bg_opa(row,LV_OPA_TRANSP,0); lv_obj_set_style_border_width(row,0,0); lv_obj_set_style_pad_all(row,0,0);
+        lv_obj_clear_flag(row,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_t*ch=lv_obj_create(row); lv_obj_set_size(ch,1,1); lv_obj_add_flag(ch,LV_OBJ_FLAG_HIDDEN);
+        lv_obj_t*n=lv_label_create(row); lv_label_set_text(n,name); lv_obj_set_style_text_color(n,UI_INK2,0); lv_obj_set_style_text_font(n,&airki_sans_18,0); lv_obj_align(n,LV_ALIGN_LEFT_MID,16,0);
+        lv_obj_t*v=lv_label_create(row); lv_obj_set_style_text_font(v,FM_14,0); lv_obj_set_style_text_color(v,UI_INK,0);
+        lv_obj_set_width(v,400); lv_obj_set_style_text_align(v,LV_TEXT_ALIGN_RIGHT,0); lv_label_set_long_mode(v,LV_LABEL_LONG_CLIP); lv_obj_align(v,LV_ALIGN_RIGHT_MID,-16,0);
+        return v;
+    }
+#endif
     const int RX=24, RW=SETW-48, RH=44, CS=34;
     lv_obj_t*row=lv_obj_create(p);
     lv_obj_set_size(row,RW,RH);lv_obj_set_pos(row,RX,y);
@@ -6724,6 +7311,9 @@ static lv_obj_t* mkInfoRow(lv_obj_t*p,int y,lv_color_t chip,const char*sym,const
 static void switchSet(lv_obj_t*row,bool on){
     if(!row)return; lv_obj_t*tr=lv_obj_get_child(row,2);   // chip[0], label[1], track[2]
     if(!tr)return;
+#ifdef BOARD_WS241
+    { lv_obj_t*kn=lv_obj_get_child(tr,0); p1SwitchSet(tr,kn,on); return; }   // (v294) pilule Settings (blanc = ON)
+#endif
     lv_obj_set_style_bg_color(tr,on?C_GREEN:lv_color_hex(0x3a3f45),0);
     lv_obj_t*kn=lv_obj_get_child(tr,0); if(kn) lv_obj_align(kn,on?LV_ALIGN_RIGHT_MID:LV_ALIGN_LEFT_MID,on?-3:3,0);
 }
@@ -6731,6 +7321,15 @@ static void switchSet(lv_obj_t*row,bool on){
 // Retourne la LIGNE (pour ovAdd + switchSet). Le switch est un enfant (child 2) mis à jour par switchSet.
 static lv_obj_t* mkSwitchRow(lv_obj_t*p,int y,lv_color_t chip,const char*sym,const char*name,bool on,lv_event_cb_t cb){
     lv_obj_t*bt=mkActRow(p,y,chip,sym,name,cb);
+#ifdef BOARD_WS241
+    {   lv_obj_t*tr=lv_obj_create(bt); lv_obj_set_size(tr,44,24); lv_obj_align(tr,LV_ALIGN_RIGHT_MID,-14,0);   // (v294) pilule 44×24
+        lv_obj_set_style_radius(tr,LV_RADIUS_CIRCLE,0); lv_obj_set_style_bg_opa(tr,LV_OPA_COVER,0); lv_obj_set_style_border_color(tr,UI_CHEV,0);
+        lv_obj_set_style_pad_all(tr,0,0); lv_obj_set_style_shadow_opa(tr,LV_OPA_TRANSP,0); lv_obj_clear_flag(tr,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_t*kn=lv_obj_create(tr); lv_obj_set_size(kn,18,18); lv_obj_set_style_radius(kn,LV_RADIUS_CIRCLE,0); lv_obj_set_style_bg_opa(kn,LV_OPA_COVER,0);
+        lv_obj_set_style_border_width(kn,0,0); lv_obj_set_style_pad_all(kn,0,0); lv_obj_set_style_shadow_opa(kn,LV_OPA_TRANSP,0); lv_obj_clear_flag(kn,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
+        p1SwitchSet(tr,kn,on); return bt;
+    }
+#endif
     const int TW=64,TH=34;
     lv_obj_t*tr=lv_obj_create(bt);lv_obj_set_size(tr,TW,TH);lv_obj_align(tr,LV_ALIGN_RIGHT_MID,-16,0);
     lv_obj_set_style_radius(tr,TH/2,0);lv_obj_set_style_border_width(tr,0,0);lv_obj_set_style_pad_all(tr,0,0);lv_obj_clear_flag(tr,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE);
@@ -6812,6 +7411,9 @@ void buildSettingsPageT4(lv_obj_t*p){
     lv_obj_add_flag(s_hdr_chip,LV_OBJ_FLAG_HIDDEN);   // visible seulement en section (couvert par le menu sinon)
 #endif
     s_set_title=mkLblP(p,"SETTINGS",UI_INK,FS_TITLE,hTitX,hTitY);   // blanc (page Settings sombre)
+#ifdef BOARD_WS241
+    lv_obj_set_style_text_font(s_set_title,&airki_sans_28,0); lv_obj_set_pos(s_set_title,20,18);   // (v292) même en-tête que la page 1
+#endif
     lv_obj_add_flag(s_set_title,LV_OBJ_FLAG_CLICKABLE);
     lv_obj_set_style_bg_opa(s_set_title,LV_OPA_TRANSP,0);
     lv_obj_add_event_cb(s_set_title,cbDebugLongPress,LV_EVENT_LONG_PRESSED,NULL);
@@ -6856,14 +7458,27 @@ void buildSettingsPageT4(lv_obj_t*p){
     lv_obj_set_style_bg_color(s_back_btn,C_BRAND,0);lv_obj_set_style_shadow_opa(s_back_btn,LV_OPA_TRANSP,0);
     lv_obj_set_style_border_width(s_back_btn,0,0);
     lv_obj_add_event_cb(s_back_btn,_sec_back_cb,LV_EVENT_CLICKED,NULL);
-#ifdef BOARD_T4S3
+#ifdef BOARD_WS241
+    lv_obj_set_size(s_back_btn,44,44);lv_obj_set_pos(s_back_btn,600-20-44,16);   // (v292) rond 1 px etch sur encre, chevron blanc
+    lv_obj_set_style_bg_color(s_back_btn,UI_BG,0);lv_obj_set_style_bg_opa(s_back_btn,LV_OPA_COVER,0);
+    lv_obj_set_style_border_width(s_back_btn,1,0);lv_obj_set_style_border_color(s_back_btn,UI_CHEV,0);
+    lv_obj_set_style_bg_color(s_back_btn,UI_SURF_F,LV_STATE_PRESSED);
+#elif defined(BOARD_T4S3)
     lv_obj_set_size(s_back_btn,62,62);lv_obj_set_pos(s_back_btn,600-40-62,24);
 #else
     lv_obj_set_size(s_back_btn,56,56);lv_obj_align(s_back_btn,LV_ALIGN_BOTTOM_MID,0,-14);  // rond : tout en bas centré (sous le contenu, zone large du cercle)
 #endif
     {lv_obj_t*l=lv_label_create(s_back_btn);lv_label_set_text(l,LV_SYMBOL_LEFT);
      lv_obj_set_style_text_color(l,lv_color_hex(0xffffff),0);
-     lv_obj_set_style_text_font(l,&lv_font_montserrat_28,0);lv_obj_center(l);}
+#ifdef BOARD_WS241
+     lv_obj_set_style_text_font(l,&airki_sans_18,0);lv_obj_center(l);
+#else
+     lv_obj_set_style_text_font(l,&lv_font_montserrat_28,0);lv_obj_center(l);
+#endif
+    }
+#ifdef BOARD_WS241
+    backBtnStyle(s_back_btn);   // (v295)
+#endif
     lv_obj_add_flag(s_back_btn,LV_OBJ_FLAG_HIDDEN);
 
     // ── Menu ─────────────────────────────────────────────────────────────────
@@ -6879,21 +7494,60 @@ void buildSettingsPageT4(lv_obj_t*p){
     lv_obj_set_style_border_width(s_menu,0,0);lv_obj_set_style_pad_all(s_menu,0,0);
     lv_obj_set_style_radius(s_menu,0,0);lv_obj_clear_flag(s_menu,LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(s_menu,swipeCb,LV_EVENT_ALL,NULL);   // swipe horizontal (nav page) conservé
+#ifdef BOARD_WS241
+    // (v290) DS AirKi : titre Instrument Sans SemiBold 28 à 20/18, bloc AIRCRAFT à droite (caption mono 13 muted + valeur mono 18 BLANCHE),
+    // filet 1 px rule-dark sous l'en-tête. Plus d'ambre en texte (règle DS).
+    // (v293) RETOUR à la page 1 v290 (préférence Christophe) : en-tête titre + AIRCRAFT + filet, liste des 4 sections (mkMenuRow).
+    mkLblP(s_menu,"Settings",UI_INK,&airki_sans_28,20,18);
+    g_p1_n=0; s_p1_diag_v=nullptr; s_p1_level_v=nullptr; s_p1_club_pill=nullptr; s_p1_club_knob=nullptr; g_diag_level_armed=false;
+    {char ac[40]; snprintf(ac,sizeof(ac),"%s/%s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");
+     { lv_obj_t* acap=mkLblP(s_menu,"AIRCRAFT",UI_INK2,FM_13,SETW-320,20);
+       lv_obj_set_width(acap,300); lv_obj_set_style_text_align(acap,LV_TEXT_ALIGN_RIGHT,0); }
+     s_set_acval=mkLblP(s_menu,ac,UI_INK,FM_18,SETW-320,38); lv_obj_set_width(s_set_acval,300); lv_obj_set_style_text_align(s_set_acval,LV_TEXT_ALIGN_RIGHT,0);
+     lv_label_set_long_mode(s_set_acval,LV_LABEL_LONG_CLIP);
+     lv_obj_add_flag(s_set_acval,LV_OBJ_FLAG_CLICKABLE); lv_obj_set_ext_click_area(s_set_acval,20);
+     lv_obj_add_event_cb(s_set_acval,[](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) showWifiSetupInfo(); },LV_EVENT_CLICKED,NULL);
+     { lv_obj_t* hr=lv_obj_create(s_menu); lv_obj_set_size(hr,SETW-40,1); lv_obj_set_pos(hr,20,78);
+       lv_obj_set_style_bg_color(hr,UI_SURF_F,0); lv_obj_set_style_bg_opa(hr,LV_OPA_COVER,0); lv_obj_set_style_border_width(hr,0,0);
+       lv_obj_set_style_pad_all(hr,0,0); lv_obj_set_style_radius(hr,0,0); lv_obj_clear_flag(hr,LV_OBJ_FLAG_SCROLLABLE|LV_OBJ_FLAG_CLICKABLE); } }
+    if(false){ const int Y0=64, DY=P1_ROWH+6; int r=0; lv_obj_t* bt;   // (v293) liste plate v291 conservée en code, NON construite
+      p1Row(s_menu,Y0+(r++)*DY,"Aircraft","---",FM_18,true,_p1_aircraft_cb,nullptr,&s_set_acval);          // valeur posée par settingsShowMenu
+      bt=p1Row(s_menu,Y0+(r++)*DY,"Display",nullptr,nullptr,true,_menu_btn_cb,(void*)(intptr_t)0,nullptr); g_menuBtns[0]=bt;
+      bt=p1Row(s_menu,Y0+(r++)*DY,"Flight", nullptr,nullptr,true,_menu_btn_cb,(void*)(intptr_t)1,nullptr); g_menuBtns[1]=bt;
+      bt=p1Row(s_menu,Y0+(r++)*DY,"Setup",  nullptr,nullptr,true,_menu_btn_cb,(void*)(intptr_t)3,nullptr); g_menuBtns[3]=bt;
+      p1Row(s_menu,Y0+(r++)*DY,"Level IMU","aircraft flat, then tap twice",&airki_sans_16,true,_p1_level_cb,nullptr,&s_p1_level_v);
+      p1Switch(s_menu,Y0+(r++)*DY,"Club mode",g_cfg.club,_p1_club_cb,&s_p1_club_pill,&s_p1_club_knob);
+      bt=p1Row(s_menu,Y0+(r++)*DY,"Diagnostic","AKV " VIEW_VERSION,FM_18,true,_open_diag_cb,nullptr,&s_p1_diag_v); g_menuBtns[4]=bt;
+      lv_label_set_long_mode(s_set_acval,LV_LABEL_LONG_CLIP);
+      mkLblP(s_menu,"AirKi View \xC2\xB7 AKV " VIEW_VERSION " \xC2\xB7 " __DATE__,UI_INK2,FM_13,20,SCR_H-16-16);   // pied : nom produit + désignateur (jamais ATV/ATC)
+    }
+    if(false){   // (v291) l'ancienne liste 4 sections (mkMenuRow) n'est plus construite sur WS241
+#else
     mkLblP(s_menu,"Settings",UI_INK,FS_TITLE,24,22);
     {char ac[40]; snprintf(ac,sizeof(ac),"%s/%s",g_ac_reg[0]?g_ac_reg:"---",g_ac_type[0]?g_ac_type:"---");
      { lv_obj_t* acap=mkLblP(s_menu,"Aircraft",UI_INK2,FS_CAP,SETW-320,24);
        lv_obj_set_width(acap,296); lv_obj_set_style_text_align(acap,LV_TEXT_ALIGN_RIGHT,0); }
      s_set_acval=mkLblP(s_menu,ac,C_BRAND,FS_VALUE,SETW-320,48);   // rafraîchi par settingsShowMenu
+#endif
      // (v250) UNE SEULE LIGNE alignée à DROITE (le width 232 faisait replier REG/TYP/HEX)
      lv_obj_set_width(s_set_acval,296);
      lv_obj_set_style_text_align(s_set_acval,LV_TEXT_ALIGN_RIGHT,0);
      lv_label_set_long_mode(s_set_acval,LV_LABEL_LONG_CLIP);
      lv_obj_add_flag(s_set_acval,LV_OBJ_FLAG_CLICKABLE); lv_obj_set_ext_click_area(s_set_acval,20);
      lv_obj_add_event_cb(s_set_acval,[](lv_event_t*e){ if(lv_event_get_code(e)==LV_EVENT_CLICKED) showWifiSetupInfo(); },LV_EVENT_CLICKED,NULL);}
-    {const int RY0=104, RP=MENU_ROWH+12;
+    {
+#ifdef BOARD_WS241
+     const int RY0=92, RP=MENU_ROWH;   // (v290/v293) liste contiguë séparée par les filets
+     g_menuBtns[4]=nullptr;
+#else
+     const int RY0=104, RP=MENU_ROWH+12;
+#endif
      mkMenuRow(s_menu,0,RY0+0*RP,lv_color_hex(0x0a84ff),LV_SYMBOL_EYE_OPEN,"Display","Brightness, theme, scale, filter");
      mkMenuRow(s_menu,1,RY0+1*RP,lv_color_hex(0x30d158),LV_SYMBOL_GPS,      "Flight", "Traffic icons, alert sound");
-     mkMenuRow(s_menu,3,RY0+2*RP,lv_color_hex(0xff9f0a),LV_SYMBOL_SETTINGS, "Setup",  "WiFi, updates, diagnostic");
+     mkMenuRow(s_menu,3,RY0+2*RP,lv_color_hex(0xff9f0a),LV_SYMBOL_SETTINGS, "Setup",  DEV_UI()?"WiFi, updates, diagnostic":"WiFi, flight logs, updates");
+#ifdef BOARD_WS241
+     if(DEV_UI())   // (v293) Debug = canal DEV seulement
+#endif
      mkMenuRow(s_menu,4,RY0+3*RP,lv_color_hex(0x8e8e93),LV_SYMBOL_LIST,     "Debug",  "Versions, system");}
 #else
     // Rond : grille 2×3 conservée (une liste pleine largeur clipperait dans le cercle).
@@ -6940,7 +7594,7 @@ void buildSettingsPageT4(lv_obj_t*p){
     //    volume du bip d'alerte trafic (WS-241 : DAC I2S ; les autres cartes n'ont pas d'audio).
     // (v199) DY réduit 72→64 pour loger une 7e ligne (TRAFFIC SRC) sous ALERT SOUND sur WS-241
     // sans déborder (Y0 22 + 6*64 + 52 = 458 < 480).
-    {lv_obj_t*sp=s_sec[1]; const int Y0=22,DY=64;
+    {lv_obj_t*sp=s_sec[1]; const int Y0=16,DY=56;   // (v271) 8 lignes : 16+7*56+52 = 460 (zone visible 15..465)
      mkSegRow (sp,"GROUNDED",Y0+0*DY,"OFF","ON",&g_cfg.show_grnd,false);
      mkSegRowN(sp,"ICONS",Y0+1*DY,kIconSzNames,3,&g_cfg.icon_sz,1);
      mkSegRow (sp,"AIP",Y0+2*DY,"OFF","ON",&g_cfg.aip_en,false);
@@ -6956,6 +7610,8 @@ void buildSettingsPageT4(lv_obj_t*p){
      // (v199) SOURCE DE TRAFIC : SafeSky (réseau, bleu) / AT-1 (radio, vert) / cumul. Envoie
      // {"cmd":"trafsrc"} au boîtier (filtre affichage + EFB). Reflète STATUS "tsel".
      s_trafsrc_v=mkPopRow(sp,"TRAFFIC SRC",Y0+5*DY,kTrafSrcNames[_idxTrafSrc()],"TRAFFIC SOURCE",kTrafSrcNames,3,_idxTrafSrc,_applyTrafSrc);
+     // (v271) TARGETS : icône avion (existante) ou TRIANGLE (pointe = cap, couleur = menace) — dessin déjà en place (v115).
+     mkSegRow (sp,"TARGETS",Y0+7*DY,"ICONS","TRIANGLES",&g_cfg.trf_tri,false);
      // (v202) AT-1 (Garrecht) : ouvre l'overlay de setup WiFi AT-1 (Scan SSID + pass AT1-00565 pré-rempli
      // + Save&connect / Disable). g_maint_mode=1 → showHotspotEntry réutilisé en mode AT-1.
      mkActRow(sp,Y0+6*DY,lv_color_hex(0x30d158),LV_SYMBOL_WIFI,"AT-1 traffic setup",
@@ -6981,15 +7637,33 @@ void buildSettingsPageT4(lv_obj_t*p){
     // 3) SETUP : LISTE watchOS (pastille icône colorée + nom + chevron), même look que le menu.
     //    5 destinations + 1 ligne info SD. (2026-07-18, demande Christophe : cohérence avec Settings.)
     {lv_obj_t*sp=s_sec[3]; const int Y0=12,DY=58;
-     mkNavRow(sp,Y0+0*DY,lv_color_hex(0x0a84ff),LV_SYMBOL_WIFI,    "WiFi Setup",  _open_wifisetup_cb);
-     mkNavRow(sp,Y0+1*DY,lv_color_hex(0xff9f0a),LV_SYMBOL_LIST,    "Flight Logs", _open_vols_cb);
-     mkNavRow(sp,Y0+2*DY,lv_color_hex(0x30d158),LV_SYMBOL_DOWNLOAD,"Updates",     _open_updates_cb);
-     mkNavRow(sp,Y0+3*DY,lv_color_hex(0x5e5ce6),LV_SYMBOL_SETTINGS,"Diagnostic",  _open_diag_cb);
-     mkNavRow(sp,Y0+4*DY,lv_color_hex(0xbf5af2),LV_SYMBOL_PLAY,    "Test",        _open_test_cb);
+     int rw=0;
+     mkNavRow(sp,Y0+(rw++)*DY,lv_color_hex(0x0a84ff),LV_SYMBOL_WIFI,    "WiFi Setup",  _open_wifisetup_cb);
+     mkNavRow(sp,Y0+(rw++)*DY,lv_color_hex(0xff9f0a),LV_SYMBOL_LIST,    "Flight Logs", _open_vols_cb);
+     mkNavRow(sp,Y0+(rw++)*DY,lv_color_hex(0x30d158),LV_SYMBOL_DOWNLOAD,"Updates",     _open_updates_cb);
+#ifdef BOARD_WS241
+     if(DEV_UI()){   // (v293) Diagnostic + Test = canal DEV seulement (Level IMU reste accessible via Diagnostic sur DEV)
+#endif
+     mkNavRow(sp,Y0+(rw++)*DY,lv_color_hex(0x5e5ce6),LV_SYMBOL_SETTINGS,"Diagnostic",  _open_diag_cb);
+     mkNavRow(sp,Y0+(rw++)*DY,lv_color_hex(0xbf5af2),LV_SYMBOL_PLAY,    "Test",        _open_test_cb);
+#ifdef BOARD_WS241
+     }
+#endif
      // (v252) ligne SD DÉPLACÉE vers la page DEBUG (info technique, pas un réglage — retour Christophe)
     }   // (v252) ferme le bloc rangées SYSTEM (les 2 accolades du bloc SD retiré)
 
     // 4) ABOUT : versions & batteries (lecture seule, live BLE)
+#ifdef BOARD_WS241
+    {lv_obj_t*sp=s_sec[4]; const int Y0=12,DY=58;   // (v292) Debug = lignes lecture seule, valeurs mono 18 (désignateurs AirKi, jamais ATV/ATC)
+     auto ro=[&](int y,const char*k,const char*v)->lv_obj_t*{ lv_obj_t*r=secRow(sp,y,k,nullptr); lv_obj_t*vl=lv_label_create(r); lv_label_set_text(vl,v);
+         lv_obj_set_style_text_color(vl,UI_INK2,0); lv_obj_set_style_text_font(vl,FM_18,0); lv_obj_align(vl,LV_ALIGN_RIGHT_MID,-16,0); return vl; };
+     ro(Y0+0*DY,"AirKi View","AKV " VIEW_VSTR);
+     s_sys_atcver=ro(Y0+1*DY,"AirKi Core","AKC --");
+     s_sys_atcbat=ro(Y0+2*DY,"Core battery","---%");
+     ro(Y0+3*DY,"View battery","n/a");
+     s_sys_atcsd =ro(Y0+4*DY,"Core SD card","---");}
+    if(false)
+#endif
     {lv_obj_t*sp=s_sec[4]; const lv_color_t kcol=UI_INK2; const int X2=320,DYr=52,Y0=22;
      mkLblP(sp,"AT-VIEW",kcol,FS_ROW,40,Y0+0*DYr);
      mkLblP(sp,VIEW_VSTR,verColor(VIEW_VSTR),FS_ROW,X2,Y0+0*DYr);   // "1.2.38-dev" coloré par canal
@@ -7326,7 +8000,7 @@ void updateRadarDR(){
     // boîtier) → trafic GRIS MOYEN, le dead reckoning continue de l'extrapoler
     // sur cap/vitesse dernière connue ; à perte+20 s (= 30 s réels) sans reprise
     // → trafic EFFACÉ. Retour ss=true → couleurs normales immédiates.
-    bool ssStale = !g_status.ss_ok || g_status.ss_mode==1;  // (v20) gris aussi en mode sol/idle (ss reste OK, mais trafic dégradé/lent)
+    bool ssStale = !g_status.ss_ok || g_status.ss_mode>=1;  // (v20) gris aussi en mode sol/idle (ss reste OK, mais trafic dégradé/lent) · (v288) ssm 1 = éco 30 s, 2 = parking
     bool ssDead  = ssStale && g_ss_lost_ms && (millis()-g_ss_lost_ms > 20000);
     // dt + compensation du mouvement propre sont désormais PAR AVION (base_ms par
     // entrée, posé dans parseTraffic) : la DR ne se réinitialise plus à chaque paquet
@@ -7427,10 +8101,15 @@ void updateRadarDR(){
             // abandonnées à l'affichage — la menace rouge/ambre et le vieillissement gris priment).
             // (v264, demande Christophe 04/09) RETOUR DU VERT pour l'AT-1 (src=1, radio FLARM/ADS-B réel) ;
             // SafeSky (src=0, réseau) reste NOIR. Menace rouge/ambre et vieillissement gris priment toujours.
-            lv_color_t srcCol=(e.src==1)?C_GREEN:lv_color_hex(0x000000);
+            lv_color_t srcCol=(e.src==1)?lv_color_hex(0x22C55E):(g_dark_theme?lv_color_hex(0xFFFFFF):lv_color_hex(0x141414));   // (v275) DS : AT-1 vert, SafeSky blanc (encre sur radar blanc)
+#ifdef BOARD_WS241
+            // (v285, Christophe) couleur par ORIGINE : SafeSky relais (ADS-B/OGN par internet) = blanc/encre selon le fond ·
+            // AT-1 (radio locale, NMEA) = vert · SafeSky NATIF (src=2, boîtier ≥208 : address ADS-L via LTE) = bleu SafeSky
+            srcCol=(e.src==1)?lv_color_hex(0x22C55E):(e.src>=2)?lv_color_hex(0x1E90FF):TFG();   // (v286) src 3 (AirKi) = bleu + halo (aipDrawCb)
+#endif
             bool tgtStale = (now-e.rx_ms>15000u);   // (v212) >15 s sans nouvelle de CETTE cible → gris (rotation boîtier ≤7 s → 2 cycles ratés tolérés, anti-scintillement)
-            lv_color_t col=(ssStale||tgtStale)?lv_color_hex(0x9ca3af)
-                          :(g_trf_threat[i]==THREAT_RED?C_RED
+            lv_color_t col=(ssStale||tgtStale)?lv_color_hex(0x8D9096)          // (v275) périmée = etch
+                          :(g_trf_threat[i]==THREAT_RED?C_AMBER                 // (v275) menace = ambre plein (plus de rouge, DS)
                            :g_trf_threat[i]==THREAT_ORANGE?C_AMBER:srcCol);
             if(e.type!=r_trf_last_type[i]){
                 lv_img_set_src(r_trf_img[i],getAircraftIcon(e.type));
@@ -7445,7 +8124,7 @@ void updateRadarDR(){
             lv_obj_set_style_img_recolor(r_trf_img[i],col,0);
             if(g_cfg.trf_tri) lv_obj_add_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);   // (v115) mode triangle : image cachée, triangle dessiné dans aipDrawCb
             else              lv_obj_clear_flag(r_trf_img[i],LV_OBJ_FLAG_HIDDEN);
-            g_trf_scr[i]=(TrfScr){(int16_t)sx,(int16_t)sy,(float)rel_hdg,col,true};   // (v115) position pour le dessin triangle
+            g_trf_scr[i]=(TrfScr){(int16_t)sx,(int16_t)sy,(float)rel_hdg,col,true,(ssStale||tgtStale),(uint8_t)e.src};   // (v115) position pour le dessin triangle
             trailPush(e.key[0]?e.key:e.cs, g_own_dx+ex, g_own_dy+ny, g_trf_threat[i], now);   // (v234) trace par CLÉ (ex/ny = relatif nord-up ; +déplacement own)
             float px_per_nm=(float)RAD_R/(float)g_cfg.scale_nm;
             int ih=kIconHalf[g_cfg.icon_sz];
@@ -7461,6 +8140,22 @@ void updateRadarDR(){
             lv_obj_set_pos(r_trf_vect[i],0,0);
             lv_line_set_points(r_trf_vect[i],r_vect_pts[i],2);
             lv_obj_clear_flag(r_trf_vect[i],LV_OBJ_FLAG_HIDDEN);
+#ifdef BOARD_WS241
+            { // (v280) spec : Δalt (ft) AU-DESSUS blanc, distance NM DESSOUS gris, 13 px, 22 px du symbole, côté EXTÉRIEUR ;
+              // libellés (pas les symboles) supprimés quand un autre contact est à < 40 px. Immat = overlay détail, pas sur la carte.
+              bool crowd=false; for(int j=0;j<i;j++) if(g_trf_scr[j].shown && abs((int)g_trf_scr[j].x-sx)<40 && abs((int)g_trf_scr[j].y-sy)<40){crowd=true;break;}
+              bool rgt=(sx>=RAD_CX); const int lw=84; int lx=rgt?(sx+22):(sx-22-lw);   // (v283) largeur 84 : immat 7 car. en 14 px
+              lv_obj_set_width(r_radar_alt[i],lw); lv_obj_set_width(r_radar_cs[i],lw);
+              lv_obj_set_style_text_align(r_radar_alt[i],rgt?LV_TEXT_ALIGN_LEFT:LV_TEXT_ALIGN_RIGHT,0);
+              lv_obj_set_style_text_align(r_radar_cs[i], rgt?LV_TEXT_ALIGN_LEFT:LV_TEXT_ALIGN_RIGHT,0);
+              snprintf(b,32,"%+d",(int)e.alt_m); lv_label_set_text(r_radar_alt[i],b); lv_obj_set_pos(r_radar_alt[i],lx,sy-FM_22->line_height-4);   // (v284) Δalt en CENTAINES de ft (« +9 »), 22 px, 4 px au-dessus du symbole
+              lv_obj_set_style_text_color(r_radar_alt[i],(ssStale||tgtStale)?lv_color_hex(0x8D9096):TFG(),0);
+              lv_label_set_text(r_radar_cs[i],e.cs[0]?e.cs:"?"); lv_obj_set_pos(r_radar_cs[i],lx,sy+4);   // (v284) IMMAT 4 px sous le symbole
+              lv_obj_set_style_text_color(r_radar_cs[i],TGREY(),0);
+              if(crowd||!g_cfg.show_vdiff) lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN); else lv_obj_clear_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
+              if(crowd) lv_obj_add_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN); else lv_obj_clear_flag(r_radar_cs[i],LV_OBJ_FLAG_HIDDEN);
+            }
+#else
             if(g_cfg.show_cs){   // (CONFIG) decluttering : callsign optionnel
               lv_obj_set_pos(r_radar_cs[i],sx+ih+6,sy-22);lv_label_set_text(r_radar_cs[i],e.cs);  // à droite de l'icône agrandie (ih=demi-taille)
               lv_obj_set_style_text_color(r_radar_cs[i],
@@ -7473,6 +8168,7 @@ void updateRadarDR(){
               lv_obj_set_style_text_color(r_radar_alt[i],col,0);
               lv_obj_clear_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
             } else lv_obj_add_flag(r_radar_alt[i],LV_OBJ_FLAG_HIDDEN);
+#endif   // (v280) fin bloc libellés non-WS241
             } // end else (dans l'échelle post-DR)
             } // end else (not grounded)
         }else{
@@ -7719,13 +8415,22 @@ void updClubUi(){
     //   [  ● haut-parleur ]  ← gros glyphe plein cercle (seul réglage pilote : volume alertes)
     bool club = clubActive() && g_page==1;
     bool spkShow = (g_page==1) && g_aud_ok;   // (v242) les deux modes, SEULEMENT si le moteur audio I2S est init (le DAC PCM5102A n'a pas de retour → présence physique indétectable)
+#ifdef BOARD_WS241
+    if(r_gear_btn) lv_obj_add_flag(r_gear_btn,LV_OBJ_FLAG_HIDDEN);   // (v279) jamais d'engrenage sur WS241 (appui long molette)
+#else
     if(r_gear_btn){ if(clubActive()) lv_obj_add_flag(r_gear_btn,LV_OBJ_FLAG_HIDDEN);
                     else             lv_obj_clear_flag(r_gear_btn,LV_OBJ_FLAG_HIDDEN); }
+#endif
     // ── haut-parleur : cercle 88 px — en CLUB à la place de l'engrenage, en COMPLET au-dessus
     if(spkShow && !r_spk_btn){
         r_spk_btn=lv_btn_create(g_pages[1]);
         lv_obj_set_size(r_spk_btn,88,88);                       // (v225) plus GRAND
+#ifdef BOARD_WS241
+        lv_obj_set_pos(r_spk_btn,SCR_W-88-8,140);
+        lv_obj_add_flag(r_spk_btn,LV_OBJ_FLAG_HIDDEN);          // (v277) RETIRÉ du radar (Christophe) : volume dans Settings → ALERT SOUND
+#else
         lv_obj_set_pos(r_spk_btn,8,SCR_H-88+6-R_GEAR_UP);       // (v226) encore plus bas — centré dans l'angle
+#endif
         lv_obj_set_style_radius(r_spk_btn,LV_RADIUS_CIRCLE,0);
         lv_obj_set_style_bg_opa(r_spk_btn,LV_OPA_TRANSP,0);   // (v245) ICÔNE NUE — plus de pastille de fond (retour Christophe)
         lv_obj_set_style_border_width(r_spk_btn,0,0);lv_obj_set_style_shadow_opa(r_spk_btn,LV_OPA_TRANSP,0);
@@ -7735,7 +8440,7 @@ void updClubUi(){
         lv_obj_t* sl=lv_label_create(r_spk_btn);
         lv_label_set_text(sl,LV_SYMBOL_MUTE);   // glyphe haut-parleur SANS arcs
         lv_obj_set_style_text_font(sl,&lv_font_montserrat_40,0);   // (v225) glyphe 40
-        lv_obj_set_style_text_color(sl,lv_color_hex(0x000000),0);
+        lv_obj_set_style_text_color(sl,TFG(),0);   // (v276) suit le thème (noir sur encre = invisible)
         lv_obj_align(sl,LV_ALIGN_LEFT_MID,4,0);
         for(int k=0;k<3;k++){
             lv_obj_t* a=lv_arc_create(r_spk_btn); r_spk_arc[k]=a;
@@ -7755,7 +8460,9 @@ void updClubUi(){
     }
     if(r_spk_btn){
         if(spkShow){
-            lv_obj_clear_flag(r_spk_btn,LV_OBJ_FLAG_HIDDEN);
+#ifndef BOARD_WS241
+            lv_obj_clear_flag(r_spk_btn,LV_OBJ_FLAG_HIDDEN);   // (v277) WS-241 : jamais réaffiché (volume dans Settings)
+#endif
             // (v241) position selon le mode : club = place de l'engrenage · complet = au-dessus de lui
             lv_obj_set_pos(r_spk_btn,8, clubActive() ? (SCR_H-88+6-R_GEAR_UP) : (SCR_H-88+6-R_GEAR_UP-64-12-10));
             uint8_t lv_=g_cfg.alert_snd>3?3:g_cfg.alert_snd;
@@ -7999,13 +8706,11 @@ void updateAllPages(){
         else strcpy(vb,"CORE --");
         if(r_radar_ver) lv_label_set_text(r_radar_ver,vb);
         // Accueil (page #01) : "ATC 1.2.38-dev" SANS date (bords, coloré par canal)
-        if(r_p0_atc){
-            char ab[24];
-            if(g_status.valid&&g_status.fws[0]) snprintf(ab,sizeof(ab),"ATC %s",g_status.fws);
-            else if(g_status.valid&&g_status.fwv) snprintf(ab,sizeof(ab),"ATC v%d",g_status.fwv);
-            else strcpy(ab,"ATC --");
+        if(r_p0_atc){   // (v272) « AKV 272 · AKC 205 » (v289 : AKC = AirKi Core, AKT était une coquille) (désignateurs AirKi), gris muted, jamais coloré
+            char ab[32];
+            if(g_status.valid&&g_status.fwv) snprintf(ab,sizeof(ab),"AKV " VIEW_VSTR " \xC2\xB7 AKC %d",g_status.fwv);
+            else strcpy(ab,"AKV " VIEW_VSTR " \xC2\xB7 AKC --");
             lv_label_set_text(r_p0_atc,ab);
-            lv_obj_set_style_text_color(r_p0_atc, g_status.fws[0]?verColor(g_status.fws):TGREY(), 0);
         }
     }
     // (v198) Invite de MAJ sur l'accueil : MAJ boîtier (oav>fwv, check boot fiable) OU MAJ écran
@@ -8068,6 +8773,25 @@ void updateAllPages(){
         updCheckRow(CHK_GPS, "GPS",                   gps_ok);
         updCheckRow(CHK_LTE, "LTE",                   lte_ok);
         updCheckRow(CHK_SKY, "SafeSky", g_connected&&g_status.valid&&g_status.ss_ok);   // (juin 2026)
+        // (v272) Accueil AirKi View : pastilles (#22C55E prêt · #F5A623 attente · #8D9096 hors service) + détails
+        if(r_p0_dot[0]){
+            auto setDot=[](int i,int st,const char*sub){
+                lv_obj_set_style_bg_color(r_p0_dot[i], st==2?lv_color_hex(0x22C55E): st==1?lv_color_hex(0xF5A623):lv_color_hex(0x8D9096),0);
+                lv_label_set_text(r_p0_sub[i],sub); };
+            char sb[32];
+            if(!g_connected||!g_status.valid){ setDot(0,0,"box offline"); setDot(1,0,""); setDot(2,0,""); }
+            else {
+                if(gps_ok){ snprintf(sb,sizeof(sb),"fix %d sat",g_status.gps_sat); setDot(0,2,sb); } else setDot(0,1,"searching");
+                if(lte_ok){ snprintf(sb,sizeof(sb),"csq %d",g_status.csq); setDot(1,2,sb); } else setDot(1,1,g_status.csq>0?"weak":"no service");
+                if(g_status.ss_ok){ snprintf(sb,sizeof(sb),"%d nearby",g_traffic.valid?g_traffic.count:0); setDot(2,2,sb); }
+                else setDot(2,1,g_status.ss_mode==1?"ground eco":g_status.ss_mode==2?"parking":"waiting");   // (v288)
+            }
+            lv_label_set_text(r_p0_pilot, g_p0_trg[0]?g_p0_trg:(g_ac_owner[0]?g_ac_owner:"--"));   // (v274) authentifié, sinon propriétaire
+            lv_label_set_text(r_p0_box,   (g_connected&&g_status.box[0])?g_status.box:"--");
+            lv_label_set_text(r_p0_hex,   g_ac_hex[0]?g_ac_hex:"--");
+            lv_label_set_text(r_p0_reg,   g_box_reg[0]?g_box_reg:(g_ac_reg[0]?g_ac_reg:"--"));
+            if(r_p0_utc) lv_label_set_text(r_p0_utc, (g_connected&&g_utc[0])?g_utc:"--:--");
+        }
         // Batterie AT-CORE (footer page #01 + page Settings)
         const char* bat_txt;
         lv_color_t  bat_col;
@@ -8157,6 +8881,15 @@ void updateAllPages(){
 #else
       SET_PILL_IMG(r_hdr_sky, sky_ok);
 #endif
+#ifdef BOARD_WS241
+      // (v280) états des icônes dessinées : vert confirme, ambre = transitoire, etch = off/perdu, jamais de rouge
+      g_ic_gps = gps_ok?2:(g_status.valid?1:0);
+      { int csq=g_status.valid?g_status.csq:0; g_ic_lte = lte_ok?(uint8_t)(csq>20?4:csq>14?3:csq>8?2:1):0; }
+      g_ic_ss  = !sky_ok?0:((g_traffic.valid&&g_traffic.count>0)?2:1);
+      if(r_ic_gps) lv_obj_invalidate(r_ic_gps); if(r_ic_lte) lv_obj_invalidate(r_ic_lte); if(r_ic_ss) lv_obj_invalidate(r_ic_ss);
+      if(r_ak_reg && r_ss_gnd){ const char* rg=g_box_reg[0]?g_box_reg:(g_ac_reg[0]?g_ac_reg:"---"); lv_label_set_text(r_ak_reg,rg);
+          lv_obj_update_layout(r_ss_gnd); lv_obj_align_to(r_ak_reg,r_ss_gnd,LV_ALIGN_OUT_LEFT_MID,-16,0); }
+#endif
      }
      // Point santé signal : vert = UDP OK · GRIS = mode sol/idle (beat dégradé) · rouge = perte.
      if(r_ss_dot) lv_obj_set_style_bg_color(r_ss_dot,
@@ -8175,9 +8908,13 @@ void updateAllPages(){
      // (v18) Badge GND visible UNIQUEMENT si SafeSky fonctionne (ss_ok=vert) ET en mode éco
      // sol (ssm=1). Si SafeSky est ROUGE (data down), on cache GND → pas de "GND + rouge"
      // trompeur (GND laisserait croire que tout va bien alors que le data est mort).
+#ifdef BOARD_WS241
+     if(r_ss_gnd) lv_obj_clear_flag(r_ss_gnd,LV_OBJ_FLAG_HIDDEN);   // (v280) spec : état GND/FLT toujours affiché bas-droite
+#else
      if(r_ss_gnd){ if(g_connected&&g_status.valid&&g_status.ss_ok&&g_status.ss_mode==1)
               lv_obj_clear_flag(r_ss_gnd,LV_OBJ_FLAG_HIDDEN);
           else lv_obj_add_flag(r_ss_gnd,LV_OBJ_FLAG_HIDDEN); }
+#endif
 #endif
      // FLARM / ADS-B retirés du radar (pastilles supprimées).
      // Battery — g_status.bat (STATUS char, ~1s) prioritaire sur g_debug.bat_pct (DEBUG char).
@@ -8216,9 +8953,13 @@ void updateAllPages(){
     // sur le radar que si tout est OK, LTE et GPS inclus » : BLE connecté + GPS fix + LTE
     // (csq>5). Tant qu'un manque, on reste sur l'accueil (le pilote peut toujours swiper
     // manuellement). One-shot par connexion.
-    if(!g_autoNavDone&&!g_pair_ov&&g_connected&&g_status.valid
-       &&g_status.gps_fix&&g_status.csq>5&&g_page==0){
-        g_autoNavDone=true;g_navPending=true;g_navPage=1;}
+    // (v273, Christophe 20/09) + TENUE 5 s : les trois conditions doivent rester vraies 5 secondes d'affilée
+    // (le fix GPS / le LTE peuvent clignoter au démarrage) avant de quitter l'accueil pour le radar.
+    { static uint32_t s_okSince=0;
+      bool allOk=!g_autoNavDone&&!g_pair_ov&&g_connected&&g_status.valid&&g_status.gps_fix&&g_status.csq>5&&g_page==0;
+      if(!allOk) s_okSince=0;
+      else { if(s_okSince==0) s_okSince=millis();
+             else if(millis()-s_okSince>=5000){ g_autoNavDone=true;g_navPending=true;g_navPage=1; s_okSince=0; } } }
     // Radar — heading-up en mouvement, north-up auto à l'arrêt (radarEffHdg()).
     // Le cap GPS (course over ground) n'est pas calculable sous RADAR_STILL_KMH :
     // on verrouille alors la rose au nord et la pill affiche "N".
@@ -8228,10 +8969,19 @@ void updateAllPages(){
         // Capsule cap = état d'enregistrement : "NF" ambre = pas de vol actif
         // (rose au nord), sinon cap effectif (figé à l'arrêt pendant un vol).
         if(g_status.flt_st==0){
+#ifdef BOARD_WS241
+            lv_label_set_text(r_radar_hdg,"---");                              // (v280) spec : donnée absente = « --- » etch, jamais un code ambre
+            lv_obj_set_style_text_color(r_radar_hdg,lv_color_hex(0x8D9096),0);
+#else
             lv_label_set_text(r_radar_hdg,"NF");
             lv_obj_set_style_text_color(r_radar_hdg,C_AMBER,0);
+#endif
         } else {
+#ifdef BOARD_WS241
+            snprintf(b,32,"%03d",radarEffHdg());lv_label_set_text(r_radar_hdg,b);   // (v280) spec : nombre seul (347)
+#else
             snprintf(b,32,"%d°",radarEffHdg());lv_label_set_text(r_radar_hdg,b);
+#endif
             lv_obj_set_style_text_color(r_radar_hdg,TFG(),0);
         }
         if(r_radar_gs){
@@ -8241,6 +8991,10 @@ void updateAllPages(){
             if(g_cfg.spd_kt) snprintf(b,32,"GS %dkt",(int)((float)g_status.spd*0.539957f+0.5f));
             else             snprintf(b,32,"GS %dkm/h",g_status.spd);
             lv_label_set_text(r_radar_gs,b);}
+        if(r_ak_gs){   // (v275) radar AirKi : GS kt, ALT (ft ou m selon réglage), UTC
+            snprintf(b,32,"%d",(int)((float)g_status.spd*0.539957f+0.5f)); lv_label_set_text(r_ak_gs,b);
+            int altv=g_cfg.alt_ft?(int)((float)g_status.alt*3.28084f+0.5f):g_status.alt; snprintf(b,32,"%d",altv); lv_label_set_text(r_ak_alt,b);
+            if(r_ak_utc){ snprintf(b,32,"%s UTC",g_utc[0]?g_utc:"--:--"); lv_label_set_text(r_ak_utc,b); } }
         const int cbear[]={0,90,180,270};
         for(int ci=0;ci<4;ci++){
             int rel=((cbear[ci]-radarEffHdg())%360+360)%360;
@@ -8248,7 +9002,11 @@ void updateAllPages(){
             int r_inner=RAD_R+RAD_CARD_OFF;
             int cx=(int)(RAD_CX+sinf(ra)*(float)r_inner)-12;   // -12 = demi-largeur (labels centrés, juin 2026)
             int cy=(int)(RAD_CY-cosf(ra)*(float)r_inner)-10;
-            lv_obj_set_pos(r_card[ci],cx,cy);}}
+            lv_obj_set_pos(r_card[ci],cx,cy);
+            if(ci==0 && r_north){   // (v278) trait NORD : de R-16 à R+2 vers le nord (tourne avec le cap)
+                g_north_pts[0]={(lv_coord_t)(RAD_CX+sinf(ra)*(float)(RAD_R-8)),(lv_coord_t)(RAD_CY-cosf(ra)*(float)(RAD_R-8))};
+                g_north_pts[1]={(lv_coord_t)(RAD_CX+sinf(ra)*(float)(RAD_R+6)),(lv_coord_t)(RAD_CY-cosf(ra)*(float)(RAD_R+6))};
+                lv_line_set_points(r_north,g_north_pts,2); lv_obj_invalidate(r_north); }}}
     // Radar blips — handled by updateRadarDR() called every loop (dead reckoning)
 #if UI_CO_EN
     // CO gauge — ball position + ppm label
@@ -8563,6 +9321,27 @@ static void imuCalibrate(const float*a){
     v3cross(g_d0,g_fwd0,g_right0); v3norm(g_right0);
     if(!g_imu_cal){g_imu_cal=true;Serial.println("[IMU] auto-zéro (repère repos figé au sol)");}
 }
+// (v269) Repère repos PERSISTANT : capturé par « Level IMU » avion à plat, prioritaire sur l'auto-zéro continu.
+static void imuSaveCal(){
+    Preferences p; if(!p.begin("atview",false)) return;
+    p.putBool("imu_cal",true);
+    p.putFloat("imu_d0x",g_d0[0]);p.putFloat("imu_d0y",g_d0[1]);p.putFloat("imu_d0z",g_d0[2]);
+    p.putFloat("imu_f0x",g_fwd0[0]);p.putFloat("imu_f0y",g_fwd0[1]);p.putFloat("imu_f0z",g_fwd0[2]);
+    p.end(); g_imu_manual=true;
+    Serial.printf("[IMU] calibration à plat SAUVÉE d0=(%.3f,%.3f,%.3f) fwd0=(%.3f,%.3f,%.3f)\n",g_d0[0],g_d0[1],g_d0[2],g_fwd0[0],g_fwd0[1],g_fwd0[2]);
+}
+static void imuLoadCal(){
+    Preferences p; if(!p.begin("atview",true)) return;
+    bool ok=p.getBool("imu_cal",false);
+    if(ok){
+        g_d0[0]=p.getFloat("imu_d0x",0);g_d0[1]=p.getFloat("imu_d0y",0);g_d0[2]=p.getFloat("imu_d0z",1);
+        g_fwd0[0]=p.getFloat("imu_f0x",1);g_fwd0[1]=p.getFloat("imu_f0y",0);g_fwd0[2]=p.getFloat("imu_f0z",0);
+        v3norm(g_d0); v3norm(g_fwd0); v3cross(g_d0,g_fwd0,g_right0); v3norm(g_right0);
+        g_imu_cal=true; g_imu_manual=true;
+        Serial.println("[IMU] calibration à plat chargée (NVS) → auto-zéro désactivé");
+    }
+    p.end();
+}
 
 static void imuInit(){
     if(!g_qmi.begin(Wire,QMI8658_L_SLAVE_ADDRESS,IMU_SDA,IMU_SCL) &&
@@ -8573,21 +9352,44 @@ static void imuInit(){
     g_qmi.enableAccelerometer(); g_qmi.enableGyroscope();
     g_imu_ok=true;
     Serial.println("[IMU] QMI8658 OK (acc ±8g / gyro ±256dps)");
+    imuLoadCal();   // (v269)
 }
 
 static void imuTick(){
-    if(!g_imu_ok) return;
+    if(!g_imu_ok){ if(g_imu_level_req){ g_imu_level_req=false; acEditToast("No IMU",false); } return; }
     uint32_t now=millis();
     static uint32_t lastS=0; if(now-lastS<40) return; lastS=now;   // ~25 Hz (allégé : ne pas affamer le radar/trafic)
     float ax,ay,az,gx=0,gy=0,gz=0;
     if(!g_qmi.getAccelerometer(ax,ay,az)) return;
     g_qmi.getGyroscope(gx,gy,gz);
     float a[3]={ax,ay,az};
-    float gmag=sqrtf(gx*gx+gy*gy+gz*gz);                 // rotation totale (°/s)
     float amag=sqrtf(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);     // module accel (g)
+    // (v269) STABILITÉ jugée sur l'ACCÉLÉROMÈTRE (vecteur quasi constant, |a|≈1 g) et non sur le module gyro brut :
+    // ce QMI8658 a un BIAIS gyro de ~5 °/s au repos → « gmag<3 » n'était JAMAIS vrai → jamais d'auto-zéro, jamais
+    // d'IMU (mesuré banc 19/09 : |a|=1.00, gyro=5.3 dps, cal=0 en continu). Le biais est appris au repos et soustrait.
+    static float alp[3]={0,0,0}, gb[3]={0,0,0}; static bool lpInit=false;
+    if(!lpInit){ alp[0]=a[0];alp[1]=a[1];alp[2]=a[2]; gb[0]=gx;gb[1]=gy;gb[2]=gz; lpInit=true; }
+    float dev=0; for(int i=0;i<3;i++){ float d=fabsf(a[i]-alp[i]); if(d>dev)dev=d; alp[i]+=0.1f*(a[i]-alp[i]); }
+    bool still=(dev<0.03f)&&(fabsf(amag-1.0f)<0.10f);
+    if(still){ gb[0]+=0.02f*(gx-gb[0]); gb[1]+=0.02f*(gy-gb[1]); gb[2]+=0.02f*(gz-gb[2]); }
+    float gmag=sqrtf((gx-gb[0])*(gx-gb[0])+(gy-gb[1])*(gy-gb[1])+(gz-gb[2])*(gz-gb[2]));   // rotation totale corrigée du biais (°/s)
     // Auto-zéro CONTINU tant qu'au sol + stable → suit le mount, fige dès qu'on bouge/vole.
     bool onGround=(!g_status.valid)||(g_status.flt_st==0);
-    if(onGround && gmag<3.0f && fabsf(amag-1.0f)<0.08f) imuCalibrate(a);
+    // (v269) « Level IMU » : moyenne de 12 échantillons stables (~0,5 s) avion À PLAT → repère repos persistant.
+    { static uint32_t dbgT=0; if((!g_imu_cal||g_imu_level_req)&&now-dbgT>1000){ dbgT=now;
+        Serial.printf("[IMU] raw |a|=%.2f g gyro=%.1f dps dev=%.3f still=%d cal=%d level=%d\n",amag,gmag,dev,(int)still,(int)g_imu_cal,(int)g_imu_level_req); } }
+    if(g_imu_level_req){   // (v269) non bloquant : accumule 12 échantillons stables, abandon après 6 s
+        static float acc[3]={0,0,0}; static int n=0; static uint32_t t0=0;
+        if(t0==0){ t0=now; n=0; acc[0]=acc[1]=acc[2]=0; }
+        if(still){ acc[0]+=a[0];acc[1]+=a[1];acc[2]+=a[2]; n++; }
+        if(n>=12){ float m[3]={acc[0]/n,acc[1]/n,acc[2]/n}; imuCalibrate(m); imuSaveCal();
+                   t0=0; g_imu_level_req=false; acEditToast("IMU levelled",true); }
+        else if(now-t0>6000){ t0=0; g_imu_level_req=false; acEditToast("IMU not stable",false);
+                   Serial.printf("[IMU] level ABANDON : %d/12 échantillons stables (|a|=%.2f gyro=%.1f)\n",n,amag,gmag); }
+    }
+    // Auto-zéro continu SEULEMENT sans calibration manuelle (sinon le repère suivait le dernier instant stable :
+    // pente au point d'attente, écran en main → ADI décalé pour tout le vol, vécu replay 18/09).
+    if(!g_imu_manual && onGround && still && gmag<3.0f) imuCalibrate(a);
     if(!g_imu_cal) return;
     float nz=v3dot(a,g_d0);                              // facteur de charge vertical (g)
     float ah[3]={a[0]-nz*g_d0[0],a[1]-nz*g_d0[1],a[2]-nz*g_d0[2]};
@@ -8810,7 +9612,7 @@ void loop(){
          g_prevPage=g_page;g_alertForced=true;
          s_prevScale=g_cfg.scale_nm;
          if(g_cfg.scale_nm!=2){g_cfg.scale_nm=2;
-             if(r_radar_scale_lbl){char b[8];snprintf(b,8,"2nm");lv_label_set_text(r_radar_scale_lbl,b);}}
+             if(r_radar_scale_lbl){char b[8];RAD_SCALE_TXT(b,8,2);lv_label_set_text(r_radar_scale_lbl,b);}}
          if(g_page!=1)switchPage(1);
      }else if(!alert&&g_alertForced){
          g_alertForced=false;
@@ -8897,6 +9699,7 @@ void loop(){
     // de {"cmd":"flights"}, 1 quand la liste est construite) → lit CHR_FLIGHTS.
     if(g_vols_loading&&g_vols_ov){
         if(g_connected&&g_status.flt_rdy==1&&millis()-g_vols_t0>1500){
+            Serial.printf("[VOLS] flt_rdy=1 → lecture t+%lu ms\n",(unsigned long)(millis()-g_vols_t0));   // (v265 diag)
             g_vols_loading=false;volsBuildList();   // lecture BLE seulement si connecté + liste fraîche
         }else if(millis()-g_vols_t0>30000){   // SD bien remplie = scan lent (16 vols ≈ 13s)
             g_vols_loading=false;if(g_vols_load)lv_label_set_text(g_vols_load,"Timeout - retry");

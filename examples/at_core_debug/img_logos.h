@@ -9,6 +9,7 @@ extern "C" {
 extern const lv_img_dsc_t img_logo_aerotrace;
 extern const lv_img_dsc_t img_logo_atview;
 extern const lv_img_dsc_t img_logo_a;
+extern const lv_img_dsc_t img_airki_mark;
 
 #ifdef __cplusplus
 }

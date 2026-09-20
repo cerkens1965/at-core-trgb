@@ -501,3 +501,103 @@ caractéristique).
   le cas se présente.
 - ⚠️ **Ne pas monitorer le série USB-CDC de l'écran pendant un connect BLE** : ça aggrave la marge heap et **fausse le
   diagnostic** (le boot-loop apparaissait sous monitoring, disparaissait sur powerbank seul — piège rencontré ce jour).
+
+## 2026-09-19 — v267 : FIX « No flights on SD » = bug NimBLE-Arduino 2.x (lecture BLE > 275 o corrompue)
+
+- **Symptôme** : page Flight Logs → « No flights on SD » alors que le boîtier sert une liste JSON valide (453 o, 7 vols ;
+  prouvé côté boîtier par `onRead` CHR_FLIGHTS + copie exacte sur SD, et par un test natif ArduinoJson 7.4.3 sur le Mac = Ok).
+- **Cause** (v266 diag : dump hexa de la valeur lue) : à partir de l'**octet 275** la valeur lue est de la mémoire quelconque.
+  `NimBLERemoteValueAttribute::onReadCB` (NimBLE-Arduino 2.5.0, idem master 09/2026) fait
+  `valBuf->append(attr->om->om_data, OS_MBUF_PKTLEN(attr->om))` = longueur TOTALE copiée depuis le PREMIER mbuf seulement.
+  Un bloc mbuf = 292 o → 275 o de données ; toute lecture > 275 o (CHR_FLIGHTS, CHR_WSCAN…) est corrompue → ArduinoJson
+  « InvalidInput » → l'ancien code retournait en silence (label « No flights » restant / liste vide).
+- **Fix** : `tools/patch_nimble_readcb.py` (PlatformIO `extra_scripts = pre:` sur WS-241, WS-241-dev, T4-S3) patche la lib
+  après téléchargement : copie via `os_mbuf_copydata` à travers la chaîne. Idempotent ; log « motif introuvable » si la lib
+  change. + `volsBuildList` : « List error - retry » si parse KO (plus de retour silencieux) + log `[VOLS] read N o … parse OK n=7`.
+- **Validé** banc 19/09 : écran v267 + boîtier X.1.203 → `[VOLS] parse OK: isArray=1 n=7`, 7 vols affichés.
+- **À publier** : tag `atv/ws241` = 267 (la flotte est en 264 → même bug partout). Boîtier : rien à changer (serveur non concerné).
+
+## 2026-09-19 — v268/v269 : fids longs + CALIBRATION IMU « Level IMU » + fix stabilité (biais gyro)
+
+- **v268** : `VolItem.fid` 20→28, trame `uploadlist` 240→360 o (boîtier v204 : `ATC-<BOX>-YYMMDD-HHMM`).
+- **v269 — cause de l'ADI décalé au replay** : (1) l'auto-zéro continu exigeait `gmag<3 °/s` sur le module gyro BRUT ; cet écran a un
+  **biais gyro ≈ 5,3 °/s au repos** → jamais stable → **jamais d'auto-zéro, jamais d'IMU** (mesuré : `|a|=1.00 gyro=5.3 cal=0` en
+  continu) ; les valeurs vues auparavant (pitch 37/roll -5) venaient d'un repère figé à un instant quelconque. (2) même sans biais,
+  l'auto-zéro continu re-figeait le repère au dernier instant stable (pente au point d'attente, écran en main) → ADI faux tout le vol.
+- **Fix** : stabilité jugée sur l'ACCÉLÉROMÈTRE (vecteur quasi constant `dev<0.03 g`, `|a|≈1 g`), biais gyro appris au repos et
+  soustrait (`gmag` corrigé, utilisé pour le peak-hold) ; bouton **Diagnostic → « Level IMU »** (2 taps, DERNIER de l'ordre molette, sous
+  « Club mode », page scrollable) : moyenne de 12 échantillons stables (abandon 6 s → « IMU not stable »), repère repos **persisté NVS**
+  `atview/imu_cal, imu_d0x..z, imu_f0x..z`, chargé au boot, **prioritaire sur l'auto-zéro** (`g_imu_manual`). Trace Serial
+  `[IMU] raw |a| gyro dev still cal level` tant que non calibré ou en cours.
+- **Procédure pilote** : avion À PLAT au sol (moteur coupé), écran dans sa position de montage → Diagnostic → Level IMU ×2 → « IMU levelled ».
+  À refaire si l'écran est déplacé/remonté. Validé banc 19/09 : `calibration à plat SAUVÉE d0=(0.994,0.033,-0.101)`, nz 1.00, pitch 0, roll 0.
+- Les vols DÉJÀ enregistrés gardent leurs angles bruts (replay ADI décalé) ; seuls les vols après calibration sont corrects.
+- **À publier ensemble** : ATV 269 (tag ws241) + ATC 205 (tag s3/wrover) — les fids longs exigent l'écran ≥ 268.
+
+## 2026-09-20 — Design system AirKi sur l'écran : v270 (fondations) + v271 (radar)
+
+Source DS : `01 - Documentation/design_handoff_airki/` (règles : AirKi jamais en capitales, pas de dégradé/ombre, ambre = accent jamais
+texte, Instrument Sans + Geist Mono, AKV/AKT = désignateurs). Décisions Christophe 20/09 : plein panneau 600×450 ✓ (déjà le cas :
+RAD_CX 375 v230) ; radar SafeSky blanc / AT-1 vert / own ambre ; cibles TRIANGLE ou ICÔNE au choix menu ; bouton NOIR/BLANC sur le radar ;
+polices converties ✓ ; AKV/AKT ✓.
+- **v270** : `tools/fonts/` = Instrument Sans (VF Google Fonts → instances SemiBold 600 / Bold 700 via fonttools) + Geist Mono Medium 500 ;
+  `examples/at_core_debug/fonts/airki_sans_{12..40}.c`, `airki_mono_{13..40}.c` (lv_font_conv 1.5.2, bpp 4, Latin étendu + symboles
+  FontAwesome de LVGL). Les `lv_font_montserrat_NN` historiques sont REDIRIGÉS par macro (26→28, 30/34→32, 38→40) ; `FM_NN` = mono.
+  Jetons : UI_BG #141414, UI_SURF #1C1C1A, focus #2C2C2C, UI_INK blanc, UI_INK2 #9A9A94, chevron #8D9096, C_BRAND = ambre, thème clair
+  = papier #F4F2ED / encre. `VIEW_VER_STR` = « AKV ». Flash +150 Ko (les tailles non référencées ne sont pas liées).
+  Régénérer une taille : `npx lv_font_conv@1.5.2 --bpp 4 --size N --font tools/fonts/InstrumentSans-SemiBold.ttf -r 0x20-0x7F,0xA0-0x17F,0x2013-0x2026
+  --font <lvgl>/scripts/built_in_font/FontAwesome5-Solid+Brands+Regular.woff -r <syms de built_in_font_gen.py> --format lvgl --lv-include lvgl.h -o …`.
+- **v271** : Traffic → **TARGETS : ICONS / TRIANGLES** (`g_cfg.trf_tri` relu en NVS, dessin v115 déjà en place ; section Traffic passe à
+  8 lignes Y0=16/DY=56) ; **bouton W/B** en haut à gauche du radar (40 px, bordure 1 px) : bascule `g_cfg.dark` + `rebuildAllPages()` en
+  différé (`lv_async_call`). Reste (étape 3) : page d'accueil AirKi View (monogramme, points GPS/LTE/TRAFFIC, UTC, immat), couleurs cibles
+  radar (blanc/vert/ambre), listes vols / code pilote / réglages restylés, textes « AT-VIEW/AT-CORE » → « AirKi View / AirKi Core ».
+- Flashé sur l'écran de Christophe (v271). Non publié (tag ws241 = 269).
+
+**RÈGLE DE CONCEPTION (Christophe, 2026-09-20) — toutes les pages** : utiliser TOUT le panneau 600×450 (pages en `lv_obj_set_size(p,SCR_W,SCR_H)` à (0,0),
+plus de canevas 480 centré) et réserver **5 px minimum vierges sur les 4 bords** : aucun texte ni objet collé au bord. Thème noir/blanc = RADAR
+uniquement ; toutes les autres pages sont sur encre #141414. Couleurs = jetons DS exacts (#141414, #9A9A94, #8D9096, #2C2C2C, #F5A623, #22C55E).
+
+## 2026-09-20 — v272→v274 : page d'ACCUEIL « AirKi View » (maquette validée)
+- Plein panneau 600×450 à (0,0), coins carrés, encre #141414 (l'accueil ne suit PAS le thème N/B, réservé au radar).
+- Monogramme deux couleurs `img_airki_mark` (96 px, généré : public/logo/AirKi_mark_duo_white.png → tools/png2lvgl_logos.py).
+- « AirKi » Bold 40 + « View » SemiBold 20 sur la même ligne de base (décalage +18 = (49-9)-(29-7), MESURÉ dans les fontes — toujours
+  calculer les alignements à partir de `.line_height`/`.base_line`, jamais à l'œil). Baseline « Not alone in the sky » 18 #9A9A94.
+- Lignes GPS / LTE / TRAFFIC : pastille 12 px (#22C55E prêt · #F5A623 attente · #8D9096 hors service) + mono 20 + détail mono 18.
+- Colonne droite calée à −40 du bord : PILOT (authentifié, sinon PROPRIÉTAIRE reçu du boîtier « own », v274) · BOX (STATUS box) ·
+  HEX (g_ac_hex) en mono 28 · FIRMWARE « AKV n · AKT n » mono 18. Bas : UTC (trame FLIGHT « utc », v273) mono 28 + immat mono 28.
+- Bascule auto vers le radar : BLE + fix GPS + LTE (csq>5) tenus **5 s d'affilée**.
+- Gestes conservés : appui long monogramme = oublier l'appairage ; appui long 8 s ligne firmware (mode club) = PIN admin.
+- LEÇON v272 : polices lv_font_conv générées COMPRESSÉES par défaut alors que `LV_USE_FONT_COMPRESSED 0` → texte invisible →
+  toujours `--no-compress`. Les 17 fontes sont régénérées ainsi.
+
+### v278 (20/09) — radar épuré (WS241 uniquement)
+- Cercles seuls : graduations 30° (`tm`), quadrants `hl`/`vl` et lettres N/S/E/W (`r_card`) masqués sous `BOARD_WS241` (objets conservés → le code commun T4/T-RGB est inchangé).
+- Nord = un trait TFG largeur 4 (`r_north`, de R-16 à R+2), repositionné dans la boucle `r_card` de `updateAllPages` (tourne avec `radarEffHdg()`).
+- Position propre = chevron ambre PLEIN : objet 44×44 centré sur (RAD_CX,RAD_CY), dessin `lv_draw_polygon` ×2 triangles convexes (LVGL 8 ne remplit pas les concaves) au `LV_EVENT_DRAW_MAIN_END`.
+- GND/FLT (`r_ss_gnd`) en bas à DROITE, Geist Mono 22 (`FM_22`), align BOTTOM_RIGHT(-16,-12). Toujours affiché seulement en mode éco sol SafeSky (ss_mode==1).
+- Icônes bas-gauche resserrées : SafeSky pill 40×40 (16,394) zoom 400 ; LTE pill (56,394) barres 4 px {8,12,16,21} ; GPS pill (108,394) symbole 24 abaissé de 5 px. Centres x 36/88/140, axe y 414.
+- v279 : `r_gear_btn` — `updateAllPages` faisait `clear_flag(HIDDEN)` hors mode club → engrenage noir fantôme au-dessus de SafeSky malgré le masquage v276. Sous `BOARD_WS241` : toujours HIDDEN. Règle : tout objet masqué dans build*Page doit être vérifié dans updateAllPages (même piège que le haut-parleur v277).
+
+### v280 (20/09) — radar = spec « AirKi View Radar » (01 - Documentation/design_handoff_airki, MAJ 20/09)
+Source : `AirKi View Radar.dc.html` (maquette 1:1), `AirKi Status Icons.dc.html`, `CLAUDE.md` du bundle (section « Radar screen — layout rules »). Tout sous `BOARD_WS241`.
+- Géométrie : `RAD_CY 228`, `RAD_R 174` (intérieur 87). Anneaux 2 px TFG à 34 % (`border_opa 87`), repères de quart 2 px (R-6→R+4) fixes aux 4 points écran, trait NORD 3 px plein (R-8→R+6) qui tourne avec le cap (choix : le trait plein = nord, pas le cap ; en north-up au sol il est en haut).
+- Blocs de coin : `g_akY[4]` calculés sur `FM_13/FM_40->line_height` (18 / +3 / +14). GS KT + ALT FT haut-gauche x=20, HDG + RANGE haut-droite x=-20. RANGE = nombre seul (`kScaleNum` via macro `RAD_SCALE_TXT`) + « NM » FM_22 gris aligné sur la ligne de base (base_line). HDG absent = « --- » etch (plus de « NF » ambre), cap `%03d` sans °.
+- Icônes d'état dessinées (`mkIcon` + `icGpsDraw/icLteDraw/icSsDraw`, DRAW_MAIN_END) 26 px à x=20/64/108, y=408 ; états `g_ic_gps` (0 etch / 1 ambre / 2 blanc + point vert), `g_ic_lte` (barres 0-4, éteintes etch), `g_ic_ss` (0 etch / 1 contour blanc / 2 cœur vert). Pas de rouge (spec). Pilules SafeSky/LTE/GPS masquées. Créées APRÈS `r_aip_layer` (au-dessus du wash).
+- Bas-droite : `r_ak_reg` (immat boîtier, FM_14 gris) + `r_ss_gnd` encadré 1 px TGRID, pad 5/9, radius 3, FM_14, TOUJOURS visible (`#ifdef` dans updateAllPages), `lv_obj_align_to` OUT_LEFT_MID -16.
+- Avion propre : chevron ambre échancré (0,-20)(14,18)(0,10)(-14,18). Aérodromes AIP en etch (plus d'ambre hors avion propre ; la MENACE reste ambre = sécurité, choix assumé).
+- Cibles : `srcCol` forcé vert #22C55E (suivi et à jour) ; `TrfScr.stale` ; triangle spec 13/11 plein, périmé = contour (intérieur repeint TBG, centroïde (0,3)) ; libellés FM_13 : Δalt ft (alt_m×100) au-dessus blanc, distance NM dessous gris, largeur 64, côté extérieur (±22 px), masqués si un contact précédent < 40 px. Immat/callsign plus affiché sur la carte WS241.
+- AIP : wash `#60A5FA` opa 36 (type 13 → 20), filet 2 px opa 140 (type 13 → 90 + tirets 6/5).
+- PIÈGE corrigé en cours de route : `if(false){…} else hide` masquait les libellés → les anciens blocs show_cs/show_vdiff sont sous `#ifndef BOARD_WS241`.
+- Non fait : police 15 px (immat/GND en 14), cibles tactiles 44 px, STOP inchangé (ambre, en vol seulement).
+- v282 : CRASH au retour radar après THEME (2 traces capturées : LoadProhibited dans `_lv_obj_get_ext_draw_size` ← `lv_obj_set_pos` ← `updClubUi()` ; puis `realloc() pointer is outside heap areas`). Cause : `rebuildAllPages()` fait `lv_obj_clean(g_pages[1])` mais `r_spk_btn`/`r_spk_arc[]` (créés à la volée dans updClubUi, pas dans buildRadarPage) gardaient un pointeur mort. Fix : remise à nullptr avant le clean. RÈGLE : tout objet créé hors build*Page sur une page doit être remis à zéro dans rebuildAllPages. Méthode : sonde série `dtr=rts=True` (pas de reset) + `xtensa-esp32s3-elf-addr2line -pfiaC -e /tmp/pio_build_atview/WS-241/firmware.elf <bt>` (build_dir = /tmp/pio_build_atview).
+- v283/v284 : libellés trafic Δalt en CENTAINES de ft (« +9 », règle AT-VIEW) Geist Mono 22 au-dessus (+4 px), IMMAT 14 gris dessous (+4 px) — la distance NM de la spec a été refusée par Christophe (« code bidon »). v285 : couleur par origine (TFG / vert AT-1 / bleu SafeSky natif src=2 ATC ≥208) + `RAD_R 180` (échelle : `px_per_nm = RAD_R/scale_nm` → anneau extérieur = RANGE, intérieur = RANGE/2).
+- v286 : `TrfScr.src` ; src 3 (AirKi, ATC ≥209) = bleu #1E90FF + halo `lv_draw_arc` r 20 largeur 2 dans aipDrawCb (avant alertRingsDraw). src 2 = bleu sans halo.
+- v287 : canal OTA écran suit le boîtier (FLIGHT « dev », ATC ≥210) : `g_box_dev` (NVS atview/otadev) → `atvOtaTag()` = ATV_OTA_BASE + "dev" / base / tag compilé si inconnu. v288 : ssm 2 (parking) = trafic gris, accueil « parking ».
+- 2026-09-20 16h35 : **ATV 288 PUBLIÉ flotte (ws241) + dev (ws241dev)**, avec ATC 211. Contient tout le radar AirKi v275-288 + fix crash thème v282.
+- v289 : désignateur boîtier = **AKC** (AirKi Core), PAS « AKT » (le bundle design_handoff écrit AKT : coquille, règle Christophe 20/09). AKV = AirKi View. Non publié (flotte 288).
+- RÈGLE (Christophe 20/09) : on travaille et on publie **uniquement sur les canaux DEV** (s3dev / ws241dev = CE276D + 885685 Pierre) ; la flotte (s3 / wrover / ws241) ne reçoit qu'une version validée en DEV, sur décision explicite de Christophe. ATV 289 publié ws241dev.
+- v290/v291 : SETTINGS page 1 = maquette « 5 · Réglages » (artefact mockups AirKi View, validée « j'aime assez bien ») : `p1Row`/`p1Switch` (WS241) — lignes 42 px radius 6 bord 1 px #2C2C2C, nom sans 20, valeur mono 18 muted, chevron etch, pilule 44×24 (on = blanc/knob encre, off = surface/knob etch), focus = surface + bord ambre. Lignes : Aircraft › (portail), Display ›, Flight ›, Setup › (sections existantes), Level IMU › (2 taps, `_p1_level_cb`), Club mode (pilule), Diagnostic › (AKV · AKC · SD). Pied « AirKi View · AKV n · date ». Groupe molette = `g_p1Rows[]` (ordre visuel). L'ancienne liste mkMenuRow reste compilée sous `if(false)` (T4 non-WS241 la garde). PIÈGE : le bloc `{char ac[40]…}` partagé #else/#endif ferme le `if(false){` — ne pas réorganiser sans vérifier les accolades. « Cloud upload » de la maquette n'existe pas comme fonction → non ajouté.
+- v292 : SOUS-PAGES Settings (WS241) — `secRow` (560×48, bord 1 px #2C2C2C radius 6, libellé sans 20), `secTrack`/`secCell` (segments : actif = blanc/encre), pilule pour les lignes OFF/ON (`SegCtl.pill/knob`, segA/segB cachés 1×1, `_segRowToggleCb`), `mkPopRow` = valeur mono 18 + chevron, brightness = slider fin blanc + `s_bright_sl` (le focus molette est la LIGNE), `mkNavRow` = nom + chevron, en-tête section titre sans 28 + retour rond 1 px, `encFocusOutline` = bord ambre (focus) / vert (édition) sans halo, titres toujours blancs. Debug = « AirKi View / AirKi Core » valeurs mono. `mkActRow` (AT-1 setup, overlays) PAS restylé.
+- v293 : page 1 = retour v290 (Christophe : « je préfère ta première version ») ; liste plate v291 conservée sous `if(false)`. `DEV_UI()` (= `g_box_dev==1` ou -DATV_OTA_DEV) : Debug (menu), Diagnostic et Test (Setup) visibles seulement sur le canal DEV. Sur la flotte, Level IMU n'est donc accessible que via Diagnostic sur DEV → à reconsidérer si un pilote flotte doit niveler (proposer une ligne « Level IMU » dans Display ?).
+- v294 : SOUS-SOUS-PAGES (overlays) restylées sous WS241 — `ovHeader` (titre sans 28 + retour rond 44 px 1 px etch, focus bord ambre), `mkActRow` (560×48 bordée ; ENFANTS [0] pastille fantôme 1×1 pour garder `child(1)` = libellé dans les callbacks d'armement, [2] pilule), `mkInfoRow` (sans bord, valeur mono 14 largeur 400 clip), `mkSwitchRow`/`switchSet` (pilule via p1SwitchSet), `rowValue` mono 18, Updates = « AirKi Core / AirKi View » valeurs gris, `pickShow` (panneau bordé, sélection blanc/encre, options mono 18), WiFi Setup (page réécrite : étapes sans 18, identifiants mono, primaire blanc / secondaire bordé), Flight Logs (cadre bordé, lignes mono 14 bordées, sélection blanc/encre, `volActBtn` bordés focus ambre). `ROW_BG` (UI_BG sur WS241, UI_SURF ailleurs) = fond de repos remis par les confirmations. Non restylé : page Test (dev), clavier Hotspot/AT-1 (textareas), toasts.
+- v295 : bouton RETOUR (`backBtnStyle`) 52 px bord blanc, chevron sans 22 recentré (-2 px), focus/appui = disque ambre + chevron encre. **Publié ws241dev = 295** (20/09 soir). Flotte reste ATV 288 / ATC 211. ÉTAT DU CHANTIER DESIGN ÉCRAN (pause « on cloisonne ») : accueil ✓, radar ✓, Settings page 1 ✓ (v290 style), sections Display/Flight/Setup/Debug ✓, overlays Updates/Flight Logs/Diagnostic/WiFi Setup/popups ✓. RESTE : page Test (dev), clavier Hotspot/AT-1, toasts, ligne « AT-1 traffic setup » (mkActRow → déjà restylée via mkActRow WS241 ✓), page code pilote, mode club verrouillé, Level IMU pour la flotte (Diagnostic = DEV seulement).
